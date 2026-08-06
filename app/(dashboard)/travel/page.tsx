@@ -3,7 +3,14 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import * as Flags from "country-flag-icons/react/3x2";
-import { AlertCircle, Globe2, Loader2, MapPinPlus, Trash2 } from "lucide-react";
+import {
+  AlertCircle,
+  ChevronRight,
+  Globe2,
+  Loader2,
+  MapPinPlus,
+  Trash2,
+} from "lucide-react";
 
 import {
   addTravelCity,
@@ -307,21 +314,25 @@ export default function TravelPage() {
               {countryGroups.map((group) => {
                 const country = COUNTRIES_BY_ALPHA3.get(group.countryCode);
                 return (
-                  <div
+                  <details
                     key={group.countryCode}
-                    className="rounded-lg border bg-background/40 p-2"
+                    className="group/country rounded-lg border bg-background/40 p-2"
                   >
-                    <div className="flex items-center gap-2 px-1 pb-2 text-sm font-medium">
+                    <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1 text-sm font-medium outline-none focus-visible:ring-1 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                      <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-open/country:rotate-90" />
                       {country && <Flag code={country.alpha2} />}
                       <span className="min-w-0 flex-1 truncate">{group.countryName}</span>
                       <span className="text-xs font-normal text-muted-foreground">
                         {group.cities.length}
                       </span>
-                    </div>
+                    </summary>
 
-                    <div className="space-y-1 border-l border-blue-500/30 pl-2">
+                    <div className="mt-1 space-y-1 border-l border-blue-500/30 pl-2">
                       {group.cities.map((city) => (
-                        <div key={city.id} className="group/city rounded-md px-1.5 py-1.5 hover:bg-muted/50">
+                        <div
+                          key={city.id}
+                          className="group/city rounded-md px-1.5 py-1.5 hover:bg-muted/50"
+                        >
                           <div className="flex items-center gap-2">
                             <span className="size-2 shrink-0 rounded-full bg-blue-500" />
                             <span className="min-w-0 flex-1 truncate text-sm">{city.cityName}</span>
@@ -368,7 +379,7 @@ export default function TravelPage() {
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </details>
                 );
               })}
             </div>

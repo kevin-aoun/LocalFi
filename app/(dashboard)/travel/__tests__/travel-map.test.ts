@@ -29,12 +29,15 @@ describe("travel map", () => {
     expect(source).not.toMatch(/destinations|\bhub\b/i);
   });
 
-  it("groups unnumbered city rows by country and fills the available page height", () => {
+  it("groups unnumbered city rows inside collapsed country disclosures", () => {
     const page = read("app/(dashboard)/travel/page.tsx");
     expect(page).toMatch(/addTravelCity/);
     expect(page).toMatch(/Add city/);
     expect(page).toMatch(/groupCitiesByCountry/);
     expect(page).toMatch(/group\.cities\.map/);
+    expect(page).toMatch(/<details[\s\S]*<summary/);
+    expect(page).not.toMatch(/<details[^>]*\sopen(?:=|\s|>)/);
+    expect(page).toMatch(/group-open\/country:rotate-90/);
     expect(page).not.toMatch(/index \+ 1|>Hub</);
     expect(page).not.toMatch(/toggleCountry|getVisitedCountries|Add a country/);
     expect(page).toMatch(/flex h-full[\s\S]*flex-col/);
