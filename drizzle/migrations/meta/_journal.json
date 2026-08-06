@@ -57,6 +57,13 @@
       "when": 1786029013396,
       "tag": "0007_travel_checkpoints",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1786032578429,
+      "tag": "0008_travel-routes",
+      "breakpoints": true
     }
   ]
 }

@@ -149,7 +149,7 @@ flowchart TD
 | `/recurring` | `recurring/page.tsx` → `recurring-client.tsx` | Recurring templates, an "upcoming" list, and the *generate due transactions* button. |
 | `/budgets` | `budgets/page.tsx` → `budgets-client.tsx` | This period, History, one-off monthly Reallocations, and Categories. The sidebar labels this route **"Categories"**. |
 | `/reports` | `reports/page.tsx` → `reports-client.tsx` | Cash-flow and Investments tabs. Investments plots each holding from the daily net-worth child ledger and has clickable line visibility controls. |
-| `/travel` | `travel/page.tsx` | City itinerary with mapcn flat/globe views, labeled markers, and hub-to-city arcs. |
+| `/travel` | `travel/page.tsx` | Cities grouped by country, with mapcn flat/globe views and explicit city-to-city arcs. |
 | `/settings` | `settings/page.tsx` | Display name, theme, accent colour, quick-command editor. |
 
 ### Data model
@@ -169,7 +169,7 @@ All money columns are **integer cents**. All calendar-day columns are `'YYYY-MM-
 | `settings` | `user_name`, `accent_color`, `theme` | Single row. |
 | `quick_commands` | `command`, `category_name`, `amount_cents`, `comment` | Powers the `/shortcut` autocomplete. Links to categories **by name**, not id. |
 | `visited_countries` | `country_code` (unique, ISO 3166-1 alpha-3), `country_name` | Internal parent rows created and removed with itinerary cities; there is no standalone country workflow. |
-| `travel_checkpoints` | `country_code`, `city_name`, `latitude`, `longitude`, `visited_at` | Stored city coordinates in itinerary order. The UI calls these cities; the physical table name is retained for migration compatibility. |
+| `travel_checkpoints` | `country_code`, `city_name`, `latitude`, `longitude`, `origin_city_id`, `visited_at` | Stored city coordinates. `origin_city_id` is an optional self-reference for one map connection and becomes NULL if its origin city is deleted. The physical table name is retained for migration compatibility. |
 | `asset_history` | `asset_id`, `value_cents`, `recorded_at` | Holding-level child rows written atomically with daily net-worth snapshots and reconstruction. Re-running a day replaces that day's values, so the investment chart cannot duplicate a holding. Rows before acquisition are omitted rather than stored as fake zeroes. |
 
 Migrations, in journal order (`drizzle/migrations/meta/_journal.json`):
@@ -184,6 +184,7 @@ Migrations, in journal order (`drizzle/migrations/meta/_journal.json`):
 | `0005_reconstructed_net_worth` | Marks net-worth rows as recorded or reconstructed and stores estimate provenance. |
 | `0006_budget_reallocations` | One-off monthly transfers between category budgets. |
 | `0007_travel_checkpoints` | City coordinates linked to their country. |
+| `0008_travel-routes` | Optional city-to-city route origins with `ON DELETE SET NULL`. |
 
 ## Where to put new code
 
@@ -217,7 +218,7 @@ There are no REST endpoints — these functions are called directly from compone
 | `import.ts` | `importTransactions` — a whole spreadsheet in one `withDb`: validate every row, insert nothing if any row is bad, dedupe, re-derive Cash once |
 | `export.ts` | `exportTransactionsCsv`, `exportJsonBackup`, `describeDatabaseLocation`, `exportDatabaseFile` |
 | `settings.ts` | `getSettings`, `updateSettings` (settings and quick commands are saved together, in one atomic `withDb`) |
-| `travel.ts` | `getTravelCities`, `addTravelCity`, `deleteTravelCity` |
+| `travel.ts` | `getTravelCities`, `addTravelCity`, `setTravelCityOrigin`, `deleteTravelCity` |
 
 ## Getting your data out
 

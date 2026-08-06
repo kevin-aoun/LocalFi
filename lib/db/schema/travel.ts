@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm";
-import { integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  integer,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+  type AnySQLiteColumn,
+} from "drizzle-orm/sqlite-core";
 
 export const visitedCountries = sqliteTable("visited_countries", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -20,6 +27,10 @@ export const travelCities = sqliteTable(
     cityName: text("city_name").notNull(),
     latitude: real("latitude").notNull(),
     longitude: real("longitude").notNull(),
+    // DECISION: DEC-001 — Route meaning comes from an explicit origin, never row order.
+    originCityId: integer("origin_city_id").references((): AnySQLiteColumn => travelCities.id, {
+      onDelete: "set null",
+    }),
     visitedAt: text("visited_at").notNull().default(sql`(current_timestamp)`),
   },
   (table) => ({

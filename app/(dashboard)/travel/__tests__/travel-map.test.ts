@@ -22,10 +22,20 @@ describe("travel map", () => {
     expect(source).not.toMatch(/MapRoute|checkpointRouteLegs/);
   });
 
-  it("adds cities directly and fills the available page height", () => {
+  it("draws each route from its saved origin instead of one central hub", () => {
+    const source = read("app/(dashboard)/travel/travel-map.tsx");
+    expect(source).toMatch(/originCityId/);
+    expect(source).toMatch(/citiesById\.get\(city\.originCityId\)/);
+    expect(source).not.toMatch(/destinations|\bhub\b/i);
+  });
+
+  it("groups unnumbered city rows by country and fills the available page height", () => {
     const page = read("app/(dashboard)/travel/page.tsx");
     expect(page).toMatch(/addTravelCity/);
     expect(page).toMatch(/Add city/);
+    expect(page).toMatch(/groupCitiesByCountry/);
+    expect(page).toMatch(/group\.cities\.map/);
+    expect(page).not.toMatch(/index \+ 1|>Hub</);
     expect(page).not.toMatch(/toggleCountry|getVisitedCountries|Add a country/);
     expect(page).toMatch(/flex h-full[\s\S]*flex-col/);
     expect(page).toMatch(/grid min-h-0 flex-1/);

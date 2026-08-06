@@ -22,22 +22,27 @@ type MapView = "flat" | "globe";
 
 export default function TravelMap({ cities }: { cities: readonly TravelCity[] }) {
   const [view, setView] = useState<MapView>("globe");
-  const [hub, ...destinations] = cities;
-  const center: [number, number] = hub
-    ? [hub.longitude, hub.latitude]
+  const firstCity = cities[0];
+  const center: [number, number] = firstCity
+    ? [firstCity.longitude, firstCity.latitude]
     : [15, 25];
-  const arcs = hub
-    ? destinations.map((city) => ({
+  const citiesById = new globalThis.Map(cities.map((city) => [city.id, city]));
+  const arcs = cities.flatMap((city) => {
+    const origin = city.originCityId === null ? null : citiesById.get(city.originCityId);
+    if (!origin) return [];
+    return [
+      {
         id: city.id,
-        from: [hub.longitude, hub.latitude] as [number, number],
+        from: [origin.longitude, origin.latitude] as [number, number],
         to: [city.longitude, city.latitude] as [number, number],
-      }))
-    : [];
+      },
+    ];
+  });
 
   return (
     <div className="relative h-full min-h-0 w-full">
       <Map
-        key={`${view}-${hub?.id ?? "empty"}`}
+        key={`${view}-${firstCity?.id ?? "empty"}`}
         blank={view === "globe"}
         center={center}
         zoom={view === "globe" ? 1.75 : 1.8}
@@ -66,16 +71,10 @@ export default function TravelMap({ cities }: { cities: readonly TravelCity[] })
           />
         )}
 
-        {cities.map((city, index) => (
+        {cities.map((city) => (
           <MapMarker key={city.id} longitude={city.longitude} latitude={city.latitude}>
             <MarkerContent>
-              <div
-                className={
-                  index === 0
-                    ? "size-3 rounded-full border-2 border-white bg-blue-500"
-                    : "size-2 rounded-full border-2 border-white bg-blue-500"
-                }
-              />
+              <div className="size-2 rounded-full border-2 border-white bg-blue-500" />
               <MarkerLabel
                 position="top"
                 className="rounded-sm bg-background/80 px-1.5 py-0.5 text-[11px] font-semibold backdrop-blur"

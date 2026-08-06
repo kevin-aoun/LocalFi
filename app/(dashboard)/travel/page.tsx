@@ -5,7 +5,12 @@ import { useEffect, useState } from "react";
 import * as Flags from "country-flag-icons/react/3x2";
 import { AlertCircle, Globe2, Loader2, MapPinPlus, Trash2 } from "lucide-react";
 
-import { addTravelCity, deleteTravelCity, getTravelCities } from "@/app/actions/travel";
+import {
+  addTravelCity,
+  deleteTravelCity,
+  getTravelCities,
+  setTravelCityOrigin,
+} from "@/app/actions/travel";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -41,17 +46,32 @@ function Flag({ code }: { code: string }) {
   return Component ? <Component className="h-auto w-5 shrink-0 rounded-sm" /> : null;
 }
 
+function groupCitiesByCountry(cities: readonly TravelCity[]) {
+  const groups = new Map<string, { countryName: string; cities: TravelCity[] }>();
+  for (const city of cities) {
+    const group = groups.get(city.countryCode);
+    if (group) group.cities.push(city);
+    else groups.set(city.countryCode, { countryName: city.countryName, cities: [city] });
+  }
+  return [...groups.entries()]
+    .map(([countryCode, group]) => ({ countryCode, ...group }))
+    .sort((left, right) => left.countryName.localeCompare(right.countryName));
+}
+
 function CityDialog({
   open,
   onOpenChange,
+  cities,
   onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  cities: readonly TravelCity[];
   onCreated: (city: TravelCity) => void;
 }) {
   const [countryCode, setCountryCode] = useState("");
   const [cityName, setCityName] = useState("");
+  const [originCityId, setOriginCityId] = useState("none");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,6 +79,7 @@ function CityDialog({
     if (!open) return;
     setCountryCode("");
     setCityName("");
+    setOriginCityId("none");
     setError(null);
   }, [open]);
 
@@ -86,7 +107,7 @@ function CityDialog({
         <DialogHeader>
           <DialogTitle>Add a visited city</DialogTitle>
           <DialogDescription>
-            Your first city is the hub. Every city after it is connected to that hub on the map.
+            Add the city, then optionally connect it to the city you travelled from.
           </DialogDescription>
         </DialogHeader>
 
@@ -131,6 +152,29 @@ function CityDialog({
             />
           </div>
 
+          {cities.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="travel-origin">Travelled from (optional)</Label>
+              <Select
+                name="originCityId"
+                value={originCityId}
+                onValueChange={setOriginCityId}
+              >
+                <SelectTrigger id="travel-origin">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No connection</SelectItem>
+                  {cities.map((city) => (
+                    <SelectItem key={city.id} value={String(city.id)}>
+                      {city.cityName}, {city.countryName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           <p className="text-xs text-muted-foreground">
             OpenStreetMap Nominatim resolves the city once when you submit. LocalFi stores only
             the resulting coordinates.
@@ -156,7 +200,9 @@ export default function TravelPage() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const countryGroups = groupCitiesByCountry(cities);
 
   useEffect(() => {
     let active = true;
@@ -184,7 +230,28 @@ export default function TravelPage() {
       setError(result.error ?? `Could not remove ${city.cityName}.`);
       return;
     }
-    setCities((current) => current.filter((item) => item.id !== city.id));
+    setCities((current) =>
+      current
+        .filter((item) => item.id !== city.id)
+        .map((item) =>
+          item.originCityId === city.id ? { ...item, originCityId: null } : item,
+        ),
+    );
+  };
+
+  const changeOrigin = async (city: TravelCity, value: string) => {
+    const originCityId = value === "none" ? null : Number(value);
+    setUpdatingId(city.id);
+    setError(null);
+    const result = await setTravelCityOrigin(city.id, originCityId);
+    setUpdatingId(null);
+    if ("error" in result) {
+      setError(result.error ?? `Could not update ${city.cityName}.`);
+      return;
+    }
+    setCities((current) =>
+      current.map((item) => (item.id === city.id ? { ...item, originCityId } : item)),
+    );
   };
 
   return (
@@ -237,44 +304,70 @@ export default function TravelPage() {
             </div>
           ) : (
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-              {cities.map((city, index) => {
-                const country = COUNTRIES_BY_ALPHA3.get(city.countryCode);
+              {countryGroups.map((group) => {
+                const country = COUNTRIES_BY_ALPHA3.get(group.countryCode);
                 return (
                   <div
-                    key={city.id}
-                    className="group flex items-center gap-3 rounded-lg border bg-background/40 p-3"
+                    key={group.countryCode}
+                    className="rounded-lg border bg-background/40 p-2"
                   >
-                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full border-2 border-white bg-blue-500 text-xs font-semibold text-white">
-                      {index + 1}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2 font-medium">
-                        <span className="truncate">{city.cityName}</span>
-                        {index === 0 && (
-                          <span className="rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-500">
-                            Hub
-                          </span>
-                        )}
+                    <div className="flex items-center gap-2 px-1 pb-2 text-sm font-medium">
+                      {country && <Flag code={country.alpha2} />}
+                      <span className="min-w-0 flex-1 truncate">{group.countryName}</span>
+                      <span className="text-xs font-normal text-muted-foreground">
+                        {group.cities.length}
                       </span>
-                      <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                        {country && <Flag code={country.alpha2} />}
-                        {city.countryName}
-                      </span>
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-8 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus:opacity-100"
-                      aria-label={`Remove ${city.cityName}`}
-                      disabled={deletingId === city.id}
-                      onClick={() => removeCity(city)}
-                    >
-                      {deletingId === city.id ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="size-4" />
-                      )}
-                    </Button>
+                    </div>
+
+                    <div className="space-y-1 border-l border-blue-500/30 pl-2">
+                      {group.cities.map((city) => (
+                        <div key={city.id} className="group/city rounded-md px-1.5 py-1.5 hover:bg-muted/50">
+                          <div className="flex items-center gap-2">
+                            <span className="size-2 shrink-0 rounded-full bg-blue-500" />
+                            <span className="min-w-0 flex-1 truncate text-sm">{city.cityName}</span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/city:opacity-100 focus:opacity-100"
+                              aria-label={`Remove ${city.cityName}`}
+                              disabled={deletingId === city.id}
+                              onClick={() => removeCity(city)}
+                            >
+                              {deletingId === city.id ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="size-3.5" />
+                              )}
+                            </Button>
+                          </div>
+
+                          {cities.length > 1 && (
+                            <Select
+                              value={city.originCityId === null ? "none" : String(city.originCityId)}
+                              onValueChange={(value) => changeOrigin(city, value)}
+                              disabled={updatingId === city.id}
+                            >
+                              <SelectTrigger
+                                className="mt-1 h-7 border-0 bg-transparent px-4 text-xs text-muted-foreground shadow-none"
+                                aria-label={`Route origin for ${city.cityName}`}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">No connection</SelectItem>
+                                {cities
+                                  .filter((origin) => origin.id !== city.id)
+                                  .map((origin) => (
+                                    <SelectItem key={origin.id} value={String(origin.id)}>
+                                      From {origin.cityName}, {origin.countryName}
+                                    </SelectItem>
+                                  ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 );
               })}
@@ -286,6 +379,7 @@ export default function TravelPage() {
       <CityDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
+        cities={cities}
         onCreated={(city) => setCities((current) => [...current, city])}
       />
     </div>

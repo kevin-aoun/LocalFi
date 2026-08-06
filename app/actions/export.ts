@@ -430,6 +430,7 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
         cityName: row.cityName,
         latitude: row.latitude,
         longitude: row.longitude,
+        originCityId: row.originCityId,
         visitedAt: row.visitedAt,
       })),
     };

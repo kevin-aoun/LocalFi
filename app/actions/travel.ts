@@ -22,6 +22,14 @@ function requireFormValue(formData: FormData, key: string) {
   return value.trim();
 }
 
+function optionalId(formData: FormData, key: string) {
+  const value = formData.get(key);
+  if (value === null || value === "" || value === "none") return null;
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) throw new Error(`Invalid ${key}.`);
+  return id;
+}
+
 function sameCityName(left: string, right: string) {
   return left.localeCompare(right, undefined, { sensitivity: "accent" }) === 0;
 }
@@ -75,6 +83,7 @@ export async function getTravelCities(): Promise<TravelCity[]> {
         cityName: travelCities.cityName,
         latitude: travelCities.latitude,
         longitude: travelCities.longitude,
+        originCityId: travelCities.originCityId,
         visitedAt: travelCities.visitedAt,
       })
       .from(travelCities)
@@ -87,19 +96,28 @@ export async function addTravelCity(formData: FormData) {
   try {
     const countryCode = requireFormValue(formData, "countryCode").toUpperCase();
     const cityName = requireFormValue(formData, "cityName");
+    const originCityId = optionalId(formData, "originCityId");
     if (cityName.length > 100) return { error: "City names must be 100 characters or fewer." };
 
     const country = COUNTRIES_BY_ALPHA3.get(countryCode);
     if (!country) return { error: "Choose a valid country." };
 
     const existing = await readDb((db) =>
-      db
-        .select({ cityName: travelCities.cityName })
-        .from(travelCities)
-        .where(eq(travelCities.countryCode, countryCode)),
+      db.select({
+        id: travelCities.id,
+        countryCode: travelCities.countryCode,
+        cityName: travelCities.cityName,
+      }).from(travelCities),
     );
-    if (existing.some((city) => sameCityName(city.cityName, cityName))) {
+    if (
+      existing.some(
+        (city) => city.countryCode === countryCode && sameCityName(city.cityName, cityName),
+      )
+    ) {
       return { error: `${cityName} is already in your itinerary.` };
+    }
+    if (originCityId !== null && !existing.some((city) => city.id === originCityId)) {
+      return { error: "Choose a saved origin city." };
     }
 
     const coordinates = await geocodeCity(cityName, country.alpha2);
@@ -120,9 +138,17 @@ export async function addTravelCity(formData: FormData) {
         throw new Error("DUPLICATE_TRAVEL_CITY");
       }
 
+      if (originCityId !== null) {
+        const [origin] = await db
+          .select({ id: travelCities.id })
+          .from(travelCities)
+          .where(eq(travelCities.id, originCityId));
+        if (!origin) throw new Error("ORIGIN_CITY_NOT_FOUND");
+      }
+
       const [created] = await db
         .insert(travelCities)
-        .values({ countryCode, cityName, ...coordinates })
+        .values({ countryCode, cityName, originCityId, ...coordinates })
         .returning();
       return { ...created, countryName: country.name } satisfies TravelCity;
     });
@@ -132,10 +158,51 @@ export async function addTravelCity(formData: FormData) {
   } catch (error) {
     console.error("Failed to add travel city:", error);
     const message = error instanceof Error ? error.message : "Failed to add city.";
+    if (/DUPLICATE_TRAVEL_CITY|UNIQUE constraint failed/i.test(message)) {
+      return { error: "That city is already in your itinerary." };
+    }
+    if (/ORIGIN_CITY_NOT_FOUND/i.test(message)) {
+      return { error: "Choose a saved origin city." };
+    }
+    return { error: message };
+  }
+}
+
+export async function setTravelCityOrigin(cityId: number, originCityId: number | null) {
+  try {
+    if (!Number.isInteger(cityId) || cityId <= 0) return { error: "Invalid city." };
+    if (originCityId !== null && (!Number.isInteger(originCityId) || originCityId <= 0)) {
+      return { error: "Invalid origin city." };
+    }
+    if (originCityId === cityId) return { error: "A city cannot connect to itself." };
+
+    const updated = await withDb(async (db) => {
+      const rows = await db
+        .select({ id: travelCities.id })
+        .from(travelCities);
+      if (!rows.some((city) => city.id === cityId)) return null;
+      if (originCityId !== null && !rows.some((city) => city.id === originCityId)) {
+        throw new Error("ORIGIN_CITY_NOT_FOUND");
+      }
+
+      const [city] = await db
+        .update(travelCities)
+        .set({ originCityId })
+        .where(eq(travelCities.id, cityId))
+        .returning({ id: travelCities.id, originCityId: travelCities.originCityId });
+      return city;
+    });
+
+    if (!updated) return { error: "City not found." };
+    revalidate("/travel");
+    return { success: true as const, data: updated };
+  } catch (error) {
+    console.error("Failed to update travel route:", error);
+    const message = error instanceof Error ? error.message : "";
     return {
-      error: /DUPLICATE_TRAVEL_CITY|UNIQUE constraint failed/i.test(message)
-        ? "That city is already in your itinerary."
-        : message,
+      error: /ORIGIN_CITY_NOT_FOUND/i.test(message)
+        ? "Choose a saved origin city."
+        : "Failed to update route.",
     };
   }
 }

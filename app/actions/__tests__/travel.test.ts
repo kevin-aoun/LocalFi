@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { addTravelCity, deleteTravelCity, getTravelCities } from "@/app/actions/travel";
+import {
+  addTravelCity,
+  deleteTravelCity,
+  getTravelCities,
+  setTravelCityOrigin,
+} from "@/app/actions/travel";
 
 import { createDomainDb, execOn, type DomainDb } from "./support/domain-fixture";
 
@@ -78,5 +83,25 @@ describe("travel itinerary", () => {
     expect(await deleteTravelCity(7)).toEqual({ success: true });
     expect((await getTravelCities()).map((city) => city.cityName)).toEqual(["Byblos"]);
     expect(temp.scalar("SELECT COUNT(*) FROM visited_countries")).toBe(1);
+  });
+
+  it("stores an explicit origin per city and clears routes when that origin is deleted", async () => {
+    execOn(temp, (db) => {
+      db.run(
+        "INSERT INTO visited_countries (country_code, country_name) VALUES ('DEU', 'Germany'), ('FRA', 'France')",
+      );
+      db.run(
+        "INSERT INTO travel_checkpoints (id, country_code, city_name, latitude, longitude) VALUES (1, 'DEU', 'Munich', 48.14, 11.58), (2, 'FRA', 'Paris', 48.86, 2.35)",
+      );
+    });
+
+    expect(await setTravelCityOrigin(2, 1)).toMatchObject({
+      success: true,
+      data: { id: 2, originCityId: 1 },
+    });
+    expect((await getTravelCities()).find((city) => city.id === 2)?.originCityId).toBe(1);
+
+    expect(await deleteTravelCity(1)).toEqual({ success: true });
+    expect((await getTravelCities()).find((city) => city.id === 2)?.originCityId).toBeNull();
   });
 });
