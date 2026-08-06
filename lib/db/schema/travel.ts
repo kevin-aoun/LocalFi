@@ -1,16 +1,16 @@
-import { sqliteTable, integer, real, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import { integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const visitedCountries = sqliteTable("visited_countries", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  countryCode: text("country_code").notNull().unique(), // ISO 3166-1 alpha-3
+  countryCode: text("country_code").notNull().unique(),
   countryName: text("country_name").notNull(),
   visitedAt: text("visited_at").default(sql`(current_timestamp)`),
 });
 
 export type VisitedCountry = typeof visitedCountries.$inferSelect;
 
-export const travelCheckpoints = sqliteTable(
+export const travelCities = sqliteTable(
   "travel_checkpoints",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
@@ -30,4 +30,8 @@ export const travelCheckpoints = sqliteTable(
   }),
 );
 
-export type TravelCheckpoint = typeof travelCheckpoints.$inferSelect;
+type TravelCityRecord = typeof travelCities.$inferSelect;
+
+export type TravelCity = TravelCityRecord & {
+  countryName: string;
+};

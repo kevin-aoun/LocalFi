@@ -149,7 +149,7 @@ flowchart TD
 | `/recurring` | `recurring/page.tsx` → `recurring-client.tsx` | Recurring templates, an "upcoming" list, and the *generate due transactions* button. |
 | `/budgets` | `budgets/page.tsx` → `budgets-client.tsx` | This period, History, one-off monthly Reallocations, and Categories. The sidebar labels this route **"Categories"**. |
 | `/reports` | `reports/page.tsx` → `reports-client.tsx` | Cash-flow and Investments tabs. Investments plots each holding from the daily net-worth child ledger and has clickable line visibility controls. |
-| `/travel` | `travel/page.tsx` | Visited-countries map (MapLibre, client-only via `next/dynamic`). |
+| `/travel` | `travel/page.tsx` | City itinerary with mapcn flat/globe views, labeled markers, and hub-to-city arcs. |
 | `/settings` | `settings/page.tsx` | Display name, theme, accent colour, quick-command editor. |
 
 ### Data model
@@ -168,7 +168,8 @@ All money columns are **integer cents**. All calendar-day columns are `'YYYY-MM-
 | `net_worth_snapshots` | `date` (unique), `total_assets_cents`, `total_liabilities_cents`, `net_worth_cents`, `source`, `source_note` | One aggregate row per local calendar day. Recorded observations outrank reconstructed estimates. |
 | `settings` | `user_name`, `accent_color`, `theme` | Single row. |
 | `quick_commands` | `command`, `category_name`, `amount_cents`, `comment` | Powers the `/shortcut` autocomplete. Links to categories **by name**, not id. |
-| `visited_countries` | `country_code` (unique, ISO 3166-1 alpha-3), `country_name` | |
+| `visited_countries` | `country_code` (unique, ISO 3166-1 alpha-3), `country_name` | Internal parent rows created and removed with itinerary cities; there is no standalone country workflow. |
+| `travel_checkpoints` | `country_code`, `city_name`, `latitude`, `longitude`, `visited_at` | Stored city coordinates in itinerary order. The UI calls these cities; the physical table name is retained for migration compatibility. |
 | `asset_history` | `asset_id`, `value_cents`, `recorded_at` | Holding-level child rows written atomically with daily net-worth snapshots and reconstruction. Re-running a day replaces that day's values, so the investment chart cannot duplicate a holding. Rows before acquisition are omitted rather than stored as fake zeroes. |
 
 Migrations, in journal order (`drizzle/migrations/meta/_journal.json`):
@@ -182,13 +183,14 @@ Migrations, in journal order (`drizzle/migrations/meta/_journal.json`):
 | `0004_priced_holdings` | `assets.price_symbol`, `assets.priced_at`. |
 | `0005_reconstructed_net_worth` | Marks net-worth rows as recorded or reconstructed and stores estimate provenance. |
 | `0006_budget_reallocations` | One-off monthly transfers between category budgets. |
+| `0007_travel_checkpoints` | City coordinates linked to their country. |
 
 ## Where to put new code
 
 | Task | Location | Follow this example |
 | --- | --- | --- |
 | Add a database table or column | `lib/db/schema/*.ts`, export it from `schema/index.ts`, then `npm run db:generate` | `lib/db/schema/net-worth.ts` |
-| Add a read or write operation | a `"use server"` file in `app/actions/` | `app/actions/countries.ts` (small, full CRUD shape) or `app/actions/accounts.ts` (the current house style: `ActionResult<T>`, `readDb`/`withDb`, `revalidate()`) |
+| Add a read or write operation | a `"use server"` file in `app/actions/` | `app/actions/travel.ts` (small CRUD flow) or `app/actions/accounts.ts` (larger domain flow) |
 | Add a business rule (a balance, a period, a ratio) | a pure module in `lib/`, imported by the action | `lib/cash-balance.ts` |
 | Add a page | `app/(dashboard)/<route>/page.tsx` (+ a `<route>-client.tsx` if it needs interactivity), plus a `navigation` entry in `components/shared/sidebar.tsx` | `app/(dashboard)/recurring/` |
 | Add a create/edit dialog | `components/<feature>/<thing>-dialog.tsx`, with the validation in `<thing>-form-logic.ts` | `components/budgets/budget-dialog.tsx` + `budget-form-logic.ts` |
@@ -215,7 +217,7 @@ There are no REST endpoints — these functions are called directly from compone
 | `import.ts` | `importTransactions` — a whole spreadsheet in one `withDb`: validate every row, insert nothing if any row is bad, dedupe, re-derive Cash once |
 | `export.ts` | `exportTransactionsCsv`, `exportJsonBackup`, `describeDatabaseLocation`, `exportDatabaseFile` |
 | `settings.ts` | `getSettings`, `updateSettings` (settings and quick commands are saved together, in one atomic `withDb`) |
-| `countries.ts` | `getVisitedCountries`, `toggleCountry` |
+| `travel.ts` | `getTravelCities`, `addTravelCity`, `deleteTravelCity` |
 
 ## Getting your data out
 
@@ -282,7 +284,7 @@ Things that break if you change them carelessly.
 **Database**
 
 - **`withDb` is NOT reentrant.** Calling `withDb` inside `withDb` **deadlocks** — the FIFO lock is not recursive. Helpers that need an open handle take one as a parameter instead (`syncCashAssetWithin(db)` in `lib/db/sync-cash.ts`). Likewise, **do slow I/O before you open the lock**: a price fetch inside `withDb` holds every other writer for the duration of a network round trip. `app/actions/crypto.ts` fetches, *then* writes.
-- **`getDb()` / `saveDb()` are deprecated but not gone.** They now share one cached in-memory database instead of loading a private copy per call, so the old lost-update race is gone — but they still cannot roll back or group a read-modify-write, so a mutation that throws half-way can be flushed by a *later* `saveDb()` from another action. New code uses `withDb` (mutations) or `readDb` (queries). **Still on the old shape, and the obvious next migration:** all of `app/actions/transactions.ts` except `createTransfer`/`updateTransfer`, all of `app/actions/countries.ts`, and the `db:seed` / `db:sample` scripts.
+- **`getDb()` / `saveDb()` are deprecated but not gone.** They share one cached database but cannot roll back or group a read-modify-write. New code uses `withDb` for mutations or `readDb` for queries. Remaining callers are the older transaction actions and setup scripts.
 - **A failed `withDb` callback discards the in-memory image.** That is the point: partial work cannot be flushed by a later save. The next call reloads from disk.
 - **`PRAGMA foreign_keys = ON` is re-applied after every flush.** `sql.js`'s `Database.export()` internally closes and re-opens the connection, which silently resets connection-scoped pragmas. `applySessionPragmas` runs after every load *and* after every export. Remove that second call and foreign keys quietly stop being enforced.
 - **A corrupt or unreadable file throws `DatabaseCorruptError`; it never boots an empty database.** Silently starting fresh over somebody's finances is the worst possible failure mode. The previous generation is kept at `data/budget.db.bak` on every flush.
@@ -294,7 +296,7 @@ Things that break if you change them carelessly.
 
 - **`next.config.ts` sets `serverExternalPackages: ["sql.js"]`. This is load-bearing — do not "clean it up".** sql.js ships an emscripten/UMD wrapper; when webpack bundles it for the server build, that wrapper's `module.exports` assignment is rewritten and loading it throws `TypeError: Cannot set properties of undefined (setting 'exports')`. The failure is **invisible under `next dev`** (Turbopack) and appears only under `next start` and in the Docker image, where every server-rendered DB-backed route — `/accounts`, `/budgets`, `/recurring`, `/reports` — returns HTTP 500. Marking it external makes the server `require()` it from `node_modules` at runtime, which is also why the Dockerfile copies `node_modules/sql.js` into the runner stage.
 - **`eslint.ignoreDuringBuilds: true`.** The build prints `Skipping linting` — run lint yourself. `typescript.ignoreBuildErrors` is `false`, so type errors *do* fail the build.
-- **Outbound network, exhaustively:** the two price feeds (`forex-data-feed.swissquote.com`, `api.coingecko.com`) and, on `/travel` only, a CartoDB basemap style (`basemaps.cartocdn.com`) plus a countries GeoJSON (`r2.datahub.io`). **The travel map will not render offline**; everything else works with no network at all.
+- **Outbound network:** price feeds use SwissQuote and CoinGecko. Travel uses CARTO tiles for the flat map, Natural Earth GeoJSON from jsDelivr for the globe, and an explicit-submit Nominatim lookup when a city is added.
 
 **Domain**
 
@@ -345,7 +347,7 @@ app/
     recurring/            page.tsx (server) + recurring-client.tsx
     budgets/              page.tsx (server) + budgets-client.tsx
     reports/              page.tsx (server) + reports-client.tsx
-    travel/               page.tsx + travel-map.tsx (MapLibre, client-only)
+    travel/               city itinerary UI + mapcn map
     settings/             profile, theme, accent, quick commands (client)
 components/
   ui/                     shadcn primitives — regenerate, don't hand-edit
@@ -375,7 +377,7 @@ lib/
     migrate-from-json.ts  legacy one-off, see below
     verify-migration.ts   legacy one-off, see below
   stores/                 Zustand view state
-  countries.ts            ISO country list for the travel map
+  countries.ts            ISO country names and alpha codes
   utils.ts                cn() helper
 drizzle/migrations/       generated SQL + meta/_journal.json
 data/                     budget.db + budget.db.bak (gitignored),
@@ -450,7 +452,7 @@ node node_modules/tsx/dist/cli.mjs lib/db/init.ts
 
 Next.js 15 (App Router) · React 19 · TypeScript 5 · Tailwind CSS 3 · shadcn/ui + Radix · Drizzle ORM · SQLite via sql.js · Zustand · Recharts · MapLibre GL · SheetJS (`xlsx`) · Vitest · Lucide
 
-<!-- TODO: `package.json` also lists zod, react-hook-form, @hookform/resolvers, d3-geo and topojson-client (plus their @types), none of which are imported anywhere under app/, lib/ or components/ — react-hook-form only via the unreferenced `components/ui/form.tsx`. Prune before publishing, or note why they are kept. -->
+<!-- TODO: zod, react-hook-form and @hookform/resolvers remain for the unreferenced shadcn form primitive. Decide whether to adopt that form stack or remove it before publishing. -->
 
 
 ## Docs map

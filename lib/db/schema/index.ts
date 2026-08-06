@@ -6,4 +6,4 @@ export * from "./budgets";
 export * from "./assets";
 export * from "./net-worth";
 export * from "./settings";
-export * from "./countries";
+export * from "./travel";

@@ -61,7 +61,7 @@ import {
   quickCommands,
   recurringTransactions,
   settings,
-  travelCheckpoints,
+  travelCities,
   transactions,
   visitedCountries,
 } from "@/lib/db/schema";
@@ -279,7 +279,7 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
       netWorthSnapshots: await db.select().from(netWorthSnapshots),
       settings: await db.select().from(settings),
       quickCommands: await db.select().from(quickCommands),
-      travelCheckpoints: await db.select().from(travelCheckpoints),
+      travelCheckpoints: await db.select().from(travelCities),
       visitedCountries: await db.select().from(visitedCountries),
     }));
 

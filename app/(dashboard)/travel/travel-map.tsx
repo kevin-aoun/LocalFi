@@ -1,224 +1,96 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Globe2, Map as MapIcon, MapPinCheck } from "lucide-react";
+import { useState } from "react";
+import { Globe2, Map as MapIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
   Map,
+  MapArc,
   MapControls,
+  MapGeoJSON,
   MapMarker,
-  MapRoute,
   MarkerContent,
   MarkerLabel,
-  MarkerTooltip,
-  useMap,
-  type MapRef,
 } from "@/components/ui/map";
-import type { TravelCheckpoint } from "@/lib/db/schema/countries";
+import type { TravelCity } from "@/lib/db/schema";
 
-import { checkpointRouteLegs, COUNTRY_CODE_PROPERTY } from "./travel-map-logic";
-
-const COUNTRIES_GEOJSON_URL =
-  "https://r2.datahub.io/clvyjaryy0000la0cxieg4o8o/main/raw/data/countries.geojson";
+const WORLD_GEOJSON =
+  "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@v5.1.2/geojson/ne_110m_admin_0_countries.geojson";
 
 type MapView = "flat" | "globe";
 
-function CountryLayers({ visitedCodes }: { visitedCodes: ReadonlySet<string> }) {
-  const { map, isLoaded } = useMap();
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    if (!map || !isLoaded) return;
-    const m = map;
-
-    const setup = () => {
-      if (m.getSource("countries")) {
-        setReady(true);
-        return;
-      }
-
-      m.addSource("countries", {
-        type: "geojson",
-        data: COUNTRIES_GEOJSON_URL,
-        promoteId: COUNTRY_CODE_PROPERTY,
-      });
-
-      m.addLayer({
-        id: "countries-fill",
-        type: "fill",
-        source: "countries",
-        paint: {
-          "fill-color": "hsl(215, 15%, 50%)",
-          "fill-opacity": 0.08,
-        },
-      });
-      m.addLayer({
-        id: "countries-visited",
-        type: "fill",
-        source: "countries",
-        paint: { "fill-color": "#22c55e", "fill-opacity": 0.35 },
-        filter: ["in", COUNTRY_CODE_PROPERTY, ""],
-      });
-      m.addLayer({
-        id: "countries-hover",
-        type: "fill",
-        source: "countries",
-        paint: { "fill-color": "#3b82f6", "fill-opacity": 0.25 },
-        filter: ["==", COUNTRY_CODE_PROPERTY, ""],
-      });
-      m.addLayer({
-        id: "countries-border",
-        type: "line",
-        source: "countries",
-        paint: {
-          "line-color": "hsl(215, 15%, 40%)",
-          "line-width": 0.5,
-          "line-opacity": 0.4,
-        },
-      });
-      m.addLayer({
-        id: "countries-visited-border",
-        type: "line",
-        source: "countries",
-        paint: {
-          "line-color": "#22c55e",
-          "line-width": 1.5,
-          "line-opacity": 0.7,
-        },
-        filter: ["in", COUNTRY_CODE_PROPERTY, ""],
-      });
-
-      m.on("mousemove", "countries-fill", (event) => {
-        m.getCanvas().style.cursor = "pointer";
-        const code = event.features?.[0]?.properties?.[COUNTRY_CODE_PROPERTY];
-        if (typeof code === "string" && code !== "-99") {
-          m.setFilter("countries-hover", ["==", COUNTRY_CODE_PROPERTY, code]);
-        }
-      });
-      m.on("mouseleave", "countries-fill", () => {
-        m.getCanvas().style.cursor = "";
-        m.setFilter("countries-hover", ["==", COUNTRY_CODE_PROPERTY, ""]);
-      });
-      setReady(true);
-    };
-
-    if (m.isStyleLoaded()) setup();
-    else m.on("load", setup);
-    return () => {
-      m.off("load", setup);
-    };
-  }, [isLoaded, map]);
-
-  useEffect(() => {
-    if (!map || !isLoaded || !ready || !map.getLayer("countries-visited")) return;
-    const codes = Array.from(visitedCodes);
-    const filter: ["in", string, ...string[]] = [
-      "in",
-      COUNTRY_CODE_PROPERTY,
-      ...(codes.length ? codes : [""]),
-    ];
-    map.setFilter("countries-visited", filter);
-    map.setFilter("countries-visited-border", filter);
-  }, [isLoaded, map, ready, visitedCodes]);
-
-  return null;
-}
-
-function CityCheckpoints({
-  checkpoints,
-  view,
-}: {
-  checkpoints: readonly TravelCheckpoint[];
-  view: MapView;
-}) {
-  const routeLegs = useMemo(() => checkpointRouteLegs(checkpoints), [checkpoints]);
-
-  return (
-    <>
-      {view === "globe" &&
-        routeLegs.map((coordinates, index) => (
-          <MapRoute
-            key={`checkpoint-leg-${checkpoints[index].id}-${checkpoints[index + 1].id}`}
-            id={`checkpoint-leg-${checkpoints[index].id}-${checkpoints[index + 1].id}`}
-            coordinates={coordinates}
-            color="#3b82f6"
-            width={2}
-            opacity={0.9}
-            dashArray={[2, 2]}
-            interactive={false}
-          />
-        ))}
-
-      {checkpoints.map((checkpoint) => (
-        <MapMarker
-          key={checkpoint.id}
-          longitude={checkpoint.longitude}
-          latitude={checkpoint.latitude}
-          anchor="bottom"
-        >
-          <MarkerContent className="group">
-            <div
-              className="relative grid h-8 w-8 place-items-center"
-              aria-label={`${checkpoint.cityName} checkpoint`}
-            >
-              <span className="absolute h-4 w-4 animate-ping rounded-full bg-blue-500/35" />
-              <MapPinCheck className="relative h-8 w-8 fill-blue-500 text-white drop-shadow-lg" />
-              <MarkerLabel className="rounded bg-background/85 px-1.5 py-0.5 text-foreground shadow-sm backdrop-blur-sm">
-                {checkpoint.cityName}
-              </MarkerLabel>
-            </div>
-          </MarkerContent>
-          <MarkerTooltip>
-            {checkpoint.cityName} · {checkpoint.countryCode}
-          </MarkerTooltip>
-        </MapMarker>
-      ))}
-    </>
-  );
-}
-
-export default function TravelMap({
-  visitedCodes,
-  checkpoints,
-}: {
-  visitedCodes: ReadonlySet<string>;
-  checkpoints: readonly TravelCheckpoint[];
-}) {
-  const [view, setView] = useState<MapView>("flat");
-  const mapRef = useRef<MapRef | null>(null);
-  const projection = useMemo(
-    () => ({ type: view === "globe" ? "globe" : "mercator" }) as const,
-    [view],
-  );
-
-  const changeView = (next: MapView) => {
-    setView(next);
-    mapRef.current?.easeTo({
-      center: [15, 25],
-      zoom: next === "globe" ? 1.25 : 1.8,
-      pitch: 0,
-      bearing: 0,
-      duration: 650,
-    });
-  };
+export default function TravelMap({ cities }: { cities: readonly TravelCity[] }) {
+  const [view, setView] = useState<MapView>("globe");
+  const [hub, ...destinations] = cities;
+  const center: [number, number] = hub
+    ? [hub.longitude, hub.latitude]
+    : [15, 25];
+  const arcs = hub
+    ? destinations.map((city) => ({
+        id: city.id,
+        from: [hub.longitude, hub.latitude] as [number, number],
+        to: [city.longitude, city.latitude] as [number, number],
+      }))
+    : [];
 
   return (
     <div className="relative h-full min-h-0 w-full">
       <Map
-        ref={mapRef}
-        center={[15, 30]}
-        zoom={1.8}
-        projection={projection}
+        key={`${view}-${hub?.id ?? "empty"}`}
+        blank={view === "globe"}
+        center={center}
+        zoom={view === "globe" ? 1.75 : 1.8}
+        projection={{ type: view === "globe" ? "globe" : "mercator" }}
         className="h-full w-full"
       >
-        <CountryLayers visitedCodes={visitedCodes} />
-        <CityCheckpoints checkpoints={checkpoints} view={view} />
+        {view === "globe" && (
+          <MapGeoJSON
+            id="world-countries"
+            data={WORLD_GEOJSON}
+            interactive={false}
+          />
+        )}
+
+        {arcs.length > 0 && (
+          <MapArc
+            id="travel-arcs"
+            data={arcs}
+            paint={{
+              "line-color": "#3b82f6",
+              "line-width": 2,
+              "line-opacity": 0.9,
+              "line-dasharray": [2, 2],
+            }}
+            interactive={false}
+          />
+        )}
+
+        {cities.map((city, index) => (
+          <MapMarker key={city.id} longitude={city.longitude} latitude={city.latitude}>
+            <MarkerContent>
+              <div
+                className={
+                  index === 0
+                    ? "size-3 rounded-full border-2 border-white bg-blue-500"
+                    : "size-2 rounded-full border-2 border-white bg-blue-500"
+                }
+              />
+              <MarkerLabel
+                position="top"
+                className="rounded-sm bg-background/80 px-1.5 py-0.5 text-[11px] font-semibold backdrop-blur"
+              >
+                {city.cityName}
+              </MarkerLabel>
+            </MarkerContent>
+          </MapMarker>
+        ))}
+
         <MapControls position="top-right" showCompass showZoom />
       </Map>
 
       <div
-        className="absolute left-3 top-3 z-10 flex rounded-lg border bg-background/90 p-1 shadow-md backdrop-blur"
+        className="absolute left-3 top-3 z-10 flex rounded-lg border bg-background/90 p-1 backdrop-blur"
         role="group"
         aria-label="Map view"
       >
@@ -228,9 +100,9 @@ export default function TravelMap({
           variant={view === "flat" ? "secondary" : "ghost"}
           className="h-8 gap-1.5 px-2.5"
           aria-pressed={view === "flat"}
-          onClick={() => changeView("flat")}
+          onClick={() => setView("flat")}
         >
-          <MapIcon className="h-4 w-4" />
+          <MapIcon className="size-4" />
           Flat
         </Button>
         <Button
@@ -239,9 +111,9 @@ export default function TravelMap({
           variant={view === "globe" ? "secondary" : "ghost"}
           className="h-8 gap-1.5 px-2.5"
           aria-pressed={view === "globe"}
-          onClick={() => changeView("globe")}
+          onClick={() => setView("globe")}
         >
-          <Globe2 className="h-4 w-4" />
+          <Globe2 className="size-4" />
           Globe
         </Button>
       </div>
