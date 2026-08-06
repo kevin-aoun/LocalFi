@@ -530,6 +530,15 @@ export async function createBudget(formData: FormData): Promise<ActionResult<Bud
           rollover: formData.get("rollover") === "true",
         })
         .returning();
+      // Once a real monthly rule exists, the legacy category column must stop
+      // being a second source of truth. Otherwise deleting this row later makes
+      // the old value silently reappear as a synthetic budget.
+      if (period === "monthly" && category.monthlyLimitCents !== null) {
+        await db
+          .update(categories)
+          .set({ monthlyLimitCents: null, updatedAt: new Date() })
+          .where(eq(categories.id, categoryId));
+      }
       return row;
     });
 
@@ -645,6 +654,16 @@ export async function updateBudget(id: number, formData: FormData): Promise<Acti
         })
         .where(eq(budgets.id, id))
         .returning();
+      if (
+        category?.monthlyLimitCents !== null &&
+        category?.monthlyLimitCents !== undefined &&
+        (existing.period === "monthly" || period === "monthly")
+      ) {
+        await db
+          .update(categories)
+          .set({ monthlyLimitCents: null, updatedAt: new Date() })
+          .where(eq(categories.id, existing.categoryId));
+      }
       return row;
     });
 
@@ -679,11 +698,23 @@ export async function deleteBudget(id: number): Promise<ActionResult<{ id: numbe
         return;
       }
 
+      const [existing] = await db.select().from(budgets).where(eq(budgets.id, id));
+      if (!existing) throw new Error(`No budget with id ${id}`);
+
       const deleted = await db
         .delete(budgets)
         .where(eq(budgets.id, id))
         .returning({ id: budgets.id });
       if (deleted.length === 0) throw new Error(`No budget with id ${id}`);
+      if (existing.period === "monthly") {
+        // Migration 0003 copied category limits into `budgets` but deliberately
+        // retained the old column. Delete means delete, so remove that fallback
+        // in the same transaction instead of resurrecting it on the next read.
+        await db
+          .update(categories)
+          .set({ monthlyLimitCents: null, updatedAt: new Date() })
+          .where(eq(categories.id, existing.categoryId));
+      }
     });
     revalidate("/budgets", "/");
     return { success: true, data: { id } };

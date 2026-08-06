@@ -589,6 +589,66 @@ describe("updateBudget / deleteBudget", () => {
     expect(await getSpendVsBudget({ dateKey: "2026-07-28" })).toEqual([]);
   });
 
+  it("does not resurrect a migrated legacy limit after deleting its real monthly row", async () => {
+    seedCategory(temp, {
+      id: 9,
+      name: "Shopping",
+      type: "Expense",
+      monthlyLimitCents: 10_000,
+    });
+    seedBudget(temp, {
+      id: 90,
+      categoryId: 9,
+      period: "monthly",
+      limitCents: 10_000,
+      effectiveFrom: "2026-01-01",
+    });
+    spend("2026-07-10", 1_000, 9);
+
+    unwrap(await deleteBudget(90));
+
+    expect(temp.scalar("SELECT monthly_limit_cents FROM categories WHERE id = 9")).toBeNull();
+    expect((await getSpendVsBudget({ dateKey: "2026-07-15" })).find((row) => row.categoryId === 9)).toBeUndefined();
+  });
+
+  it("clears the legacy source when a real monthly budget is created", async () => {
+    seedCategory(temp, {
+      id: 10,
+      name: "Subscriptions",
+      type: "Expense",
+      monthlyLimitCents: 4_000,
+    });
+
+    const created = unwrap(
+      await createBudget(
+        form({ categoryId: 10, period: "monthly", limit: "60.00", effectiveFrom: "2026-01-01" }),
+      ),
+    );
+    expect(temp.scalar("SELECT monthly_limit_cents FROM categories WHERE id = 10")).toBeNull();
+
+    unwrap(await deleteBudget(created.id));
+    expect((await getSpendVsBudget({ dateKey: "2026-07-15" })).find((row) => row.categoryId === 10)).toBeUndefined();
+  });
+
+  it("keeps an independent legacy monthly limit when deleting a weekly budget", async () => {
+    seedCategory(temp, {
+      id: 11,
+      name: "Coffee",
+      type: "Expense",
+      monthlyLimitCents: 5_000,
+    });
+    seedBudget(temp, {
+      id: 91,
+      categoryId: 11,
+      period: "weekly",
+      limitCents: 1_000,
+      effectiveFrom: "2026-01-01",
+    });
+
+    unwrap(await deleteBudget(91));
+    expect(temp.scalar("SELECT monthly_limit_cents FROM categories WHERE id = 11")).toBe(5_000);
+  });
+
   it("deletes an old category-backed budget directly", async () => {
     seedCategory(temp, {
       id: 9,
