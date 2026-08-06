@@ -38,6 +38,7 @@ import {
   Repeat,
   Settings as SettingsIcon,
   BarChart3,
+  BadgeDollarSign,
   Globe,
   AlertTriangle,
   Info,
@@ -137,7 +138,8 @@ export function Sidebar() {
   return (
     <div className="flex h-screen w-72 flex-col border-r bg-card">
       {/* Header */}
-      <div className="flex h-14 items-center border-b px-4">
+      <div className="flex h-14 items-center gap-2 border-b px-4">
+        <BadgeDollarSign className="h-6 w-6 text-primary" aria-hidden="true" />
         <span className="text-lg font-semibold">LocalFi</span>
       </div>
 
