@@ -265,9 +265,6 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
         clearStyleTimeout();
         styleTimeoutRef.current = setTimeout(() => {
           setIsStyleLoaded(true);
-          if (projection) {
-            map.setProjection(projection);
-          }
         }, 100);
       };
       const loadHandler = () => setIsLoaded(true);
@@ -343,6 +340,14 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
 
     mapInstance.setStyle(newStyle, { diff: true });
   }, [mapInstance, resolvedTheme, mapStyles, clearStyleTimeout]);
+
+  // Projection is a live map setting: callers can switch between a flat map
+  // and a globe without destroying the map, its layers, or its viewport.
+  useEffect(() => {
+    if (!mapInstance || !isStyleLoaded || !projection) return;
+    if (mapInstance.getProjection()?.type === projection.type) return;
+    mapInstance.setProjection(projection);
+  }, [isStyleLoaded, mapInstance, projection]);
 
   const contextValue = useMemo(
     () => ({

@@ -61,6 +61,7 @@ import {
   quickCommands,
   recurringTransactions,
   settings,
+  travelCheckpoints,
   transactions,
   visitedCountries,
 } from "@/lib/db/schema";
@@ -278,6 +279,7 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
       netWorthSnapshots: await db.select().from(netWorthSnapshots),
       settings: await db.select().from(settings),
       quickCommands: await db.select().from(quickCommands),
+      travelCheckpoints: await db.select().from(travelCheckpoints),
       visitedCountries: await db.select().from(visitedCountries),
     }));
 
@@ -420,6 +422,14 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
         id: row.id,
         countryCode: row.countryCode,
         countryName: row.countryName,
+        visitedAt: row.visitedAt,
+      })),
+      travelCheckpoints: raw.travelCheckpoints.map((row) => ({
+        id: row.id,
+        countryCode: row.countryCode,
+        cityName: row.cityName,
+        latitude: row.latitude,
+        longitude: row.longitude,
         visitedAt: row.visitedAt,
       })),
     };

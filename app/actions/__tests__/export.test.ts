@@ -176,6 +176,7 @@ describe("exportJsonBackup", () => {
       "recurring",
       "settings",
       "transactions",
+      "travelCheckpoints",
       "visitedCountries",
     ]);
   });
