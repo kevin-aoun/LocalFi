@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1769886451669,
+      "tag": "0000_acoustic_natasha_romanoff",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1772637608489,
+      "tag": "0001_natural_the_santerians",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785248400000,
+      "tag": "0002_money_to_cents",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785859200000,
+      "tag": "0003_accounts_and_budget_periods",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785945600000,
+      "tag": "0004_priced_holdings",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1786032000000,
+      "tag": "0005_reconstructed_net_worth",
+      "breakpoints": true
+    }
+  ]
+}
