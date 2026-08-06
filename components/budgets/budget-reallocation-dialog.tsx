@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, ArrowRight, Loader2 } from "lucide-react";
+import { format } from "date-fns";
+import { AlertCircle, ArrowRight, CalendarIcon, Loader2 } from "lucide-react";
 
 import { createBudgetReallocation } from "@/app/actions/budgets";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -22,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { fromMonthKey, monthKey } from "@/lib/dates";
 
 type CategoryOption = { id: number; name: string; type: string };
 type InputMode = "amount" | "percentage";
@@ -52,6 +56,7 @@ export function BudgetReallocationDialog({
     [categories],
   );
   const [month, setMonth] = useState(defaultMonth);
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const [fromCategoryId, setFromCategoryId] = useState("");
   const [toCategoryId, setToCategoryId] = useState("");
   const [inputMode, setInputMode] = useState<InputMode>("amount");
@@ -62,6 +67,7 @@ export function BudgetReallocationDialog({
   useEffect(() => {
     if (!open) return;
     setMonth(defaultMonth);
+    setMonthPickerOpen(false);
     setFromCategoryId("");
     setToCategoryId("");
     setInputMode("amount");
@@ -118,13 +124,32 @@ export function BudgetReallocationDialog({
 
           <div className="space-y-2">
             <Label htmlFor="reallocation-month">Month</Label>
-            <Input
-              id="reallocation-month"
-              type="month"
-              value={month}
-              onChange={(event) => setMonth(event.target.value)}
-              required
-            />
+            <Popover open={monthPickerOpen} onOpenChange={setMonthPickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  id="reallocation-month"
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-start text-left font-normal"
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {format(fromMonthKey(month), "MMMM yyyy")}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={fromMonthKey(month)}
+                  defaultMonth={fromMonthKey(month)}
+                  onSelect={(date) => {
+                    if (!date) return;
+                    setMonth(monthKey(date));
+                    setMonthPickerOpen(false);
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div className="grid items-end gap-3 sm:grid-cols-[1fr_auto_1fr]">

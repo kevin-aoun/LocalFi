@@ -884,4 +884,15 @@ describe("the Budgets UI keeps the house conventions", () => {
     expect(source).toMatch(/setInputMode\("percentage"\)/);
     expect(source).toMatch(/aria-pressed=\{selected\}/);
   });
+
+  it("the reallocation dialog uses the shadcn calendar instead of a native month input", () => {
+    const source = stripComments(read("components/budgets/budget-reallocation-dialog.tsx"));
+    expect(source).toMatch(/from\s+"@\/components\/ui\/calendar"/);
+    expect(source).toMatch(/from\s+"@\/components\/ui\/popover"/);
+    expect(source).toMatch(/<Calendar[\s\S]*mode="single"/);
+    expect(source).toMatch(/setMonth\(monthKey\(date\)\)/);
+    expect(source).toMatch(/fromMonthKey\(month\)/);
+    expect(source).not.toMatch(/type="month"/);
+    expect(source).not.toMatch(/toISOString\(\)/);
+  });
 });
