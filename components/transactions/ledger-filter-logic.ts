@@ -1,33 +1,4 @@
-/**
- * The ledger's filter predicate — free-text search, date range, month, type,
- * category and account — as pure functions.
- *
- * WHY THIS FILE EXISTS
- *
- * The transactions page shipped with three dropdowns (month, type, category) and
- * nothing else: no free-text search and no date range, so "that coffee thing in
- * March" meant paging through the ledger by hand. Worse, the filtering lived
- * inline in the page component, where no part of it could be tested — including
- * the date comparisons, which are exactly the code most likely to be wrong.
- *
- * Two rules this module is careful about:
- *
- *   - **Dates are CALENDAR DAYS, not instants.** Every comparison happens on
- *     'YYYY-MM-DD' keys produced by `toDateKey` from LOCAL components, so a range
- *     that starts on the 1st contains the 1st in every timezone. Comparing raw
- *     `Date` instants (what the page used to do) drops month-boundary rows east
- *     of UTC. String comparison on 'YYYY-MM-DD' is lexicographic *and*
- *     chronological, so it needs no arithmetic.
- *
- *   - **A transfer is neither income nor expense.** Whether a row is a transfer
- *     is decided by `isTransfer` in lib/cash-balance.ts — the same authority the
- *     budgets page uses — never by an ad-hoc `categoryId === null` check here.
- *     A transfer that (wrongly) carries a category is still a transfer.
- *
- * Filtering is in memory and single-pass over the rows, with the category and
- * account lookups hoisted into Maps by `buildLedgerIndex`, so a few thousand
- * rows re-filter on every keystroke without a visible pause.
- */
+/** Pure filtering and sorting for the transaction ledger. Dates use local DateKeys. */
 import { isTransfer } from "@/lib/cash-balance";
 import { monthKey, toDateKey, type DateKey, type MonthKey } from "@/lib/dates";
 import type { Cents } from "@/lib/money";
@@ -54,6 +25,8 @@ export type LedgerRow = {
 
 export type LedgerCategory = { id: number; name: string; type: string; color?: string };
 export type LedgerAccountRef = { id: number; name: string };
+export type LedgerSortColumn = "date" | "category" | "amount";
+export type LedgerSortDirection = "asc" | "desc";
 
 /** Hoisted lookups, built once per render rather than per row. */
 export type LedgerIndex = {
@@ -246,6 +219,40 @@ export function filterLedger<T extends LedgerRow>(
 ): T[] {
   const prepared = prepareLedgerFilters(filters);
   return rows.filter((row) => matchesPreparedFilters(row, index, prepared));
+}
+
+/**
+ * Sort a ledger view without mutating the store's transaction array.
+ *
+ * Date descending is the default because a transaction ledger opens on the
+ * latest activity. Equal values use the row id as a deterministic tie-breaker,
+ * which also puts the newest-created row first on the same calendar day.
+ */
+export function sortLedger<T extends LedgerRow>(
+  rows: readonly T[],
+  index: LedgerIndex,
+  column: LedgerSortColumn = "date",
+  direction: LedgerSortDirection = "desc",
+): T[] {
+  const labelOf = (row: LedgerRow) =>
+    isTransfer(row)
+      ? "Transfer"
+      : (row.categoryId == null ? "" : index.categories.get(row.categoryId)?.name) ?? "";
+  const multiplier = direction === "asc" ? 1 : -1;
+
+  return [...rows].sort((a, b) => {
+    let comparison: number;
+    if (column === "date") {
+      comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+    } else if (column === "category") {
+      comparison = labelOf(a).localeCompare(labelOf(b));
+    } else {
+      comparison = a.amountCents - b.amountCents;
+    }
+
+    if (comparison !== 0) return comparison * multiplier;
+    return ((a.id ?? 0) - (b.id ?? 0)) * multiplier;
+  });
 }
 
 /** True when any filter is actually narrowing the ledger (for a "Clear" button). */

@@ -1,44 +1,35 @@
 "use server";
 
-/**
- * Budgets: per-category limits with a real period, effective dates and rollover.
- *
- * The arithmetic is in lib/budgets.ts (pure, unit-tested); these actions load
- * rows, hand them over, and persist edits.
- *
- * INCOME CATEGORIES CANNOT HAVE A BUDGET. A budget is a spending limit and a
- * paycheque is not spending, so `createBudget` / `updateBudget` refuse one, the
- * legacy import skips one, and `loadLedger` drops any row that already exists —
- * every read path included, because the UI is not the only caller (the agent's
- * `budget_status` tool and the CLI reach these actions directly).
- *
- * BACKWARD COMPATIBILITY: `categories.monthly_limit_cents` is still honoured. Any
- * category that has a legacy limit but NO row in `budgets` is treated as having a
- * monthly budget of that amount, so a database that has not been migrated — or a
- * category edited through the old category form — keeps working. The 0003
- * migration copies the existing limits across, so in practice the fallback only
- * covers newly-set legacy limits.
- */
+/** Budget persistence; period and reallocation arithmetic lives in lib/budgets.ts. */
 import { and, asc, eq } from "drizzle-orm";
 import { revalidate } from "@/lib/revalidate";
 
 import { readDb, withDb } from "@/lib/db/client";
-import { budgets, categories, transactions, type Budget } from "@/lib/db/schema";
 import {
+  budgetReallocations,
+  budgets,
+  categories,
+  transactions,
+  type Budget,
+  type BudgetReallocation,
+  type BudgetReallocationInputMode,
+} from "@/lib/db/schema";
+import {
+  budgetInForce,
   budgetPerformance,
   budgetPeriods,
   budgetsFromLegacyLimits,
+  monthlyReallocationAdjustment,
   periodContaining,
   spendVsBudget,
+  type BudgetReallocationRow,
   type BudgetLedgerTransaction,
   type BudgetPeriod,
   type BudgetPeriodResult,
   type BudgetRow,
 } from "@/lib/budgets";
 import { isDateKey, toDateKey, todayKey, type DateKey } from "@/lib/dates";
-import { parseAmount } from "@/lib/money";
-// The refusal sentence lives with the budgets view logic (a plain module, no
-// "use server"), so the dialog and this action say exactly the same thing.
+import { formatMoney, parseAmount, type Cents } from "@/lib/money";
 import { incomeBudgetRefusal } from "@/components/budgets/budget-view-logic";
 
 export type ActionResult<T> = { success: true; data: T } | { error: string };
@@ -92,6 +83,7 @@ function toBudgetRow(row: Budget): BudgetRow {
 
 type LoadedLedger = {
   budgets: BudgetRow[];
+  reallocations: BudgetReallocationRow[];
   /** ids of budgets that came from the legacy column (negative ids). */
   legacyIds: Set<number>;
   transactions: BudgetLedgerTransaction[];
@@ -111,6 +103,10 @@ async function loadLedger(): Promise<LoadedLedger> {
     const budgetRows = await db.select().from(budgets).orderBy(asc(budgets.id));
     const categoryRows = await db.select().from(categories).orderBy(asc(categories.id));
     const txRows = await db.select().from(transactions);
+    const reallocationRows = await db
+      .select()
+      .from(budgetReallocations)
+      .orderBy(asc(budgetReallocations.id));
 
     // DEFENSIVE READ PATH. An Income category cannot be given a budget any more,
     // but a row written before this rule (or straight into the database) must
@@ -156,6 +152,13 @@ async function loadLedger(): Promise<LoadedLedger> {
 
     return {
       budgets: [...explicit, ...legacy],
+      reallocations: reallocationRows.map((row) => ({
+        id: row.id,
+        month: row.month,
+        fromCategoryId: row.fromCategoryId,
+        toCategoryId: row.toCategoryId,
+        amountCents: row.amountCents,
+      })),
       legacyIds: new Set(legacy.map((b) => b.id)),
       transactions: txRows.map((tx) => ({
         categoryId: tx.categoryId,
@@ -232,6 +235,7 @@ export async function getSpendVsBudget(options?: {
   const results = spendVsBudget({
     budgets: loaded.budgets,
     transactions: loaded.transactions,
+    reallocations: loaded.reallocations,
     dateKey,
     period: options?.period,
     categoryId: options?.categoryId,
@@ -257,12 +261,195 @@ export async function getBudgetHistory(options: {
   const results = budgetPerformance({
     budgets: loaded.budgets,
     transactions: loaded.transactions,
+    reallocations: loaded.reallocations,
     fromKey: options.fromKey,
     toKey: options.toKey,
     period: options.period,
     categoryId: options.categoryId,
   });
   return decorate(results, loaded);
+}
+
+export type BudgetReallocationView = BudgetReallocation & {
+  fromCategoryName: string;
+  toCategoryName: string;
+};
+
+function requireMonth(value: string | null): string {
+  if (!value || value.length !== 7 || !isDateKey(`${value}-01`)) {
+    throw new Error(`Invalid month: expected 'YYYY-MM', received ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
+/** Parse a percentage to basis points without float arithmetic (50.25 -> 5025). */
+function parsePercentageBasisPoints(value: string | null): number {
+  const raw = value?.trim().replace(/%$/, "") ?? "";
+  const match = /^(\d{1,3})(?:\.(\d{1,2}))?$/.exec(raw);
+  if (!match) throw new Error("Enter a percentage between 0.01 and 100.");
+  const basisPoints = Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  if (basisPoints < 1 || basisPoints > 10_000) {
+    throw new Error("Enter a percentage between 0.01 and 100.");
+  }
+  return basisPoints;
+}
+
+function monthlyBudgetFor(
+  rows: readonly BudgetRow[],
+  category: { id: number; monthlyLimitCents: Cents | null },
+  monthStart: DateKey,
+): BudgetRow | null {
+  const explicit = budgetInForce(rows, category.id, monthStart, "monthly");
+  if (explicit) return explicit;
+  if (category.monthlyLimitCents === null) return null;
+  return {
+    id: -category.id,
+    categoryId: category.id,
+    period: "monthly",
+    limitCents: category.monthlyLimitCents,
+    effectiveFrom: monthStart,
+    effectiveTo: null,
+    rollover: false,
+  };
+}
+
+/** Reallocations, oldest first, optionally restricted to one calendar month. */
+export async function getBudgetReallocations(options?: {
+  month?: string;
+}): Promise<BudgetReallocationView[]> {
+  const month = options?.month === undefined ? null : requireMonth(options.month);
+  return readDb(async (db) => {
+    const rows = month
+      ? await db
+          .select()
+          .from(budgetReallocations)
+          .where(eq(budgetReallocations.month, month))
+          .orderBy(asc(budgetReallocations.id))
+      : await db.select().from(budgetReallocations).orderBy(asc(budgetReallocations.id));
+    const categoryRows = await db.select().from(categories);
+    const names = new Map(categoryRows.map((category) => [category.id, category.name]));
+    return rows.map((row) => ({
+      ...row,
+      fromCategoryName: names.get(row.fromCategoryId) ?? `Category ${row.fromCategoryId}`,
+      toCategoryName: names.get(row.toCategoryId) ?? `Category ${row.toCategoryId}`,
+    }));
+  });
+}
+
+/**
+ * Move part of one monthly budget to another for exactly one month.
+ * Percentage entry is resolved against the source's BASE monthly limit now and
+ * the resulting cents are stored, so later budget edits cannot rewrite history.
+ */
+export async function createBudgetReallocation(
+  formData: FormData,
+): Promise<ActionResult<BudgetReallocation>> {
+  try {
+    const month = requireMonth(str(formData, "month"));
+    const fromCategoryId = Number(str(formData, "fromCategoryId"));
+    const toCategoryId = Number(str(formData, "toCategoryId"));
+    if (!Number.isInteger(fromCategoryId) || fromCategoryId <= 0) {
+      return { error: "Choose the category to take budget from." };
+    }
+    if (!Number.isInteger(toCategoryId) || toCategoryId <= 0) {
+      return { error: "Choose the category to give budget to." };
+    }
+    if (fromCategoryId === toCategoryId) {
+      return { error: "Choose two different categories." };
+    }
+    const inputMode = str(formData, "inputMode") as BudgetReallocationInputMode | null;
+    if (inputMode !== "amount" && inputMode !== "percentage") {
+      return { error: "Choose an amount or percentage." };
+    }
+    const inputValue = str(formData, "value");
+    if (inputValue === null) return { error: "Enter how much budget to move." };
+
+    const row = await withDb(async (db) => {
+      const categoryRows = await db.select().from(categories);
+      const fromCategory = categoryRows.find((category) => category.id === fromCategoryId);
+      const toCategory = categoryRows.find((category) => category.id === toCategoryId);
+      if (!fromCategory) throw new Error(`No category with id ${fromCategoryId}`);
+      if (!toCategory) throw new Error(`No category with id ${toCategoryId}`);
+      if (fromCategory.type === "Income" || toCategory.type === "Income") {
+        throw new Error("Budget can only be reallocated between spending categories.");
+      }
+
+      const storedBudgets = (await db.select().from(budgets)).map(toBudgetRow);
+      const monthStart = `${month}-01` as DateKey;
+      const sourceBudget = monthlyBudgetFor(storedBudgets, fromCategory, monthStart);
+      const targetBudget = monthlyBudgetFor(storedBudgets, toCategory, monthStart);
+      if (!sourceBudget) {
+        throw new Error(`${fromCategory.name} has no monthly budget in ${month}.`);
+      }
+      if (!targetBudget) {
+        throw new Error(`${toCategory.name} has no monthly budget in ${month}.`);
+      }
+
+      const existing = await db
+        .select()
+        .from(budgetReallocations)
+        .where(eq(budgetReallocations.month, month));
+      const existingRows: BudgetReallocationRow[] = existing.map((allocation) => ({
+        id: allocation.id,
+        month: allocation.month,
+        fromCategoryId: allocation.fromCategoryId,
+        toCategoryId: allocation.toCategoryId,
+        amountCents: allocation.amountCents,
+      }));
+      const adjustedSourceCents =
+        sourceBudget.limitCents +
+        monthlyReallocationAdjustment(existingRows, fromCategoryId, month);
+
+      const amountCents =
+        inputMode === "amount"
+          ? parseAmount(inputValue)
+          : Math.round((sourceBudget.limitCents * parsePercentageBasisPoints(inputValue)) / 10_000);
+      if (amountCents <= 0) throw new Error("The reallocated amount must be greater than zero.");
+      if (amountCents > adjustedSourceCents) {
+        throw new Error(
+          `${fromCategory.name} only has ${formatMoney(adjustedSourceCents)} left to reallocate in ${month}.`,
+        );
+      }
+
+      const [created] = await db
+        .insert(budgetReallocations)
+        .values({
+          month,
+          fromCategoryId,
+          toCategoryId,
+          amountCents,
+          inputMode,
+          inputValue,
+        })
+        .returning();
+      return created;
+    });
+
+    revalidate("/budgets", "/");
+    return { success: true, data: row };
+  } catch (error) {
+    console.error("Failed to reallocate budget:", error);
+    return { error: (error as Error).message || "Failed to reallocate budget." };
+  }
+}
+
+export async function deleteBudgetReallocation(
+  id: number,
+): Promise<ActionResult<{ id: number }>> {
+  try {
+    await withDb(async (db) => {
+      const deleted = await db
+        .delete(budgetReallocations)
+        .where(eq(budgetReallocations.id, id))
+        .returning({ id: budgetReallocations.id });
+      if (deleted.length === 0) throw new Error(`No budget reallocation with id ${id}`);
+    });
+    revalidate("/budgets", "/");
+    return { success: true, data: { id } };
+  } catch (error) {
+    console.error("Failed to delete budget reallocation:", error);
+    return { error: (error as Error).message || "Failed to delete budget reallocation." };
+  }
 }
 
 // ---------------------------------------------------------------------------

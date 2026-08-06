@@ -1,26 +1,4 @@
-/**
- * Budget periods, spend-vs-budget and historical performance — pure and
- * timezone-safe.
- *
- * WHY THIS EXISTS: budgets used to be a single nullable `monthly_limit_cents`
- * column on `categories`, which made three things impossible — a past period, a
- * non-monthly period, and any notion of carry-over. The `budgets` table fixes the
- * storage; this module is the arithmetic, kept out of `"use server"` so it can be
- * unit-tested.
- *
- * Conventions:
- *   - every date crossing this boundary is a `DateKey` ('YYYY-MM-DD'), which sorts
- *     lexicographically in calendar order, so no UTC conversion is ever involved;
- *   - a week runs MONDAY..SUNDAY;
- *   - period keys are 'YYYY-MM-DD' (the Monday) for weekly, 'YYYY-MM' for
- *     monthly, 'YYYY' for yearly;
- *   - "spend" is a positive magnitude for BOTH directions: money out for an
- *     Expense category, money in for an Income one. Income totals are still
- *     summed here (reporting needs them) but an Income category can no longer
- *     carry a budget to compare them against — see lib/db/schema/budgets.ts.
- *     Transfers and pending rows are never spend — that rule lives in
- *     lib/cash-balance.ts and is imported, not restated.
- */
+/** Pure, timezone-safe budget period, rollover, and reallocation arithmetic. */
 import { isSpendable, type CashLedgerTransaction } from "./cash-balance";
 import { fromDateKey, isDateKey, toDateKey, type DateKey } from "./dates";
 import { assertCents, negateCents, sumCents, type Cents } from "./money";
@@ -49,6 +27,15 @@ export type BudgetRow = {
   /** Inclusive last day the budget applies. null = open-ended. */
   effectiveTo: DateKey | null;
   rollover: boolean;
+};
+
+/** A fixed one-month transfer between two category budgets. */
+export type BudgetReallocationRow = {
+  id?: number;
+  month: string;
+  fromCategoryId: number;
+  toCategoryId: number;
+  amountCents: Cents;
 };
 
 /** A transaction as the budget engine sees it: a calendar day plus a magnitude. */
@@ -214,6 +201,8 @@ export function spendInRange(
 export type BudgetPerformanceInput = {
   budgets: readonly BudgetRow[];
   transactions: readonly BudgetLedgerTransaction[];
+  /** One-off monthly transfers; ignored by weekly and yearly budgets. */
+  reallocations?: readonly BudgetReallocationRow[];
   /** Inclusive window of periods to REPORT. */
   fromKey: DateKey;
   toKey: DateKey;
@@ -222,6 +211,22 @@ export type BudgetPerformanceInput = {
   /** Restrict to one period type. Default: every period type present in `budgets`. */
   period?: BudgetPeriod;
 };
+
+/** Incoming minus outgoing for one category in one month. */
+export function monthlyReallocationAdjustment(
+  reallocations: readonly BudgetReallocationRow[],
+  categoryId: number,
+  month: string,
+): Cents {
+  const parts: Cents[] = [];
+  for (const row of reallocations) {
+    if (row.month !== month) continue;
+    assertCents(row.amountCents, `reallocation ${row.id ?? "?"} amountCents`);
+    if (row.fromCategoryId === categoryId) parts.push(negateCents(row.amountCents));
+    if (row.toCategoryId === categoryId) parts.push(row.amountCents);
+  }
+  return sumCents(parts);
+}
 
 /**
  * Historical performance, one row per (category, period) that had a budget in
@@ -236,7 +241,7 @@ export type BudgetPerformanceInput = {
  * limit change mid-period takes effect in the following period.
  */
 export function budgetPerformance(input: BudgetPerformanceInput): BudgetPeriodResult[] {
-  const { budgets, transactions, categoryId, period } = input;
+  const { budgets, transactions, reallocations = [], categoryId, period } = input;
   const fromKey = assertKey(input.fromKey, "from date key");
   const toKey = assertKey(input.toKey, "to date key");
   if (fromKey > toKey) return [];
@@ -285,8 +290,14 @@ export function budgetPerformance(input: BudgetPerformanceInput): BudgetPeriodRe
       }
       assertCents(budget.limitCents, `budget ${budget.id} limitCents`);
 
+      const adjustmentCents =
+        groupPeriod === "monthly"
+          ? monthlyReallocationAdjustment(reallocations, groupCategory, range.key)
+          : 0;
+      const effectiveLimitCents = sumCents([budget.limitCents, adjustmentCents]);
+
       const appliedCarry = budget.rollover ? carriedInCents : 0;
-      const availableCents = sumCents([budget.limitCents, appliedCarry]);
+      const availableCents = sumCents([effectiveLimitCents, appliedCarry]);
       const spentCents = spendInRange(transactions, groupCategory, range.startKey, range.endKey);
       const remainingCents = sumCents([availableCents, negateCents(spentCents)]);
       const carriedOutCents = budget.rollover && remainingCents > 0 ? remainingCents : 0;
@@ -299,7 +310,7 @@ export function budgetPerformance(input: BudgetPerformanceInput): BudgetPeriodRe
           periodKey: range.key,
           startKey: range.startKey,
           endKey: range.endKey,
-          limitCents: budget.limitCents,
+          limitCents: effectiveLimitCents,
           carriedInCents: appliedCarry,
           availableCents,
           spentCents,
@@ -322,6 +333,7 @@ export function budgetPerformance(input: BudgetPerformanceInput): BudgetPeriodRe
 export type SpendVsBudgetInput = {
   budgets: readonly BudgetRow[];
   transactions: readonly BudgetLedgerTransaction[];
+  reallocations?: readonly BudgetReallocationRow[];
   /** Any day inside the period of interest — including a past one. */
   dateKey: DateKey;
   /** Default: every period type present in `budgets`. */
@@ -335,7 +347,7 @@ export type SpendVsBudgetInput = {
  * `budgetPerformance`.
  */
 export function spendVsBudget(input: SpendVsBudgetInput): BudgetPeriodResult[] {
-  const { budgets, transactions, dateKey, period, categoryId } = input;
+  const { budgets, transactions, reallocations = [], dateKey, period, categoryId } = input;
   assertKey(dateKey, "date key");
 
   const types: BudgetPeriod[] = period ? [period] : [...new Set(budgets.map((b) => b.period))];
@@ -346,6 +358,7 @@ export function spendVsBudget(input: SpendVsBudgetInput): BudgetPeriodResult[] {
       ...budgetPerformance({
         budgets,
         transactions,
+        reallocations,
         fromKey: range.startKey,
         toKey: range.endKey,
         period: type,

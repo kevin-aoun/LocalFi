@@ -56,7 +56,7 @@ npm run dev
 
 Open <http://localhost:1313>.
 
-**Verify:** `npm run db:setup` prints `Applied 0000_…` through `Applied 0004_priced_holdings`, a `Tables: …` line, `Database saved to …/data/budget.db (N bytes)`, then `Database seeded successfully!`. `npm run dev` prints `- Local: http://localhost:1313`. The dashboard loads with an empty net-worth chart, `/accounts` shows the single seeded `Main` account at $0.00, and the sidebar reads `Cash $0.00`.
+**Verify:** `npm run db:setup` prints `Applied 0000_…` through `Applied 0006_…`, a `Tables: …` line, `Database saved to …/data/budget.db (N bytes)`, then `Database seeded successfully!`. `npm run dev` prints `- Local: http://localhost:1313`. The dashboard loads with an empty net-worth chart, `/accounts` shows the single seeded `Main` account at $0.00, and the sidebar reads `Cash $0.00`.
 
 Want something to look at? `npm run db:sample` adds five example assets and six transactions.
 
@@ -147,7 +147,7 @@ flowchart TD
 | `/accounts` | `accounts/page.tsx` → `accounts-client.tsx` | Accounts grouped by asset/liability with derived balances, archive toggle, "snapshot net worth", and a repair card for transactions with no account. |
 | `/transactions` | `transactions/page.tsx` | Ledger with month/category filters, sorting, category breakdown, pending queue, transfers, spreadsheet import. |
 | `/recurring` | `recurring/page.tsx` → `recurring-client.tsx` | Recurring templates, an "upcoming" list, and the *generate due transactions* button. |
-| `/budgets` | `budgets/page.tsx` → `budgets-client.tsx` | Three tabs: **This period** (spend vs budget), **History** (past periods), **Categories** (the category manager). The sidebar labels this route **"Categories"**. |
+| `/budgets` | `budgets/page.tsx` → `budgets-client.tsx` | This period, History, one-off monthly Reallocations, and Categories. The sidebar labels this route **"Categories"**. |
 | `/reports` | `reports/page.tsx` → `reports-client.tsx` | Cash-flow and Investments tabs. Investments plots each holding from the daily net-worth child ledger and has clickable line visibility controls. |
 | `/travel` | `travel/page.tsx` | Visited-countries map (MapLibre, client-only via `next/dynamic`). |
 | `/settings` | `settings/page.tsx` | Display name, theme, accent colour, quick-command editor. |
@@ -162,6 +162,7 @@ All money columns are **integer cents**. All calendar-day columns are `'YYYY-MM-
 | `transactions` | `date`, `category_id`, `account_id`, `transfer_account_id`, `amount_cents`, `comment`, `pending`, `recurring_id`, `recurring_occurrence` | `amount_cents` is always a positive magnitude; direction comes from the category's `type`. `category_id` is **nullable**: a transfer has no category. A **transfer** is `transfer_account_id` set, `category_id` NULL, `account_id` = source — net-neutral to net worth and excluded from income, expense and budget spend. `(recurring_id, recurring_occurrence)` is a partial UNIQUE index, which is what makes recurring generation idempotent in the database rather than in a cursor. |
 | `categories` | `name` (unique), `type`, `monthly_limit_cents`, `icon`, `color` | `type` is `Income` \| `Expense` \| `Investment`. `icon` is a Lucide icon name. `monthly_limit_cents` is the **legacy** budget: still honoured as a monthly budget for any category with no `budgets` row (`budgetsFromLegacyLimits`). |
 | `budgets` | `category_id`, `period`, `limit_cents`, `effective_from`, `effective_to`, `rollover` | `period` is `weekly` \| `monthly` \| `yearly`. `effective_from`/`_to` are inclusive `DateKey`s; `effective_to` NULL means still in force. Income categories are rejected because budgets are spending limits. `rollover` carries an unused surplus into the next period. |
+| `budget_reallocations` | `month`, `from_category_id`, `to_category_id`, `amount_cents`, `input_mode`, `input_value` | Moves room between two monthly budgets for one `YYYY-MM` month. The stored cents are authoritative; percentage input is resolved when saved so later permanent budget changes do not rewrite history. |
 | `recurring_transactions` | `name`, `account_id`, `transfer_account_id`, `category_id`, `amount_cents`, `frequency`, `interval`, `start_date`, `end_date`, `next_due`, `last_generated`, `archived` | `start_date` is the **anchor**: occurrences are computed from it by index, so "the 31st" clamps to Feb 28 for February only and returns to the 31st in March. `next_due` and `last_generated` are cursors, not the rule. Setting `transfer_account_id` makes each occurrence a transfer. |
 | `assets` | `category`, `current_value_cents`, `currency`, `notes`, `commodity_type`, `quantity`, `unit`, `price_symbol`, `priced_at`, `use_live_price` | Standalone holdings, alongside accounts. **No `name` column** — use `notes` as the label. `quantity` is deliberately a `real` (a weight or a coin count, not money). `unit` is `oz`/`grams` for metals and `coins` for crypto. `price_symbol` — not `category`, not `commodity_type` — decides which feed prices it. `priced_at` NULL means it was never live-priced. |
 | `net_worth_snapshots` | `date` (unique), `total_assets_cents`, `total_liabilities_cents`, `net_worth_cents`, `source`, `source_note` | One aggregate row per local calendar day. Recorded observations outrank reconstructed estimates. |
@@ -180,6 +181,7 @@ Migrations, in journal order (`drizzle/migrations/meta/_journal.json`):
 | `0003_accounts_and_budget_periods` | `accounts` (+ a seeded `Main` account), transfers, nullable `category_id`, `budgets`, `recurring_transactions`, `net_worth_snapshots`. |
 | `0004_priced_holdings` | `assets.price_symbol`, `assets.priced_at`. |
 | `0005_reconstructed_net_worth` | Marks net-worth rows as recorded or reconstructed and stores estimate provenance. |
+| `0006_budget_reallocations` | One-off monthly transfers between category budgets. |
 
 ## Where to put new code
 
@@ -204,7 +206,7 @@ There are no REST endpoints — these functions are called directly from compone
 | --- | --- |
 | `accounts.ts` | `getAccounts`, `getDefaultAccountId`, `getAccountBalances`, `getNetWorth`, `getNetWorthHistory`, `getLatestNetWorthSnapshot`, `createAccount`, `updateAccount`, `setAccountArchived`, `deleteAccount`, `snapshotNetWorth`, `deleteNetWorthSnapshot`, `assignOrphanTransactions` |
 | `transactions.ts` | `getTransactions`, `getTransfers`, `syncCashAssetManually`, `createTransaction`, `updateTransaction`, `confirmTransaction`, `deleteTransaction`, `createTransfer`, `updateTransfer` |
-| `budgets.ts` | `getBudgets`, `getBudgetsForCategory`, `getSpendVsBudget`, `getBudgetHistory`, `createBudget`, `updateBudget`, `deleteBudget`, `importLegacyBudgets` |
+| `budgets.ts` | Budget queries/mutations plus `getBudgetReallocations`, `createBudgetReallocation`, and `deleteBudgetReallocation`. |
 | `recurring.ts` | `getRecurringTransactions`, `getUpcomingRecurring`, `getRecurringFormOptions`, `createRecurringTransaction`, `updateRecurringTransaction`, `setRecurringArchived`, `deleteRecurringTransaction`, `generateDueTransactions` |
 | `categories.ts` | `getCategories`, `createCategory`, `updateCategory`, `countCategoryUsage`, `deleteCategory` |
 | `assets.ts` | `getAssets`, `getInvestmentHistory`, `createAsset`, `updateAsset`, `deleteAsset` |
@@ -369,6 +371,7 @@ lib/
     migrate-to-cents.ts           one-shot applier for 0002
     migrate-to-accounts.ts        one-shot applier for 0003
     migrate-to-priced-holdings.ts one-shot applier for 0004
+    migrate-to-budget-reallocations.ts one-shot applier for 0006
     migrate-from-json.ts  legacy one-off, see below
     verify-migration.ts   legacy one-off, see below
   stores/                 Zustand view state
@@ -382,14 +385,14 @@ data/                     budget.db + budget.db.bak (gitignored),
 
 ### The one-shot migration appliers
 
-`migrate-to-cents.ts`, `migrate-to-accounts.ts` and `migrate-to-priced-holdings.ts` exist to apply 0002/0003/0004 to a database that already holds real data. They are **not** the DDL — that is the `.sql` file — their job is to refuse to leave a damaged file behind. Each one has no npm script (run it explicitly) and each: writes a timestamped byte-for-byte backup to `data/backups/` first, works on an in-memory copy, verifies row counts per table, verifies the derived cash balance is **identical** before and after using the app's own `deriveCashBalanceCents`, runs `PRAGMA foreign_key_check`, re-opens and re-verifies what landed on disk, restores the backup and throws if anything fails, and refuses to run twice.
+The `migrate-to-*.ts` scripts safely apply migrations to databases that already hold real data. The SQL migration remains the source of truth; each applier works on an in-memory copy, preserves existing row counts, checks foreign keys, writes a timestamped backup before replacing the file, reopens and verifies the result, and refuses to run twice.
 
 ```bash
 node node_modules/tsx/dist/cli.mjs lib/db/migrate-to-accounts.ts --dry-run
 node node_modules/tsx/dist/cli.mjs lib/db/migrate-to-accounts.ts [--db <path>]
+node node_modules/tsx/dist/cli.mjs lib/db/migrate-to-budget-reallocations.ts --dry-run
+node node_modules/tsx/dist/cli.mjs lib/db/migrate-to-budget-reallocations.ts [--db <path>]
 ```
-
-<!-- TODO: the invocation above is the exec-bit workaround for this checkout; the documented form in each script's header is `npx tsx lib/db/migrate-to-accounts.ts`. Neither was run against the live database while writing these docs. -->
 
 `migrate-from-json.ts` and `verify-migration.ts` are older still — they moved data from the app's original JSON files into SQLite. They expect `data/categories.json` and friends, which now exist only as `*.json.backup`, so they will not run as-is. Keep them as a record or delete them.
 

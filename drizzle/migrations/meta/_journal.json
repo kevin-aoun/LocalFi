@@ -43,6 +43,13 @@
       "when": 1786032000000,
       "tag": "0005_reconstructed_net_worth",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1786118400000,
+      "tag": "0006_budget_reallocations",
+      "breakpoints": true
     }
   ]
 }

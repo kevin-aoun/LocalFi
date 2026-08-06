@@ -64,3 +64,53 @@ export const budgets = sqliteTable(
 
 export type Budget = typeof budgets.$inferSelect;
 export type NewBudget = typeof budgets.$inferInsert;
+
+export const budgetReallocationInputModes = ["amount", "percentage"] as const;
+export type BudgetReallocationInputMode = (typeof budgetReallocationInputModes)[number];
+
+/**
+ * A one-off transfer between two MONTHLY category budgets.
+ *
+ * `amount_cents` is the historical fact used by the budget engine. Percentage
+ * entry is resolved to cents when saved, so a later permanent budget edit does
+ * not rewrite what the owner decided for an earlier month. `input_*` preserves
+ * how that fixed amount was entered for an audit-friendly label in the UI.
+ */
+export const budgetReallocations = sqliteTable(
+  "budget_reallocations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** 'YYYY-MM': exactly one calendar month. */
+    month: text("month").notNull(),
+    fromCategoryId: integer("from_category_id")
+      .notNull()
+      .references(() => categories.id, { onDelete: "cascade" }),
+    toCategoryId: integer("to_category_id")
+      .notNull()
+      .references(() => categories.id, { onDelete: "cascade" }),
+    amountCents: integer("amount_cents").notNull().$type<Cents>(),
+    inputMode: text("input_mode", { enum: budgetReallocationInputModes }).notNull(),
+    /** Decimal amount or percentage exactly as entered, for display only. */
+    inputValue: text("input_value").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => ({
+    monthIdx: index("budget_reallocations_month_idx").on(table.month),
+    fromIdx: index("budget_reallocations_from_idx").on(table.fromCategoryId, table.month),
+    toIdx: index("budget_reallocations_to_idx").on(table.toCategoryId, table.month),
+    amountPositive: check("budget_reallocations_amount_positive", sql`${table.amountCents} > 0`),
+    categoriesDifferent: check(
+      "budget_reallocations_categories_different",
+      sql`${table.fromCategoryId} <> ${table.toCategoryId}`,
+    ),
+    modeValid: check(
+      "budget_reallocations_mode_valid",
+      sql`${table.inputMode} IN ('amount', 'percentage')`,
+    ),
+  }),
+);
+
+export type BudgetReallocation = typeof budgetReallocations.$inferSelect;
+export type NewBudgetReallocation = typeof budgetReallocations.$inferInsert;

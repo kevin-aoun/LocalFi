@@ -329,6 +329,68 @@ describe("budgetPerformance", () => {
   });
 });
 
+describe("budgetPerformance — one-off monthly reallocations", () => {
+  const entertainment: BudgetRow = {
+    ...monthlyFood,
+    id: 2,
+    categoryId: SALARY,
+    limitCents: 20_000,
+  };
+
+  it("subtracts from the source and adds to the target while preserving the total", () => {
+    const rows = spendVsBudget({
+      budgets: [{ ...monthlyFood, limitCents: 10_000 }, entertainment],
+      transactions: [],
+      reallocations: [
+        { id: 1, month: "2026-07", fromCategoryId: FOOD, toCategoryId: SALARY, amountCents: 5_000 },
+      ],
+      dateKey: "2026-07-15",
+      period: "monthly",
+    });
+
+    expect(rows.map((row) => [row.categoryId, row.limitCents])).toEqual([
+      [FOOD, 5_000],
+      [SALARY, 25_000],
+    ]);
+    expect(rows.reduce((total, row) => total + row.limitCents, 0)).toBe(30_000);
+  });
+
+  it("applies only in its named month", () => {
+    const rows = budgetPerformance({
+      budgets: [{ ...monthlyFood, limitCents: 10_000 }, entertainment],
+      transactions: [],
+      reallocations: [
+        { month: "2026-07", fromCategoryId: FOOD, toCategoryId: SALARY, amountCents: 3_000 },
+      ],
+      fromKey: "2026-06-01",
+      toKey: "2026-08-31",
+      period: "monthly",
+    });
+    const foodLimits = rows
+      .filter((row) => row.categoryId === FOOD)
+      .map((row) => [row.periodKey, row.limitCents]);
+    expect(foodLimits).toEqual([
+      ["2026-06", 10_000],
+      ["2026-07", 7_000],
+      ["2026-08", 10_000],
+    ]);
+  });
+
+  it("does not alter weekly or yearly limits", () => {
+    const weekly = { ...monthlyFood, period: "weekly" as const, limitCents: 10_000 };
+    const rows = spendVsBudget({
+      budgets: [weekly],
+      transactions: [],
+      reallocations: [
+        { month: "2026-07", fromCategoryId: FOOD, toCategoryId: SALARY, amountCents: 3_000 },
+      ],
+      dateKey: "2026-07-15",
+      period: "weekly",
+    });
+    expect(rows[0].limitCents).toBe(10_000);
+  });
+});
+
 describe("budgetPerformance — rollover", () => {
   const rolling: BudgetRow = { ...monthlyFood, rollover: true };
 

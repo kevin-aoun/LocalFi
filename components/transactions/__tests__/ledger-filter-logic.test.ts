@@ -20,6 +20,7 @@ import {
   matchesLedgerFilters,
   normalizeDateRange,
   normalizeQuery,
+  sortLedger,
   type LedgerRow,
 } from "../ledger-filter-logic";
 
@@ -74,6 +75,24 @@ describe("normalizeQuery", () => {
 
   it("lowercases and collapses whitespace", () => {
     expect(normalizeQuery("  Coffee   SHOP ")).toBe("coffee shop");
+  });
+});
+
+describe("sortLedger", () => {
+  it("shows the most recent transaction first by default without mutating input", () => {
+    const rows = [
+      row({ id: 1, date: new Date(2026, 5, 1) }),
+      row({ id: 2, date: new Date(2026, 7, 1) }),
+      row({ id: 3, date: new Date(2026, 6, 1) }),
+    ];
+
+    expect(sortLedger(rows, INDEX).map((item) => item.id)).toEqual([2, 3, 1]);
+    expect(rows.map((item) => item.id)).toEqual([1, 2, 3]);
+  });
+
+  it("uses newest id first for transactions on the same date", () => {
+    const rows = [row({ id: 4 }), row({ id: 9 }), row({ id: 5 })];
+    expect(sortLedger(rows, INDEX).map((item) => item.id)).toEqual([9, 5, 4]);
   });
 });
 

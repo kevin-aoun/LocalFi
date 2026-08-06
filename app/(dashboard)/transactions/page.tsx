@@ -52,8 +52,11 @@ import {
   buildLedgerIndex,
   filterLedger,
   hasActiveFilters,
+  sortLedger,
   type LedgerAccountFilter,
   type LedgerFilters,
+  type LedgerSortColumn,
+  type LedgerSortDirection,
 } from "@/components/transactions/ledger-filter-logic";
 import {
   breakdownTypeFor,
@@ -120,8 +123,8 @@ export default function TransactionsPage() {
     clearFilters,
   } = useTransactionsStore();
 
-  const [sortColumn, setSortColumn] = useState<"date" | "category" | "amount" | null>(null);
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [sortColumn, setSortColumn] = useState<LedgerSortColumn>("date");
+  const [sortDirection, setSortDirection] = useState<LedgerSortDirection>("desc");
   /** Failure from a delete/confirm action; null when there is nothing to report. */
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -282,7 +285,7 @@ export default function TransactionsPage() {
   };
 
   // Handle column sorting
-  const handleSort = (column: "date" | "category" | "amount") => {
+  const handleSort = (column: LedgerSortColumn) => {
     if (sortColumn === column) {
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
     } else {
@@ -291,29 +294,10 @@ export default function TransactionsPage() {
     }
   };
 
-  const sortedTransactions = useMemo(() => {
-    if (!sortColumn) return filteredTransactions;
-    const labelOf = (tx: LedgerTransaction) =>
-      isTransfer(tx)
-        ? "Transfer"
-        : (tx.categoryId == null ? "" : index.categories.get(tx.categoryId)?.name) ?? "";
-
-    return [...filteredTransactions].sort((a, b) => {
-      let comparison = 0;
-      switch (sortColumn) {
-        case "date":
-          comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
-          break;
-        case "category":
-          comparison = labelOf(a).localeCompare(labelOf(b));
-          break;
-        case "amount":
-          comparison = a.amountCents - b.amountCents;
-          break;
-      }
-      return sortDirection === "asc" ? comparison : -comparison;
-    });
-  }, [filteredTransactions, sortColumn, sortDirection, index]);
+  const sortedTransactions = useMemo(
+    () => sortLedger(filteredTransactions, index, sortColumn, sortDirection),
+    [filteredTransactions, sortColumn, sortDirection, index],
+  );
 
   // Pagination
   const totalPages = Math.ceil(sortedTransactions.length / ITEMS_PER_PAGE);

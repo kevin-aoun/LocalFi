@@ -27,9 +27,12 @@ import {
   type DomainDb,
 } from "./support/domain-fixture";
 import {
+  createBudgetReallocation,
   createBudget,
+  deleteBudgetReallocation,
   deleteBudget,
   getBudgetHistory,
+  getBudgetReallocations,
   getBudgets,
   getBudgetsForCategory,
   getSpendVsBudget,
@@ -313,6 +316,99 @@ describe("getBudgetHistory", () => {
   it("rejects malformed bounds", async () => {
     await expect(getBudgetHistory({ fromKey: "nope", toKey: "2026-01-01" })).rejects.toThrow(/fromKey/);
     await expect(getBudgetHistory({ fromKey: "2026-01-01", toKey: "nope" })).rejects.toThrow(/toKey/);
+  });
+});
+
+describe("monthly budget reallocations", () => {
+  beforeEach(() => {
+    seedBudget(temp, { id: 1, categoryId: FOOD, period: "monthly", limitCents: 50_000, effectiveFrom: "2026-01-01" });
+    seedBudget(temp, { id: 2, categoryId: TRANSPORT, period: "monthly", limitCents: 30_000, effectiveFrom: "2026-01-01" });
+  });
+
+  it("moves a fixed amount for one month without changing either permanent rule", async () => {
+    const created = unwrap(
+      await createBudgetReallocation(
+        form({
+          month: "2026-07",
+          fromCategoryId: FOOD,
+          toCategoryId: TRANSPORT,
+          inputMode: "amount",
+          value: "30.00",
+        }),
+      ),
+    );
+    expect(created.amountCents).toBe(3_000);
+
+    const july = await getSpendVsBudget({ dateKey: "2026-07-15", period: "monthly" });
+    expect(july.map((row) => [row.categoryId, row.limitCents])).toEqual([
+      [FOOD, 47_000],
+      [TRANSPORT, 33_000],
+    ]);
+    const august = await getSpendVsBudget({ dateKey: "2026-08-15", period: "monthly" });
+    expect(august.map((row) => [row.categoryId, row.limitCents])).toEqual([
+      [FOOD, 50_000],
+      [TRANSPORT, 30_000],
+    ]);
+    expect((await getBudgets()).map((budget) => budget.limitCents)).toEqual([50_000, 30_000]);
+  });
+
+  it("converts a percentage to fixed cents when it is created", async () => {
+    unwrap(
+      await createBudgetReallocation(
+        form({
+          month: "2026-07",
+          fromCategoryId: FOOD,
+          toCategoryId: TRANSPORT,
+          inputMode: "percentage",
+          value: "50",
+        }),
+      ),
+    );
+    expect(await getBudgetReallocations({ month: "2026-07" })).toMatchObject([
+      {
+        amountCents: 25_000,
+        inputMode: "percentage",
+        inputValue: "50",
+        fromCategoryName: "Food",
+        toCategoryName: "Transport",
+      },
+    ]);
+
+    unwrap(await updateBudget(1, form({ limit: "1000.00" })));
+    const food = (await getSpendVsBudget({ dateKey: "2026-07-15", categoryId: FOOD }))[0];
+    expect(food.limitCents).toBe(75_000);
+  });
+
+  it("refuses invalid or overdrawn moves", async () => {
+    expect(
+      await createBudgetReallocation(
+        form({ month: "2026-07", fromCategoryId: FOOD, toCategoryId: FOOD, inputMode: "amount", value: "1" }),
+      ),
+    ).toMatchObject({ error: expect.stringMatching(/different categories/i) });
+    expect(
+      await createBudgetReallocation(
+        form({ month: "2026-07", fromCategoryId: FOOD, toCategoryId: TRANSPORT, inputMode: "amount", value: "500.01" }),
+      ),
+    ).toMatchObject({ error: expect.stringMatching(/only has/i) });
+    expect(
+      await createBudgetReallocation(
+        form({ month: "2026-99", fromCategoryId: FOOD, toCategoryId: TRANSPORT, inputMode: "amount", value: "1" }),
+      ),
+    ).toMatchObject({ error: expect.stringMatching(/invalid month/i) });
+  });
+
+  it("deletes the reallocation directly and restores the original limits", async () => {
+    const created = unwrap(
+      await createBudgetReallocation(
+        form({ month: "2026-07", fromCategoryId: FOOD, toCategoryId: TRANSPORT, inputMode: "amount", value: "30" }),
+      ),
+    );
+    unwrap(await deleteBudgetReallocation(created.id));
+    expect(await getBudgetReallocations()).toEqual([]);
+    expect((await getSpendVsBudget({ dateKey: "2026-07-15" })).map((row) => row.limitCents)).toEqual([
+      50_000,
+      30_000,
+    ]);
   });
 });
 

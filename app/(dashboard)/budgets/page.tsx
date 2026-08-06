@@ -1,4 +1,9 @@
-import { getBudgetHistory, getBudgets, getSpendVsBudget } from "@/app/actions/budgets";
+import {
+  getBudgetHistory,
+  getBudgetReallocations,
+  getBudgets,
+  getSpendVsBudget,
+} from "@/app/actions/budgets";
 import { getCategories } from "@/app/actions/categories";
 import { getTransactions } from "@/app/actions/transactions";
 import { historyRange } from "@/components/budgets/budget-view-logic";
@@ -27,14 +32,16 @@ const INITIAL_HISTORY_PERIODS = 6;
  */
 export default async function BudgetsPage() {
   const today = todayKey();
+  const month = periodContaining("monthly", today);
   const monthlyHistory = historyRange("monthly", today, INITIAL_HISTORY_PERIODS);
 
-  const [categories, transactions, budgets, currentPeriod, history] = await Promise.all([
+  const [categories, transactions, budgets, currentPeriod, history, reallocations] = await Promise.all([
     getCategories(),
     getTransactions(),
     getBudgets(),
     getSpendVsBudget({ dateKey: today }),
     getBudgetHistory({ ...monthlyHistory, period: "monthly" }),
+    getBudgetReallocations(),
   ]);
 
   // Same spend rule as the engine (transfers and pending rows excluded) because
@@ -47,7 +54,6 @@ export default async function BudgetsPage() {
     accountId: tx.accountId,
     transferAccountId: tx.transferAccountId,
   }));
-  const month = periodContaining("monthly", today);
   const monthlySpendByCategory: Record<number, Cents> = {};
   for (const category of categories) {
     monthlySpendByCategory[category.id] = spendInRange(
@@ -65,6 +71,7 @@ export default async function BudgetsPage() {
       initialBudgets={budgets}
       initialCurrentPeriod={currentPeriod}
       initialHistory={history}
+      initialReallocations={reallocations}
       initialHistoryPeriods={INITIAL_HISTORY_PERIODS}
       monthlySpendByCategory={monthlySpendByCategory}
       currentMonthLabel={month.key}

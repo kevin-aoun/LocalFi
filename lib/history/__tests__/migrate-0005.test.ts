@@ -80,9 +80,9 @@ function query(file: string, sql: string): unknown[][] {
 }
 
 describe("journal", () => {
-  it("carries 0005 as the last entry, with a snapshot chained to 0004", () => {
+  it("keeps 0005 at index 5, with a snapshot chained to 0004", () => {
     const entries = [...journal.entries].sort((a, b) => a.idx - b.idx);
-    expect(entries[entries.length - 1]).toMatchObject({ idx: 5, tag: TAG });
+    expect(entries.find((entry) => entry.idx === 5)).toMatchObject({ idx: 5, tag: TAG });
     const previous = JSON.parse(readFileSync(path.join(MIGRATIONS_DIR, "meta", "0004_snapshot.json"), "utf-8"));
     const current = JSON.parse(readFileSync(path.join(MIGRATIONS_DIR, "meta", "0005_snapshot.json"), "utf-8"));
     expect(current.prevId).toBe(previous.id);

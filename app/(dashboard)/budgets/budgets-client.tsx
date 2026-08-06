@@ -1,30 +1,6 @@
 "use client";
 
-/**
- * Budgets & categories.
- *
- * WHAT CHANGED AND WHY: this page used to read one nullable column,
- * `categories.monthly_limit_cents`, and compare it against spend in the CURRENT
- * calendar month, computed inline. That made three things unaskable — "did I stay
- * under in March?", "what about my weekly coffee budget?", "does last month's
- * surplus help me this month?" — and the only over-budget signal was a red card
- * you had to scroll to.
- *
- * Now every figure comes from the tested engine (`getSpendVsBudget` /
- * `getBudgetHistory` over `lib/budgets.ts`), the page summarizes over-budget and
- * near-limit states at the top, and the three tabs cover the period in progress,
- * per-period history, and category management (which this page still owns).
- *
- * A BUDGET IS A SPENDING LIMIT, so an INCOME category cannot have one: income is
- * never offered in the budget dialog, never listed in the "no budget yet" strip,
- * and never invited from a category card. A row that somehow exists on an income
- * category (hand-edited database, or one predating the rule) is reported in a
- * notice and can be deleted from there — it is never counted into the over/near
- * totals, which would read a paycheque as an overspend.
- *
- * Older category-level limits are normalized behind the actions. The page treats
- * them exactly like budgets instead of exposing a storage migration workflow.
- */
+/** Budget performance, history, one-off reallocations, and category management. */
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -32,6 +8,7 @@ import * as Icons from "lucide-react";
 import {
   AlertCircle,
   AlertTriangle,
+  ArrowLeftRight,
   CalendarRange,
   CircleSlash,
   Loader2,
@@ -44,13 +21,16 @@ import {
 } from "lucide-react";
 
 import {
+  deleteBudgetReallocation,
   deleteBudget,
   getBudgetHistory,
+  type BudgetReallocationView,
   type BudgetPerformanceRow,
 } from "@/app/actions/budgets";
 import { deleteCategory } from "@/app/actions/categories";
 import { BudgetDialog } from "@/components/budgets/budget-dialog";
 import { BudgetRuleDialog } from "@/components/budgets/budget-rule-dialog";
+import { BudgetReallocationDialog } from "@/components/budgets/budget-reallocation-dialog";
 import {
   budgetableCategories,
   classifyBudgetRow,
@@ -103,7 +83,11 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { budgetPeriods, type BudgetPeriod } from "@/lib/budgets";
+import {
+  budgetPeriods,
+  monthlyReallocationAdjustment,
+  type BudgetPeriod,
+} from "@/lib/budgets";
 import type { DateKey } from "@/lib/dates";
 import { formatMoney, type Cents } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -137,6 +121,7 @@ type BudgetsClientProps = {
   initialBudgets: BudgetRecord[];
   initialCurrentPeriod: BudgetPerformanceRow[];
   initialHistory: BudgetPerformanceRow[];
+  initialReallocations: BudgetReallocationView[];
   initialHistoryPeriods: number;
   monthlySpendByCategory: Record<number, Cents>;
   currentMonthLabel: string;
@@ -150,6 +135,7 @@ export default function BudgetsClient({
   initialBudgets,
   initialCurrentPeriod,
   initialHistory,
+  initialReallocations,
   initialHistoryPeriods,
   monthlySpendByCategory,
   currentMonthLabel,
@@ -164,6 +150,9 @@ export default function BudgetsClient({
   // BudgetRowView, because the engine refuses to measure it — can be deleted too.
   const [budgetToDelete, setBudgetToDelete] = useState<DeletableBudget | null>(null);
   const [budgetDeleteError, setBudgetDeleteError] = useState<string | null>(null);
+  const [reallocationDialogOpen, setReallocationDialogOpen] = useState(false);
+  const [reallocationDeleteId, setReallocationDeleteId] = useState<number | null>(null);
+  const [reallocationError, setReallocationError] = useState<string | null>(null);
 
   // --- category dialogs (this page is still the category manager) -----------
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
@@ -258,11 +247,17 @@ export default function BudgetsClient({
 
   const openEditBudget = (row: BudgetRowView) => {
     const record = budgetsById.get(row.budgetId);
+    const reallocationCents =
+      row.period === "monthly"
+        ? monthlyReallocationAdjustment(initialReallocations, row.categoryId, row.periodKey)
+        : 0;
     setBudgetBeingEdited({
       id: record?.id ?? row.budgetId,
       categoryId: record?.categoryId ?? row.categoryId,
       period: record?.period ?? row.period,
-      limitCents: record?.limitCents ?? row.limitCents,
+      // A synthetic legacy row has no record to read. Remove this month's
+      // one-off adjustment so editing never turns it into a permanent change.
+      limitCents: record?.limitCents ?? row.limitCents - reallocationCents,
       effectiveFrom: record?.effectiveFrom ?? row.effectiveFrom ?? row.startKey,
       effectiveTo: record?.effectiveTo ?? row.effectiveTo ?? null,
       rollover: record?.rollover ?? row.rollover,
@@ -303,6 +298,19 @@ export default function BudgetsClient({
     router.refresh();
   };
 
+  const handleDeleteReallocation = async (id: number) => {
+    setReallocationDeleteId(id);
+    setReallocationError(null);
+    const result = await deleteBudgetReallocation(id);
+    if ("error" in result) {
+      setReallocationError(result.error);
+      setReallocationDeleteId(null);
+      return;
+    }
+    setReallocationDeleteId(null);
+    router.refresh();
+  };
+
   const handleSuccess = () => {
     router.refresh();
   };
@@ -314,6 +322,9 @@ export default function BudgetsClient({
   };
 
   const historyGroups = groupHistory(historyRows);
+  const sortedReallocations = [...initialReallocations].sort(
+    (a, b) => b.month.localeCompare(a.month) || b.id - a.id,
+  );
 
   return (
     <div className="space-y-6">
@@ -325,7 +336,15 @@ export default function BudgetsClient({
             categories they apply to
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setReallocationDialogOpen(true)}
+            disabled={creatableCategories.length < 2}
+          >
+            <ArrowLeftRight className="mr-2 h-4 w-4" />
+            Reallocate
+          </Button>
           <Button variant="outline" onClick={() => openCategoryDialog(null)}>
             <Plus className="mr-2 h-4 w-4" />
             Add Category
@@ -495,9 +514,10 @@ export default function BudgetsClient({
       )}
 
       <Tabs defaultValue="current" className="space-y-4">
-        <TabsList>
+        <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="current">This period</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
+          <TabsTrigger value="reallocations">Reallocations</TabsTrigger>
           <TabsTrigger value="categories">Categories</TabsTrigger>
         </TabsList>
 
@@ -554,6 +574,15 @@ export default function BudgetsClient({
                     setBudgetDeleteError(null);
                     setBudgetToDelete(row);
                   }}
+                  reallocationCents={
+                    row.period === "monthly"
+                      ? monthlyReallocationAdjustment(
+                          initialReallocations,
+                          row.categoryId,
+                          row.periodKey,
+                        )
+                      : 0
+                  }
                 />
               ))}
             </div>
@@ -749,6 +778,96 @@ export default function BudgetsClient({
           )}
         </TabsContent>
 
+        {/* ================= Reallocations ================= */}
+        <TabsContent value="reallocations" className="space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">One-off monthly reallocations</h2>
+              <p className="text-sm text-muted-foreground">
+                Each entry changes only the named month. It never edits either permanent budget.
+              </p>
+            </div>
+            <Button
+              onClick={() => setReallocationDialogOpen(true)}
+              disabled={creatableCategories.length < 2}
+            >
+              <ArrowLeftRight className="mr-2 h-4 w-4" />
+              Reallocate budget
+            </Button>
+          </div>
+
+          {reallocationError && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            >
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{reallocationError}</span>
+            </div>
+          )}
+
+          {sortedReallocations.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-14 text-center">
+                <ArrowLeftRight className="mb-3 h-10 w-10 text-muted-foreground" />
+                <h3 className="font-semibold">No reallocations yet</h3>
+                <p className="mt-1 max-w-md text-sm text-muted-foreground">
+                  Move a fixed amount or a percentage from one monthly category budget to another.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Month</TableHead>
+                      <TableHead>From</TableHead>
+                      <TableHead>To</TableHead>
+                      <TableHead className="text-right">Moved</TableHead>
+                      <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sortedReallocations.map((allocation) => (
+                      <TableRow key={allocation.id}>
+                        <TableCell className="font-medium">{allocation.month}</TableCell>
+                        <TableCell>{allocation.fromCategoryName}</TableCell>
+                        <TableCell>{allocation.toCategoryName}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="font-medium">{formatMoney(allocation.amountCents)}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {allocation.inputMode === "percentage"
+                              ? `${allocation.inputValue}% when created`
+                              : "fixed amount"}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            disabled={reallocationDeleteId === allocation.id}
+                            onClick={() => void handleDeleteReallocation(allocation.id)}
+                            aria-label={`Delete ${allocation.month} reallocation`}
+                          >
+                            {reallocationDeleteId === allocation.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            )}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
         {/* ================= Categories ================= */}
         <TabsContent value="categories" className="space-y-8">
           {initialCategories.length === 0 ? (
@@ -827,6 +946,14 @@ export default function BudgetsClient({
         categories={initialCategories}
         budget={budgetBeingEdited}
         defaultCategoryId={budgetDefaultCategoryId}
+        onSuccess={handleSuccess}
+      />
+
+      <BudgetReallocationDialog
+        open={reallocationDialogOpen}
+        onOpenChange={setReallocationDialogOpen}
+        categories={initialCategories}
+        defaultMonth={currentMonthLabel}
         onSuccess={handleSuccess}
       />
 
@@ -946,10 +1073,12 @@ function BudgetCard({
   row,
   onEdit,
   onDelete,
+  reallocationCents,
 }: {
   row: BudgetRowView;
   onEdit: () => void;
   onDelete: () => void;
+  reallocationCents: Cents;
 }) {
   const status = classifyBudgetRow(row);
   const percent = usagePercent(row.spentCents, row.availableCents);
@@ -1018,6 +1147,12 @@ function BudgetCard({
         <p className="text-xs text-muted-foreground mt-1">
           of {formatMoney(row.availableCents)} available {periodUnitLabel(row.period)}
         </p>
+        {reallocationCents !== 0 && (
+          <p className={cn("mt-1 text-xs", reallocationCents > 0 ? "text-emerald-600" : "text-orange-600")}>
+            {reallocationCents > 0 ? "+" : "−"}
+            {formatMoney(Math.abs(reallocationCents))} {reallocationCents > 0 ? "moved in" : "moved out"} this month
+          </p>
+        )}
 
         <Progress
           className={cn("mt-3", status === "over" && "bg-destructive/25")}
