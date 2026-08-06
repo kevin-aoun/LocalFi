@@ -14,6 +14,7 @@ import {
   budgetInForce,
   budgetPerformance,
   budgetsFromLegacyLimits,
+  monthlyReallocationFlow,
   periodContaining,
   periodsBetween,
   spendInRange,
@@ -336,6 +337,20 @@ describe("budgetPerformance — one-off monthly reallocations", () => {
     categoryId: SALARY,
     limitCents: 20_000,
   };
+
+  it("reports incoming and outgoing separately even when they cancel out", () => {
+    expect(
+      monthlyReallocationFlow(
+        [
+          { month: "2026-07", fromCategoryId: FOOD, toCategoryId: SALARY, amountCents: 5_000 },
+          { month: "2026-07", fromCategoryId: SALARY, toCategoryId: FOOD, amountCents: 2_000 },
+          { month: "2026-08", fromCategoryId: FOOD, toCategoryId: SALARY, amountCents: 9_000 },
+        ],
+        FOOD,
+        "2026-07",
+      ),
+    ).toEqual({ incomingCents: 2_000, outgoingCents: 5_000, netCents: -3_000 });
+  });
 
   it("subtracts from the source and adds to the target while preserving the total", () => {
     const rows = spendVsBudget({

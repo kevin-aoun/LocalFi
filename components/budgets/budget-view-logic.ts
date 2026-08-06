@@ -117,6 +117,29 @@ export function usagePercent(spentCents: Cents, availableCents: Cents): number {
   return (spentCents / availableCents) * 100;
 }
 
+/**
+ * Card-only usage after budget has been moved out of this category.
+ *
+ * A reallocation is not a transaction, so it must not inflate actual spending.
+ * It does commit part of the category's original capacity elsewhere, though, and
+ * the progress bar should fill accordingly. Adding the outgoing amount back to
+ * the adjusted availability reconstructs the capacity that could have been used
+ * here; adding it to spend shows how much of that capacity is now committed.
+ */
+export function visualBudgetUsage(
+  spentCents: Cents,
+  adjustedAvailableCents: Cents,
+  outgoingCents: Cents,
+): { usedCents: Cents; capacityCents: Cents; percent: number } {
+  const usedCents = sumCents([spentCents, outgoingCents]);
+  const capacityCents = sumCents([adjustedAvailableCents, outgoingCents]);
+  return {
+    usedCents,
+    capacityCents,
+    percent: usagePercent(usedCents, capacityCents),
+  };
+}
+
 export function classifyBudgetRow(
   row: Pick<BudgetRowView, "categoryType" | "spentCents" | "availableCents" | "remainingCents">,
 ): BudgetStatus {

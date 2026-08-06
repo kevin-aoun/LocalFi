@@ -38,6 +38,12 @@ export type BudgetReallocationRow = {
   amountCents: Cents;
 };
 
+export type BudgetReallocationFlow = {
+  incomingCents: Cents;
+  outgoingCents: Cents;
+  netCents: Cents;
+};
+
 /** A transaction as the budget engine sees it: a calendar day plus a magnitude. */
 export type BudgetLedgerTransaction = CashLedgerTransaction & { dateKey: DateKey };
 
@@ -212,20 +218,36 @@ export type BudgetPerformanceInput = {
   period?: BudgetPeriod;
 };
 
+/** Incoming, outgoing, and net budget movement for one category in one month. */
+export function monthlyReallocationFlow(
+  reallocations: readonly BudgetReallocationRow[],
+  categoryId: number,
+  month: string,
+): BudgetReallocationFlow {
+  const incoming: Cents[] = [];
+  const outgoing: Cents[] = [];
+  for (const row of reallocations) {
+    if (row.month !== month) continue;
+    assertCents(row.amountCents, `reallocation ${row.id ?? "?"} amountCents`);
+    if (row.fromCategoryId === categoryId) outgoing.push(row.amountCents);
+    if (row.toCategoryId === categoryId) incoming.push(row.amountCents);
+  }
+  const incomingCents = sumCents(incoming);
+  const outgoingCents = sumCents(outgoing);
+  return {
+    incomingCents,
+    outgoingCents,
+    netCents: sumCents([incomingCents, negateCents(outgoingCents)]),
+  };
+}
+
 /** Incoming minus outgoing for one category in one month. */
 export function monthlyReallocationAdjustment(
   reallocations: readonly BudgetReallocationRow[],
   categoryId: number,
   month: string,
 ): Cents {
-  const parts: Cents[] = [];
-  for (const row of reallocations) {
-    if (row.month !== month) continue;
-    assertCents(row.amountCents, `reallocation ${row.id ?? "?"} amountCents`);
-    if (row.fromCategoryId === categoryId) parts.push(negateCents(row.amountCents));
-    if (row.toCategoryId === categoryId) parts.push(row.amountCents);
-  }
-  return sumCents(parts);
+  return monthlyReallocationFlow(reallocations, categoryId, month).netCents;
 }
 
 /**

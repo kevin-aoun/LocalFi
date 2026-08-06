@@ -48,6 +48,7 @@ import {
   summarizeBudgets,
   unbudgetedCategories,
   usagePercent,
+  visualBudgetUsage,
   type BudgetRowView,
   type EditableBudget,
   type PeriodFilter,
@@ -86,6 +87,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import {
   budgetPeriods,
   monthlyReallocationAdjustment,
+  monthlyReallocationFlow,
+  type BudgetReallocationFlow,
   type BudgetPeriod,
 } from "@/lib/budgets";
 import type { DateKey } from "@/lib/dates";
@@ -565,26 +568,28 @@ export default function BudgetsClient({
             </Card>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {visibleRows.map((row) => (
-                <BudgetCard
-                  key={`${row.budgetId}-${row.periodKey}`}
-                  row={row}
-                  onEdit={() => openEditBudget(row)}
-                  onDelete={() => {
-                    setBudgetDeleteError(null);
-                    setBudgetToDelete(row);
-                  }}
-                  reallocationCents={
-                    row.period === "monthly"
-                      ? monthlyReallocationAdjustment(
-                          initialReallocations,
-                          row.categoryId,
-                          row.periodKey,
-                        )
-                      : 0
-                  }
-                />
-              ))}
+              {visibleRows.map((row) => {
+                const reallocationFlow =
+                  row.period === "monthly"
+                    ? monthlyReallocationFlow(
+                        initialReallocations,
+                        row.categoryId,
+                        row.periodKey,
+                      )
+                    : undefined;
+                return (
+                  <BudgetCard
+                    key={`${row.budgetId}-${row.periodKey}`}
+                    row={row}
+                    onEdit={() => openEditBudget(row)}
+                    onDelete={() => {
+                      setBudgetDeleteError(null);
+                      setBudgetToDelete(row);
+                    }}
+                    reallocationFlow={reallocationFlow}
+                  />
+                );
+              })}
             </div>
           )}
 
@@ -1073,15 +1078,25 @@ function BudgetCard({
   row,
   onEdit,
   onDelete,
-  reallocationCents,
+  reallocationFlow,
 }: {
   row: BudgetRowView;
   onEdit: () => void;
   onDelete: () => void;
-  reallocationCents: Cents;
+  reallocationFlow?: BudgetReallocationFlow;
 }) {
-  const status = classifyBudgetRow(row);
-  const percent = usagePercent(row.spentCents, row.availableCents);
+  const reallocationCents = reallocationFlow?.netCents ?? 0;
+  const visualUsage = visualBudgetUsage(
+    row.spentCents,
+    row.availableCents,
+    reallocationFlow?.outgoingCents ?? 0,
+  );
+  const status = classifyBudgetRow({
+    ...row,
+    spentCents: visualUsage.usedCents,
+    availableCents: visualUsage.capacityCents,
+  });
+  const percent = visualUsage.percent;
   const rollover = describeRollover(row);
 
   return (

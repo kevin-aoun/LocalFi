@@ -338,8 +338,8 @@ export async function getBudgetReallocations(options?: {
 
 /**
  * Move part of one monthly budget to another for exactly one month.
- * Percentage entry is resolved against the source's BASE monthly limit now and
- * the resulting cents are stored, so later budget edits cannot rewrite history.
+ * Percentage entry is resolved against what remains available to reallocate now.
+ * The resulting cents are stored, so later budget edits cannot rewrite history.
  */
 export async function createBudgetReallocation(
   formData: FormData,
@@ -403,7 +403,7 @@ export async function createBudgetReallocation(
       const amountCents =
         inputMode === "amount"
           ? parseAmount(inputValue)
-          : Math.round((sourceBudget.limitCents * parsePercentageBasisPoints(inputValue)) / 10_000);
+          : Math.round((adjustedSourceCents * parsePercentageBasisPoints(inputValue)) / 10_000);
       if (amountCents <= 0) throw new Error("The reallocated amount must be greater than zero.");
       if (amountCents > adjustedSourceCents) {
         throw new Error(

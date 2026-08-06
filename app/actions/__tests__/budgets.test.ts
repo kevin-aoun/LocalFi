@@ -379,6 +379,49 @@ describe("monthly budget reallocations", () => {
     expect(food.limitCents).toBe(75_000);
   });
 
+  it("applies percentages to the remaining reallocatable budget so Max always works", async () => {
+    unwrap(
+      await createBudgetReallocation(
+        form({
+          month: "2026-07",
+          fromCategoryId: FOOD,
+          toCategoryId: TRANSPORT,
+          inputMode: "amount",
+          value: "100.00",
+        }),
+      ),
+    );
+    unwrap(
+      await createBudgetReallocation(
+        form({
+          month: "2026-07",
+          fromCategoryId: FOOD,
+          toCategoryId: TRANSPORT,
+          inputMode: "percentage",
+          value: "50",
+        }),
+      ),
+    );
+    unwrap(
+      await createBudgetReallocation(
+        form({
+          month: "2026-07",
+          fromCategoryId: FOOD,
+          toCategoryId: TRANSPORT,
+          inputMode: "percentage",
+          value: "100",
+        }),
+      ),
+    );
+
+    expect(
+      (await getBudgetReallocations({ month: "2026-07" })).map((row) => row.amountCents),
+    ).toEqual([10_000, 20_000, 20_000]);
+    expect(
+      (await getSpendVsBudget({ dateKey: "2026-07-15", categoryId: FOOD }))[0].limitCents,
+    ).toBe(0);
+  });
+
   it("refuses invalid or overdrawn moves", async () => {
     expect(
       await createBudgetReallocation(

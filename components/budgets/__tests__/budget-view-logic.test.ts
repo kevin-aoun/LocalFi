@@ -45,6 +45,7 @@ import {
   toBudgetFormData,
   unbudgetedCategories,
   usagePercent,
+  visualBudgetUsage,
   validateBudgetForm,
   type BudgetRowView,
   type BudgetRuleFormState,
@@ -139,6 +140,28 @@ describe("a limit of exactly 0 is a real ceiling", () => {
 
   it("rejects a negative limit", () => {
     expect(validateBudgetForm(formState({ limit: "-5" }))).toMatch(/negative/i);
+  });
+});
+
+describe("reallocated budget is visually committed", () => {
+  it("fills half the bar when half the untouched budget moved out", () => {
+    expect(visualBudgetUsage(0, 5_000, 5_000)).toEqual({
+      usedCents: 5_000,
+      capacityCents: 10_000,
+      percent: 50,
+    });
+  });
+
+  it("fills the bar completely when the whole budget moved out", () => {
+    expect(visualBudgetUsage(0, 0, 10_000).percent).toBe(100);
+  });
+
+  it("combines real spend and moved-out budget without changing capacity", () => {
+    expect(visualBudgetUsage(2_000, 5_000, 3_000)).toEqual({
+      usedCents: 5_000,
+      capacityCents: 8_000,
+      percent: 62.5,
+    });
   });
 });
 
@@ -851,5 +874,14 @@ describe("the Budgets UI keeps the house conventions", () => {
     const source = read("app/(dashboard)/budgets/page.tsx");
     expect(source).toMatch(/getSpendVsBudget/);
     expect(source).toMatch(/getBudgetHistory/);
+  });
+
+  it("the reallocation dialog offers 25%, 50%, and Max shortcuts", () => {
+    const source = stripComments(read("components/budgets/budget-reallocation-dialog.tsx"));
+    expect(source).toMatch(/label:\s*"25%",\s*value:\s*"25"/);
+    expect(source).toMatch(/label:\s*"50%",\s*value:\s*"50"/);
+    expect(source).toMatch(/label:\s*"Max",\s*value:\s*"100"/);
+    expect(source).toMatch(/setInputMode\("percentage"\)/);
+    expect(source).toMatch(/aria-pressed=\{selected\}/);
   });
 });

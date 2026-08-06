@@ -26,6 +26,12 @@ import {
 type CategoryOption = { id: number; name: string; type: string };
 type InputMode = "amount" | "percentage";
 
+const QUICK_PERCENTAGES = [
+  { label: "25%", value: "25" },
+  { label: "50%", value: "50" },
+  { label: "Max", value: "100" },
+] as const;
+
 type BudgetReallocationDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -174,7 +180,7 @@ export function BudgetReallocationDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="reallocation-value">
-                {inputMode === "amount" ? "Amount" : "Percent of source budget"}
+                {inputMode === "amount" ? "Amount" : "Percent of available budget"}
               </Label>
               <div className="relative">
                 {inputMode === "amount" && (
@@ -199,9 +205,34 @@ export function BudgetReallocationDialog({
             </div>
           </div>
 
+          <div className="space-y-2">
+            <Label>Quick amount</Label>
+            <div className="grid grid-cols-3 gap-2" role="group" aria-label="Quick reallocation amount">
+              {QUICK_PERCENTAGES.map((option) => {
+                const selected = inputMode === "percentage" && value === option.value;
+                return (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    size="sm"
+                    variant={selected ? "default" : "outline"}
+                    aria-pressed={selected}
+                    onClick={() => {
+                      setInputMode("percentage");
+                      setValue(option.value);
+                    }}
+                  >
+                    {option.label}
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+
           <p className="text-xs text-muted-foreground">
-            Both categories must have a monthly budget in the selected month. A percentage is
-            converted to a fixed amount when saved, so later budget edits cannot rewrite history.
+            Both categories must have a monthly budget in the selected month. Percentages use
+            the source budget still available to reallocate, then save as a fixed amount so later
+            budget edits cannot rewrite history.
           </p>
 
           <DialogFooter>
