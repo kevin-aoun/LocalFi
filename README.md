@@ -144,7 +144,7 @@ flowchart TD
 | Route | Page | What it does |
 | --- | --- | --- |
 | `/` | `app/(dashboard)/page.tsx` | Net worth headline + history chart, asset cards, income/expense bar chart (daily/weekly/monthly). |
-| `/accounts` | `accounts/page.tsx` → `accounts-client.tsx` | Accounts grouped by asset/liability with derived balances, archive toggle, "snapshot net worth", and a repair card for transactions with no account. |
+| `/accounts` | `accounts/page.tsx` → `accounts-client.tsx` | Accounts grouped by asset/liability with derived balances, archive toggle, live-price refresh + daily net-worth recording, and a repair card for transactions with no account. |
 | `/transactions` | `transactions/page.tsx` | Ledger with month/category filters, sorting, category breakdown, pending queue, transfers, spreadsheet import. |
 | `/recurring` | `recurring/page.tsx` → `recurring-client.tsx` | Recurring templates, an "upcoming" list, and the *generate due transactions* button. |
 | `/budgets` | `budgets/page.tsx` → `budgets-client.tsx` | This period, History, one-off monthly Reallocations, and Categories. The sidebar labels this route **"Categories"**. |
@@ -203,17 +203,17 @@ Migrations, in journal order (`drizzle/migrations/meta/_journal.json`):
 
 ## Server Actions
 
-There are no REST endpoints — these functions are called directly from components. The house pattern is: validate input, do any slow I/O (a price fetch) **first**, then one `withDb(...)` for the write, then `revalidate(...)`.
+Components call server actions directly. The authenticated `/api/agent` and `/api/snapshot` endpoints exist for the local sidecar and scheduler; `/api/snapshot` calls the same `recordNetWorthToday` service as both visible buttons. The house pattern is: validate input, do any slow I/O (a price fetch) **first**, then one `withDb(...)` for the write, then `revalidate(...)`.
 
 | File | Functions |
 | --- | --- |
-| `accounts.ts` | `getAccounts`, `getDefaultAccountId`, `getAccountBalances`, `getNetWorth`, `getNetWorthHistory`, `getLatestNetWorthSnapshot`, `createAccount`, `updateAccount`, `setAccountArchived`, `deleteAccount`, `snapshotNetWorth`, `deleteNetWorthSnapshot`, `assignOrphanTransactions` |
+| `accounts.ts` | Account queries/mutations plus `recordNetWorthToday` (refresh all live-priced holdings, then persist today) and the lower-level network-free `snapshotNetWorth({ dateKey })`. |
 | `transactions.ts` | `getTransactions`, `getTransfers`, `syncCashAssetManually`, `createTransaction`, `updateTransaction`, `confirmTransaction`, `deleteTransaction`, `createTransfer`, `updateTransfer` |
 | `budgets.ts` | Budget queries/mutations plus `getBudgetReallocations`, `createBudgetReallocation`, and `deleteBudgetReallocation`. |
 | `recurring.ts` | `getRecurringTransactions`, `getUpcomingRecurring`, `getRecurringFormOptions`, `createRecurringTransaction`, `updateRecurringTransaction`, `setRecurringArchived`, `deleteRecurringTransaction`, `generateDueTransactions` |
 | `categories.ts` | `getCategories`, `createCategory`, `updateCategory`, `countCategoryUsage`, `deleteCategory` |
 | `assets.ts` | `getAssets`, `getInvestmentHistory`, `createAsset`, `updateAsset`, `deleteAsset` |
-| `crypto.ts` | `getLivePriceQuote`, `createLivePricedAsset`, `updateLivePricedAsset` — quote and write paths for any live-priced holding |
+| `crypto.ts` | `getLivePriceQuote`, `createLivePricedAsset`, `updateLivePricedAsset`, `refreshLivePricedAssets` — one batched CoinGecko request can reprice every configured metal and crypto holding. |
 | `commodities.ts` | `calculateCommodityValue` — the legacy metals-facing value wrapper over `lib/prices.ts`; no database access |
 | `import.ts` | `importTransactions` — a whole spreadsheet in one `withDb`: validate every row, insert nothing if any row is bad, dedupe, re-derive Cash once |
 | `export.ts` | `exportTransactionsCsv`, `exportJsonBackup`, `describeDatabaseLocation`, `exportDatabaseFile` |

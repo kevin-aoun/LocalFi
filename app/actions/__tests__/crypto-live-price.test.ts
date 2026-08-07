@@ -30,6 +30,7 @@ const {
   getLivePriceQuote,
   updateLivePricedAsset,
 } = await import("../crypto");
+const { recordNetWorthToday } = await import("../accounts");
 const { calculateCommodityValue } = await import("../commodities");
 
 let temp: TempDb;
@@ -227,5 +228,106 @@ describe("updateLivePricedAsset", () => {
       error: expect.stringContaining("calculated from your transactions"),
     });
     expect(storedAssets()[0]).toMatchObject({ current_value_cents: 449_618, price_symbol: null });
+  });
+});
+
+describe("recordNetWorthToday", () => {
+  it("refreshes every live-priced commodity and crypto holding in one request", async () => {
+    await createLivePricedAsset(
+      holdingForm({ priceSymbol: "XAU", quantity: "1", unit: "oz", notes: "Gold" }),
+    );
+    await createLivePricedAsset(
+      holdingForm({ priceSymbol: "XAG", quantity: "10", unit: "oz", notes: "Silver" }),
+    );
+    await createLivePricedAsset(
+      holdingForm({ priceSymbol: "BTC", quantity: "0.5", notes: "Bitcoin" }),
+    );
+    await createLivePricedAsset(
+      holdingForm({ priceSymbol: "ETH", quantity: "2", notes: "Ethereum" }),
+    );
+
+    fetchMock.mockClear();
+    serve({
+      coingecko: {
+        "pax-gold": { usd: 2000 },
+        "kinesis-silver": { usd: 20 },
+        bitcoin: { usd: 100_000 },
+        ethereum: { usd: 3000 },
+      },
+    });
+
+    const result = await recordNetWorthToday();
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        netWorthCents: 5_820_000,
+        prices: { ok: true, refreshed: 4, skipped: 0, failed: [], unpriceable: [] },
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(storedAssets().map((asset) => asset.current_value_cents)).toEqual([
+      200_000,
+      20_000,
+      5_000_000,
+      600_000,
+    ]);
+    expect(
+      temp.query("SELECT asset_id, value_cents FROM asset_history ORDER BY asset_id"),
+    ).toEqual([
+      { asset_id: 1, value_cents: 200_000 },
+      { asset_id: 2, value_cents: 20_000 },
+      { asset_id: 3, value_cents: 5_000_000 },
+      { asset_id: 4, value_cents: 600_000 },
+    ]);
+  });
+
+  it("keeps only the sixth and latest recording when run six times in one day", async () => {
+    await createLivePricedAsset(
+      holdingForm({ priceSymbol: "BTC", quantity: "1", notes: "Bitcoin" }),
+    );
+    fetchMock.mockClear();
+
+    for (let run = 1; run <= 6; run += 1) {
+      serve({ coingecko: { bitcoin: { usd: 100_000 + run } } });
+      expect(await recordNetWorthToday()).toMatchObject({ success: true });
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(temp.query("SELECT COUNT(*) AS count FROM net_worth_snapshots")).toEqual([
+      { count: 1 },
+    ]);
+    expect(temp.query("SELECT net_worth_cents FROM net_worth_snapshots")).toEqual([
+      { net_worth_cents: 10_000_600 },
+    ]);
+    expect(temp.query("SELECT asset_id, value_cents FROM asset_history")).toEqual([
+      { asset_id: 1, value_cents: 10_000_600 },
+    ]);
+  });
+
+  it("records the last stored value when the live quote is unavailable", async () => {
+    await createLivePricedAsset(
+      holdingForm({ priceSymbol: "BTC", quantity: "1", notes: "Bitcoin" }),
+    );
+    fetchMock.mockClear();
+    serve({ status: 503 });
+
+    const result = await recordNetWorthToday();
+
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        netWorthCents: 11_843_200,
+        prices: {
+          ok: true,
+          refreshed: 0,
+          failed: [{ id: 1, label: "Bitcoin", error: expect.any(String) }],
+        },
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(storedAssets()[0]).toMatchObject({ current_value_cents: 11_843_200 });
+    expect(temp.query("SELECT asset_id, value_cents FROM asset_history")).toEqual([
+      { asset_id: 1, value_cents: 11_843_200 },
+    ]);
   });
 });

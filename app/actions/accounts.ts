@@ -35,6 +35,7 @@ import { annotateStandaloneAssets } from "@/lib/assets/standalone";
 import { fromDateKey, isDateKey, toDateKey, todayKey, type DateKey } from "@/lib/dates";
 import { parseAmount, type Cents } from "@/lib/money";
 import type { AcquisitionTransaction } from "@/lib/assets/acquisition";
+import { refreshLivePricedAssets } from "./crypto";
 
 /**
  * Ledger rows reduced to calendar days, for the acquisition rule.
@@ -58,6 +59,12 @@ function toAcquisitionLedger(
 }
 
 export type ActionResult<T> = { success: true; data: T } | { error: string };
+
+type LivePriceRefresh = Awaited<ReturnType<typeof refreshLivePricedAssets>>;
+
+export type NetWorthPriceRefresh =
+  | ({ ok: true } & LivePriceRefresh)
+  | { ok: false; error: string };
 
 /** An account row plus its derived balance — what an accounts page renders. */
 export type AccountWithBalance = Account & {
@@ -483,6 +490,71 @@ export async function snapshotNetWorth(options?: { dateKey?: DateKey }) {
     console.error("Failed to snapshot net worth:", error);
     return { error: (error as Error).message || "Failed to snapshot net worth" };
   }
+}
+
+function describePriceRefresh(prices: NetWorthPriceRefresh): string {
+  if (!prices.ok) {
+    return `Live prices could not be refreshed (${prices.error}); stored values were recorded.`;
+  }
+
+  if (
+    prices.refreshed === 0 &&
+    prices.skipped === 0 &&
+    prices.failed.length === 0 &&
+    prices.unpriceable.length === 0
+  ) {
+    return "No live-priced holdings were configured.";
+  }
+
+  const parts = [
+    `Refreshed ${prices.refreshed} live-priced holding${prices.refreshed === 1 ? "" : "s"}`,
+  ];
+  if (prices.failed.length > 0) {
+    parts.push(
+      `${prices.failed.length} failed (${prices.failed.map((item) => item.label).join(", ")})`,
+    );
+  }
+  if (prices.unpriceable.length > 0) {
+    parts.push(
+      `${prices.unpriceable.length} kept stored values because no live source exists ` +
+        `(${prices.unpriceable.map((item) => item.label).join(", ")})`,
+    );
+  }
+  if (prices.skipped > 0) {
+    parts.push(`${prices.skipped} skipped because their symbol or quantity is missing`);
+  }
+  return `${parts.join("; ")}.`;
+}
+
+/**
+ * Refresh every live-priced holding, then record today's newest values.
+ *
+ * DECISION: DEC-002 — every manual and scheduled current-day recording calls
+ * this orchestrator; `snapshotNetWorth` remains the network-free persistence
+ * primitive for explicit historical dates.
+ */
+export async function recordNetWorthToday() {
+  let prices: NetWorthPriceRefresh;
+  try {
+    prices = { ok: true, ...(await refreshLivePricedAssets()) };
+  } catch (cause) {
+    const error =
+      cause instanceof Error && cause.message ? cause.message : "Live price refresh failed.";
+    prices = { ok: false, error };
+    console.warn("record today: price refresh failed; recording stored values:", error);
+  }
+
+  const result = await snapshotNetWorth();
+  if ("error" in result) return { error: result.error };
+
+  return {
+    success: true as const,
+    data: {
+      ...result.data,
+      prices,
+      priceSummary: describePriceRefresh(prices),
+    },
+  };
 }
 
 /** Delete one day's snapshot. */

@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 
 import {
-  snapshotNetWorth,
+  recordNetWorthToday,
   type AccountWithBalance,
   type NetWorthView,
 } from "@/app/actions/accounts";
@@ -102,7 +102,7 @@ export function NetWorthSection({
     setSnapshotNote(null);
     setSnapshotting(true);
     try {
-      const result = await snapshotNetWorth();
+      const result = await recordNetWorthToday();
       // The action reports failure by RETURNING { error }; ignoring that is how a
       // refused write used to look like a successful one.
       if (result && "error" in result) {
@@ -110,7 +110,8 @@ export function NetWorthSection({
         return;
       }
       setSnapshotNote(
-        `Recorded ${formatMoney(result.data.netWorthCents, currency)} for ${formatDateKey(result.data.date)}.`,
+        `Recorded ${formatMoney(result.data.netWorthCents, currency)} for ` +
+          `${formatDateKey(result.data.date)}. ${result.data.priceSummary}`,
       );
       await onRecorded();
     } catch (error) {

@@ -14,6 +14,8 @@
  * data/budget.db (the user's real financial history) is never opened: the fixture
  * creates its own file under mkdtemp and points BUDGET_DB_PATH at it.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -38,6 +40,7 @@ import {
 } from "../net-worth-series";
 
 let temp: DomainDb;
+const projectRoot = path.resolve(__dirname, "..", "..", "..");
 
 beforeEach(async () => {
   temp = await createDomainDb();
@@ -47,6 +50,21 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await temp.cleanup();
+});
+
+describe("record-today entry points", () => {
+  it("routes both buttons and the scheduled endpoint through one service", () => {
+    const sources = [
+      "components/dashboard/net-worth-section.tsx",
+      "app/(dashboard)/accounts/accounts-client.tsx",
+      "app/api/snapshot/route.ts",
+    ].map((file) => readFileSync(path.join(projectRoot, file), "utf8"));
+
+    for (const source of sources) {
+      expect(source).toMatch(/await recordNetWorthToday\(\)/);
+    }
+    expect(sources[2]).not.toMatch(/refreshLivePricedAssets/);
+  });
 });
 
 /** Last day of the month before `now` — always before the 1st of this month. */

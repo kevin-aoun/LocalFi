@@ -91,8 +91,9 @@ services:
   # cron that opened budget.db directly could clobber the entire ledger.
   #
   # It fires every SNAPSHOT_INTERVAL_HOURS (default 6) rather than once at
-  # midnight, because `snapshotNetWorth()` is idempotent per calendar day — one
-  # row per day no matter how often it runs. A daily-at-00:00 cron would miss any
+  # midnight, because `recordNetWorthToday()` refreshes live holdings and then
+  # replaces the current day's rows — one retained observation per day no matter
+  # how often it runs. A daily-at-00:00 cron would miss any
   # day the machine happened to be asleep; firing four times a day means any
   # waking window records it. It does NOT backfill: a snapshot holds *today's*
   # figures, so writing them under a past date would assert a net worth that was

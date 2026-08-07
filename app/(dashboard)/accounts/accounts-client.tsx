@@ -13,8 +13,8 @@ import {
 
 import {
   deleteAccount,
+  recordNetWorthToday,
   setAccountArchived,
-  snapshotNetWorth,
   type AccountWithBalance,
   type NetWorthView,
 } from "@/app/actions/accounts";
@@ -134,13 +134,14 @@ export default function AccountsClient({
     setSnapshotNote(null);
     setSnapshotting(true);
     try {
-      const result = await snapshotNetWorth();
+      const result = await recordNetWorthToday();
       if (result && "error" in result) {
         setActionError(result.error || "Failed to record net worth.");
         return;
       }
       setSnapshotNote(
-        `Recorded ${formatMoney(result.data.netWorthCents, currency)} for ${formatDateKey(result.data.date)}.`,
+        `Recorded ${formatMoney(result.data.netWorthCents, currency)} for ` +
+          `${formatDateKey(result.data.date)}. ${result.data.priceSummary}`,
       );
       refresh();
     } catch (err) {
