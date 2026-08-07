@@ -338,7 +338,8 @@ export async function getBudgetReallocations(options?: {
 
 /**
  * Move part of one monthly budget to another for exactly one month.
- * Percentage entry is resolved against what remains available to reallocate now.
+ * Percentage entry is resolved against the source category's current allocation
+ * for that month, after any earlier reallocations.
  * The resulting cents are stored, so later budget edits cannot rewrite history.
  */
 export async function createBudgetReallocation(

@@ -883,6 +883,9 @@ describe("the Budgets UI keeps the house conventions", () => {
     expect(source).toMatch(/label:\s*"Max",\s*value:\s*"100"/);
     expect(source).toMatch(/setInputMode\("percentage"\)/);
     expect(source).toMatch(/aria-pressed=\{selected\}/);
+    expect(source).toMatch(/disabled=\{!fromCategoryId \|\| loading\}/);
+    expect(source).toMatch(/Quick percentage of \$\{selectedSource\.name\}/);
+    expect(source).toMatch(/Choose the source category before selecting a percentage/);
   });
 
   it("the reallocation dialog uses the shadcn calendar instead of a native month input", () => {

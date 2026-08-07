@@ -63,6 +63,9 @@ export function BudgetReallocationDialog({
   const [value, setValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const selectedSource = selectable.find(
+    (category) => String(category.id) === fromCategoryId,
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -144,6 +147,7 @@ export function BudgetReallocationDialog({
                   onSelect={(date) => {
                     if (!date) return;
                     setMonth(monthKey(date));
+                    setValue("");
                     setMonthPickerOpen(false);
                   }}
                   initialFocus
@@ -155,7 +159,13 @@ export function BudgetReallocationDialog({
           <div className="grid items-end gap-3 sm:grid-cols-[1fr_auto_1fr]">
             <div className="space-y-2">
               <Label>Take from</Label>
-              <Select value={fromCategoryId} onValueChange={setFromCategoryId}>
+              <Select
+                value={fromCategoryId}
+                onValueChange={(categoryId) => {
+                  setFromCategoryId(categoryId);
+                  setValue("");
+                }}
+              >
                 <SelectTrigger><SelectValue placeholder="Source category" /></SelectTrigger>
                 <SelectContent>
                   {selectable
@@ -191,6 +201,7 @@ export function BudgetReallocationDialog({
               <Label>Move by</Label>
               <Select
                 value={inputMode}
+                disabled={!fromCategoryId}
                 onValueChange={(next) => {
                   setInputMode(next as InputMode);
                   setValue("");
@@ -218,6 +229,7 @@ export function BudgetReallocationDialog({
                   max={inputMode === "percentage" ? "100" : undefined}
                   step="0.01"
                   value={value}
+                  disabled={!fromCategoryId}
                   onChange={(event) => setValue(event.target.value)}
                   className={inputMode === "amount" ? "pl-7" : "pr-7"}
                   placeholder={inputMode === "amount" ? "30.00" : "50"}
@@ -231,7 +243,11 @@ export function BudgetReallocationDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Quick amount</Label>
+            <Label>
+              {selectedSource
+                ? `Quick percentage of ${selectedSource.name}`
+                : "Quick percentage of source"}
+            </Label>
             <div className="grid grid-cols-3 gap-2" role="group" aria-label="Quick reallocation amount">
               {QUICK_PERCENTAGES.map((option) => {
                 const selected = inputMode === "percentage" && value === option.value;
@@ -242,6 +258,7 @@ export function BudgetReallocationDialog({
                     size="sm"
                     variant={selected ? "default" : "outline"}
                     aria-pressed={selected}
+                    disabled={!fromCategoryId || loading}
                     onClick={() => {
                       setInputMode("percentage");
                       setValue(option.value);
@@ -252,19 +269,33 @@ export function BudgetReallocationDialog({
                 );
               })}
             </div>
+            {!selectedSource && (
+              <p className="text-xs text-muted-foreground">
+                Choose the source category before selecting a percentage.
+              </p>
+            )}
           </div>
 
           <p className="text-xs text-muted-foreground">
             Both categories must have a monthly budget in the selected month. Percentages use
-            the source budget still available to reallocate, then save as a fixed amount so later
-            budget edits cannot rewrite history.
+            the source category’s budget currently allocated for that month, then save as a fixed
+            amount so later budget edits cannot rewrite history.
           </p>
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={loading || selectable.length < 2}>
+            <Button
+              type="submit"
+              disabled={
+                loading ||
+                selectable.length < 2 ||
+                !fromCategoryId ||
+                !toCategoryId ||
+                value === ""
+              }
+            >
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Reallocate
             </Button>
