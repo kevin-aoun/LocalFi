@@ -100,6 +100,7 @@ const base: AccountFormState = {
   kind: "asset",
   type: "Checking",
   openingBalance: "",
+  openingBalanceDate: "2026-07-28",
   currency: "USD",
 };
 
@@ -193,8 +194,8 @@ describe("validateAccountForm — opening balance", () => {
     expect(parseAmount(opening({ ...base, openingBalance: "$1,000" }))).toBe(100000);
   });
 
-  it("accepts a negative opening balance on an asset (a genuinely overdrawn account)", () => {
-    expect(parseAmount(opening({ ...base, openingBalance: "-25.50" }))).toBe(-2550);
+  it("rejects a negative opening-balance magnitude", () => {
+    expect(err({ ...base, openingBalance: "-25.50" })).toMatch(/cannot be negative/i);
   });
 
   it("produces an ERROR for garbage rather than a silent 0", () => {
@@ -226,6 +227,15 @@ describe("validateAccountForm — currency", () => {
   });
 });
 
+describe("validateAccountForm — opening date", () => {
+  it("keeps a real calendar day and rejects impossible dates", () => {
+    expect(ok({ ...base, openingBalanceDate: "2024-02-29" }).openingBalanceDate).toBe(
+      "2024-02-29",
+    );
+    expect(err({ ...base, openingBalanceDate: "2024-02-30" })).toMatch(/date/i);
+  });
+});
+
 describe("toAccountFormData", () => {
   it("carries exactly the validated values", () => {
     const formData = toAccountFormData({
@@ -241,6 +251,7 @@ describe("toAccountFormData", () => {
     expect(formData.get("kind")).toBe("liability");
     expect(formData.get("openingBalance")).toBe("600");
     expect(formData.get("currency")).toBe("USD");
+    expect(formData.get("openingBalanceDate")).toBe("2026-07-28");
     // Archiving is a separate action; the dialog must never flip it by omission.
     expect(formData.has("archived")).toBe(false);
   });
@@ -266,6 +277,7 @@ describe("accountFormStateFromAccount", () => {
       kind: "liability",
       type: "Mortgage",
       openingBalanceCents: 25000000,
+      openingBalanceDate: "2020-01-01",
       currency: "USD",
     });
     expect(state.openingBalance).toBe("250000");
@@ -278,6 +290,7 @@ describe("accountFormStateFromAccount", () => {
       kind: "asset",
       type: "Cash",
       openingBalanceCents: 4550,
+      openingBalanceDate: "2020-01-01",
       currency: "USD",
     });
     expect(parseAmount(state.openingBalance)).toBe(4550);
@@ -289,20 +302,23 @@ describe("accountFormStateFromAccount", () => {
       kind: "asset",
       type: "Cash",
       openingBalanceCents: 0,
+      openingBalanceDate: "2020-01-01",
       currency: "USD",
     });
     expect(state.openingBalance).toBe("0");
   });
 
-  it("keeps a negative stored opening balance signed", () => {
+  it("surfaces an impossible legacy negative value so validation rejects it", () => {
     const state = accountFormStateFromAccount({
       name: "a",
       kind: "asset",
       type: "Checking",
       openingBalanceCents: -1234,
+      openingBalanceDate: "2020-01-01",
       currency: "USD",
     });
     expect(parseAmount(state.openingBalance)).toBe(-1234);
+    expect(validateAccountForm(state)).toMatchObject({ ok: false, error: expect.stringMatching(/negative/i) });
   });
 
   it("round-trips through validation unchanged", () => {
@@ -311,6 +327,7 @@ describe("accountFormStateFromAccount", () => {
       kind: "liability",
       type: "CreditCard",
       openingBalanceCents: 123456,
+      openingBalanceDate: "2020-01-01",
       currency: "EUR",
     });
     const values = ok(state);
@@ -331,6 +348,7 @@ const row = (over: Partial<Parameters<typeof groupAccountsByKind>[0][number]>) =
   kind: "asset" as const,
   type: "Checking",
   openingBalanceCents: 0,
+  openingBalanceDate: "2020-01-01" as const,
   currency: "USD",
   archived: false,
   balanceCents: 0,

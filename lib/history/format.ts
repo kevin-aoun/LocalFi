@@ -23,8 +23,8 @@ export type RenderOptions = {
   edge?: number;
 };
 
-function money(cents: Cents): string {
-  return formatMoney(cents);
+function money(cents: Cents, currency = "USD"): string {
+  return formatMoney(cents, currency);
 }
 
 function pad(value: string, width: number): string {
@@ -81,6 +81,7 @@ function selectDays(plan: ReconstructionPlan, options: RenderOptions): Array<{ i
 export function renderPlan(plan: ReconstructionPlan, options: RenderOptions = {}): string {
   const lines: string[] = [];
   const { days } = plan;
+  const currency = days[0]?.currency ?? "USD";
 
   lines.push("HISTORICAL NET-WORTH RECONSTRUCTION");
   lines.push(`  range        ${plan.fromKey} .. ${plan.toKey}  (${days.length} day(s))`);
@@ -122,10 +123,10 @@ export function renderPlan(plan: ReconstructionPlan, options: RenderOptions = {}
       const verdict =
         check.residualCents === 0
           ? "CONTINUOUS (0 cents)"
-          : `STEP of ${money(check.residualCents)}; see the warning below`;
+          : `STEP of ${money(check.residualCents, currency)}; see the warning below`;
       lines.push(
-        `  ${padRight(check.label, 22)} ${check.dateKey}  paid ${money(check.paidCents)} ` +
-          `vs valued ${money(check.valuedCents)}  ->  ${verdict}`,
+        `  ${padRight(check.label, 22)} ${check.dateKey}  paid ${money(check.paidCents, currency)} ` +
+          `vs valued ${money(check.valuedCents, currency)}  ->  ${verdict}`,
       );
     }
   }
@@ -153,9 +154,9 @@ export function renderPlan(plan: ReconstructionPlan, options: RenderOptions = {}
       previous === null ? null : sumCents([day.netWorthCents, negateCents(previous.netWorthCents)]);
     const existing = existingByDate.get(day.dateKey);
     lines.push(
-      `  ${padRight(day.dateKey, 12)}${pad(money(day.accountsCents), 14)}` +
-        `${pad(money(day.holdingsCents), 14)}${pad(money(day.netWorthCents), 14)}` +
-        `${pad(delta === null ? "—" : money(delta), 12)}  ${existing ? existing.source : ""}`,
+      `  ${padRight(day.dateKey, 12)}${pad(money(day.accountsCents, day.currency), 14)}` +
+        `${pad(money(day.holdingsCents, day.currency), 14)}${pad(money(day.netWorthCents, day.currency), 14)}` +
+        `${pad(delta === null ? "—" : money(delta, day.currency), 12)}  ${existing ? existing.source : ""}`,
     );
   }
   lines.push("");
@@ -164,9 +165,9 @@ export function renderPlan(plan: ReconstructionPlan, options: RenderOptions = {}
   const last = days[days.length - 1];
   if (first && last) {
     lines.push(
-      `Net worth ${first.dateKey} ${money(first.netWorthCents)}  ->  ` +
-        `${last.dateKey} ${money(last.netWorthCents)}  ` +
-        `(${money(sumCents([last.netWorthCents, negateCents(first.netWorthCents)]))} over ${days.length} day(s))`,
+      `Net worth ${first.dateKey} ${money(first.netWorthCents, first.currency)}  ->  ` +
+        `${last.dateKey} ${money(last.netWorthCents, last.currency)}  ` +
+        `(${money(sumCents([last.netWorthCents, negateCents(first.netWorthCents)]), last.currency)} over ${days.length} day(s))`,
     );
   }
 

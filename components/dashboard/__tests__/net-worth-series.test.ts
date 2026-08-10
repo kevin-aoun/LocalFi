@@ -15,7 +15,7 @@
  *
  *  3. **Timezone day-shift.** Snapshot dates are 'YYYY-MM-DD' calendar days.
  *     Labelling them via `toISOString()` moves every point a day east of UTC.
- *     These label assertions must hold under `npm run test:tz`.
+ *     These label assertions must hold under `bun run test:tz`.
  *
  *  4. **A fabricated "vs. last month".** When there is no snapshot from before
  *     this month there is no comparison to make, and the answer is `null` — not
@@ -153,6 +153,27 @@ describe("buildNetWorthSeries", () => {
     ]);
     expect(series.points[0].label).toContain("2025");
     expect(series.points[1].label).toContain("2026");
+  });
+
+  it("refuses to put mixed currencies on one numeric axis", () => {
+    const rows = [
+      { ...snap("2026-06-30", 100_00, 0), currency: "EUR" },
+      { ...snap("2026-07-31", 200_00, 0), currency: "USD" },
+    ];
+
+    const mixed = buildNetWorthSeries(rows);
+    expect(mixed).toMatchObject({
+      status: "mixed",
+      points: [],
+      currency: null,
+      currencies: ["EUR", "USD"],
+    });
+
+    const eur = buildNetWorthSeries(rows, "EUR");
+    expect(eur.status).toBe("single");
+    expect(eur.points.map((point) => [point.dateKey, point.currency])).toEqual([
+      ["2026-06-30", "EUR"],
+    ]);
   });
 });
 

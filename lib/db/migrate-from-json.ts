@@ -93,7 +93,7 @@ async function migrateFromJSON() {
           id === null ? null : transactionIdMap.get(id) || id
         );
         linkedIds = JSON.stringify(newIds);
-      } catch (e) {
+      } catch {
         linkedIds = asset.linkedTransactionIds;
       }
     }

@@ -26,6 +26,12 @@ type Transaction = {
   accountId?: number | null;
   /** Set only on a transfer: the destination account. */
   transferAccountId?: number | null;
+  pending?: boolean | null;
+  currentEventId?: string | null;
+  instrumentId?: string | null;
+  quantityDelta?: string | null;
+  transferPrincipalAmountCents?: Cents | null;
+  allocations?: Array<{ categoryId: number; amountCents: Cents }>;
 };
 
 type QuickCommand = {

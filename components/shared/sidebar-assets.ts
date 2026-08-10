@@ -41,7 +41,6 @@ import {
   presentNetWorth,
   type AccountRow,
   type NetWorthDisplay,
-  type NetWorthTotals,
 } from "@/components/accounts/account-form-logic";
 import {
   formatCurrencyTotals,
@@ -49,6 +48,7 @@ import {
   totalsByCurrency,
 } from "@/components/assets/currency-totals";
 import { netWorthCurrencies } from "@/components/dashboard/net-worth-series";
+import type { NetWorth } from "@/lib/cash-balance";
 import { formatMoney, negateCents, sumCents, type Cents } from "@/lib/money";
 import { describePriceSource, pricedHolding } from "@/lib/prices";
 
@@ -72,6 +72,7 @@ export type SidebarAssetRow = {
   /** A weight or a coin count — NOT money, so a real. `0` is a real quantity. */
   quantity?: number | null;
   unit?: string | null;
+  archived?: boolean | null;
 };
 
 export type SidebarTone = "positive" | "negative" | "neutral";
@@ -113,7 +114,7 @@ export type SidebarGroup = {
 
 export type SidebarViewInput = {
   /** Straight from `getNetWorth()`. Echoed, never recomputed. */
-  netWorth: NetWorthTotals;
+  netWorth: NetWorth;
   /** Straight from `getAccountBalances({ includeArchived: true })`. */
   accounts: readonly AccountRow[];
   /** Straight from `getAssets()`. The derived Cash row is filtered out here. */
@@ -122,8 +123,10 @@ export type SidebarViewInput = {
 
 export type SidebarView = {
   groups: SidebarGroup[];
-  /** `presentNetWorth(netWorth, currency)` — formatting only. */
+  /** First denomination, retained as the single-currency compatibility view. */
   summary: NetWorthDisplay;
+  /** Every denomination-scoped summary; the renderer always uses this list. */
+  summaries: Array<NetWorthDisplay & { currency: string }>;
   /** The currency the totals may honestly be labelled with. */
   currency: string;
   /** True when accounts/assets disagree about currency, so the label is a caveat. */
@@ -175,10 +178,12 @@ function formatQuantity(quantity: number): string {
  * user a figure the home page deliberately left out and imply their cash is worth
  * twice what it is.
  */
-export function countedAssets<T extends { category: string }>(
+export function countedAssets<T extends { category: string; archived?: boolean | null }>(
   assets: readonly T[],
 ): T[] {
-  return assets.filter((asset) => asset.category !== DERIVED_CASH_CATEGORY);
+  return assets.filter(
+    (asset) => asset.category !== DERIVED_CASH_CATEGORY && asset.archived !== true,
+  );
 }
 
 /** The derived Cash rows that were excluded, so the UI can explain the absence. */
@@ -419,13 +424,26 @@ export function buildSidebarView(input: SidebarViewInput): SidebarView {
 
   // The same currency check the dashboard performs, over the same two lists, so
   // the two headlines carry the same symbol or the same caveat.
-  const { currency, mixed, currencies } = netWorthCurrencies([...accounts, ...assets]);
+  const currencies = netWorth.currencyTotals.map((total) => total.currency);
+  const mixed = netWorth.aggregateCurrency === null;
+  const currency = netWorth.aggregateCurrency ?? currencies[0] ?? "USD";
   const groups = buildSidebarGroups(input);
   const cashRows = derivedCashAssets(assets);
+  const summaries = netWorth.currencyTotals.map((total) => ({
+    ...presentNetWorth(total, total.currency),
+    currency: total.currency,
+  }));
 
   return {
     groups,
-    summary: presentNetWorth(netWorth, currency),
+    summary: summaries[0] ?? { ...presentNetWorth({
+      totalAssetsCents: 0,
+      totalLiabilitiesCents: 0,
+      netWorthCents: 0,
+      standaloneAssetsCents: 0,
+      unassignedCents: 0,
+    }, "USD"), currency: "USD" },
+    summaries,
     currency,
     mixed,
     currencies,
@@ -458,40 +476,77 @@ export function buildSidebarView(input: SidebarViewInput): SidebarView {
  * account are not among the sidebar's rows. The panel prints that figure
  * separately (`summary.unassignedLabel`) instead of letting it vanish.
  *
- * Currencies are added together here for the same reason `deriveNetWorth` does —
- * there is no FX source. That is why the panel never prints this number: it
- * prints the per-currency subtotals and the action's own totals.
+ * The audit is currency-scoped for the same reason as `deriveNetWorth`: without
+ * FX, even test-only arithmetic must not manufacture a mixed scalar.
  */
 export function auditSidebarTotals(input: SidebarViewInput): {
   totalAssetsCents: Cents;
   totalLiabilitiesCents: Cents;
   netWorthCents: Cents;
   standaloneAssetsCents: Cents;
+  currencyTotals: Array<{
+    currency: string;
+    totalAssetsCents: Cents;
+    totalLiabilitiesCents: Cents;
+    netWorthCents: Cents;
+    standaloneAssetsCents: Cents;
+  }>;
 } {
   const grouped = groupAccountsByKind(input.accounts, { includeArchived: true });
+  type Parts = {
+    assets: Cents[];
+    liabilities: Cents[];
+    standalone: Cents[];
+  };
+  const buckets = new Map<string, Parts>();
+  const bucketFor = (currency: string) => {
+    const code = normalizeCurrency(currency);
+    const existing = buckets.get(code);
+    if (existing) return existing;
+    const created: Parts = { assets: [], liabilities: [], standalone: [] };
+    buckets.set(code, created);
+    return created;
+  };
 
-  const assetParts: Cents[] = [input.netWorth.unassignedCents];
-  const liabilityParts: Cents[] = [];
-
-  for (const row of grouped.assets) assetParts.push(row.balanceCents);
+  for (const total of input.netWorth.currencyTotals) {
+    bucketFor(total.currency).assets.push(total.unassignedCents);
+  }
+  for (const row of grouped.assets) {
+    bucketFor(row.currency).assets.push(row.balanceCents);
+  }
   for (const row of grouped.liabilities) {
+    const bucket = bucketFor(row.currency);
     // Mirrors deriveNetWorth: owed is a liability, overpaid is an asset.
-    if (row.balanceCents < 0) liabilityParts.push(negateCents(row.balanceCents));
-    else assetParts.push(row.balanceCents);
+    if (row.balanceCents < 0) bucket.liabilities.push(negateCents(row.balanceCents));
+    else bucket.assets.push(row.balanceCents);
   }
 
-  const standaloneAssetsCents = sumCents(
-    countedAssets(input.assets).map((asset) => asset.currentValueCents),
-  );
-  assetParts.push(standaloneAssetsCents);
+  for (const asset of countedAssets(input.assets)) {
+    const bucket = bucketFor(asset.currency);
+    bucket.standalone.push(asset.currentValueCents);
+    bucket.assets.push(asset.currentValueCents);
+  }
 
-  const totalAssetsCents = sumCents(assetParts);
-  const totalLiabilitiesCents = sumCents(liabilityParts);
+  const currencyTotals = [...buckets.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([currency, parts]) => {
+      const totalAssetsCents = sumCents(parts.assets);
+      const totalLiabilitiesCents = sumCents(parts.liabilities);
+      return {
+        currency,
+        totalAssetsCents,
+        totalLiabilitiesCents,
+        netWorthCents: sumCents([totalAssetsCents, negateCents(totalLiabilitiesCents)]),
+        standaloneAssetsCents: sumCents(parts.standalone),
+      };
+    });
+  const aggregate = currencyTotals.length === 1 ? currencyTotals[0] : null;
 
   return {
-    totalAssetsCents,
-    totalLiabilitiesCents,
-    netWorthCents: sumCents([totalAssetsCents, negateCents(totalLiabilitiesCents)]),
-    standaloneAssetsCents,
+    totalAssetsCents: aggregate?.totalAssetsCents ?? 0,
+    totalLiabilitiesCents: aggregate?.totalLiabilitiesCents ?? 0,
+    netWorthCents: aggregate?.netWorthCents ?? 0,
+    standaloneAssetsCents: aggregate?.standaloneAssetsCents ?? 0,
+    currencyTotals,
   };
 }

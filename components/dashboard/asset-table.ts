@@ -379,7 +379,7 @@ function listedRows<T extends SidebarAssetRow>(input: AssetTableInput<T>): Liste
 
   for (const account of input.accounts) {
     // A liability is not an asset. See THE CASH RULE in the module docstring.
-    if (account.kind === "liability") continue;
+    if ((account.balanceKind ?? account.kind) === "liability") continue;
     const holding: AssetTableHolding<T> = {
       ...accountHolding(account),
       source: "account",
@@ -627,7 +627,7 @@ export function auditNetWorthFromTable<T extends SidebarAssetRow>(
   const assetParts: Cents[] = [listedCents, extras.unassignedCents];
   const liabilityParts: Cents[] = [];
   for (const account of input.accounts) {
-    if (account.kind !== "liability") continue;
+    if ((account.balanceKind ?? account.kind) !== "liability") continue;
     // Mirrors deriveNetWorth: owed is a liability, overpaid is an asset.
     if (account.balanceCents < 0) liabilityParts.push(negateCents(account.balanceCents));
     else assetParts.push(account.balanceCents);

@@ -1,7 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { maskPrivacyDigits, PRIVACY_STORAGE_KEY } from "@/lib/privacy";
+import {
+  maskPrivacyDigits,
+  maskPrivacyAttribute,
+  PRIVACY_MASKED_ATTRIBUTES,
+  PRIVACY_STORAGE_KEY,
+} from "@/lib/privacy";
 
 type PrivacyContextValue = {
   enabled: boolean;
@@ -11,15 +16,22 @@ type PrivacyContextValue = {
 const PrivacyContext = React.createContext<PrivacyContextValue | null>(null);
 
 const originalText = new Map<Text, string>();
+const originalAttributes = new Map<Element, Map<string, string>>();
 let privacyObserver: MutationObserver | null = null;
+const PRIVACY_EXEMPT_SELECTOR =
+  "script, style, noscript, [data-privacy-exempt], [data-private-chart]";
+
+export function isPrivacyExempt(parent: {
+  closest: (selectors: string) => unknown;
+}): boolean {
+  return Boolean(parent.closest(PRIVACY_EXEMPT_SELECTOR));
+}
 
 function isMaskable(node: Text): boolean {
   const parent = node.parentElement;
   return Boolean(
     parent &&
-      !parent.closest(
-        "script, style, noscript, [data-privacy-exempt], [data-private-chart]",
-      ),
+      !isPrivacyExempt(parent),
   );
 }
 
@@ -39,16 +51,47 @@ function maskTextNode(node: Text) {
   }
 }
 
+function maskAccessibleAttributes(element: Element) {
+  if (isPrivacyExempt(element)) return;
+
+  for (const attribute of PRIVACY_MASKED_ATTRIBUTES) {
+    const current = element.getAttribute(attribute);
+    if (current === null) continue;
+
+    const originals = originalAttributes.get(element);
+    const original = originals?.get(attribute);
+    // Ignore the provider's own masked write. React updates that replace the
+    // label still arrive as a different value and are captured below.
+    if (original !== undefined && current === maskPrivacyAttribute(original)) continue;
+
+    if (/\d/.test(current)) {
+      const saved = originals ?? new Map<string, string>();
+      saved.set(attribute, current);
+      originalAttributes.set(element, saved);
+      element.setAttribute(attribute, maskPrivacyAttribute(current));
+    } else if (originals?.delete(attribute) && originals.size === 0) {
+      originalAttributes.delete(element);
+    }
+  }
+}
+
 function maskTree(root: Node) {
   if (root.nodeType === Node.TEXT_NODE) {
     maskTextNode(root as Text);
     return;
   }
   if (!(root instanceof Element) || root.matches("script, style, noscript")) return;
+  const elements = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+  let element: Node | null = root;
+  while (element) {
+    maskAccessibleAttributes(element as Element);
+    element = elements.nextNode();
+  }
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let node = walker.nextNode();
   while (node) {
     maskTextNode(node as Text);
+    maskAccessibleAttributes((node as Text).parentElement as Element);
     node = walker.nextNode();
   }
 }
@@ -60,6 +103,7 @@ function startPrivacyMask() {
   privacyObserver = new MutationObserver((records) => {
     for (const record of records) {
       if (record.type === "characterData") maskTextNode(record.target as Text);
+      if (record.type === "attributes") maskAccessibleAttributes(record.target as Element);
       for (const added of record.addedNodes) maskTree(added);
     }
   });
@@ -67,6 +111,8 @@ function startPrivacyMask() {
     subtree: true,
     childList: true,
     characterData: true,
+    attributes: true,
+    attributeFilter: [...PRIVACY_MASKED_ATTRIBUTES],
   });
   document.documentElement.dataset.privacyReady = "true";
 }
@@ -78,6 +124,15 @@ function stopPrivacyMask() {
     if (node.isConnected && node.data === maskPrivacyDigits(original)) node.data = original;
   }
   originalText.clear();
+  for (const [element, attributes] of originalAttributes) {
+    if (!element.isConnected) continue;
+    for (const [attribute, original] of attributes) {
+      if (element.getAttribute(attribute) === maskPrivacyAttribute(original)) {
+        element.setAttribute(attribute, original);
+      }
+    }
+  }
+  originalAttributes.clear();
   delete document.documentElement.dataset.privacyReady;
 }
 

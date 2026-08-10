@@ -43,6 +43,11 @@ describe("isTransfer", () => {
     expect(isTransfer({ amountCents: 100, accountId: 10, transferAccountId: null })).toBe(false);
     expect(isTransfer({ amountCents: 100, categoryId: 2 })).toBe(false);
   });
+
+  it("uses stored direction instead of a later transfer-link interpretation", () => {
+    expect(isTransfer({ amountCents: 100, direction: "transfer", transferAccountId: 11 })).toBe(true);
+    expect(isTransfer({ amountCents: 100, direction: "outflow", transferAccountId: 11 })).toBe(false);
+  });
 });
 
 describe("deriveAccountBalances — opening balance", () => {
@@ -66,6 +71,26 @@ describe("deriveAccountBalances — opening balance", () => {
     const balances = deriveAccountBalances([card], [], CATEGORIES);
     expect(balanceOf(balances, 20).balanceCents).toBe(-50_000);
     expect(balanceOf(balances, 20).owedCents).toBe(50_000);
+  });
+
+  it("excludes an opening balance before its effective day", () => {
+    const account = {
+      ...checking,
+      openingBalanceCents: 250_000,
+      openingBalanceDate: "2026-03-10" as const,
+    };
+    expect(
+      balanceOf(
+        deriveAccountBalances([account], [], CATEGORIES, { asOfKey: "2026-03-09" }),
+        10,
+      ).balanceCents,
+    ).toBe(0);
+    expect(
+      balanceOf(
+        deriveAccountBalances([account], [], CATEGORIES, { asOfKey: "2026-03-10" }),
+        10,
+      ).balanceCents,
+    ).toBe(250_000);
   });
 });
 
@@ -158,6 +183,23 @@ describe("deriveAccountBalances — ledger activity", () => {
       deriveAccountBalances([{ ...checking, openingBalanceCents: 12.34 }], [], CATEGORIES),
     ).toThrow(/integer number of cents/);
   });
+
+  it("rejects negative transaction and opening magnitudes", () => {
+    expect(() =>
+      deriveAccountBalances([checking], [{ direction: "outflow", amountCents: -1 }], CATEGORIES),
+    ).toThrow(/non-negative magnitude/i);
+    expect(() =>
+      deriveAccountBalances([{ ...checking, openingBalanceCents: -1 }], [], CATEGORIES),
+    ).toThrow(/non-negative magnitude/i);
+  });
+
+  it("keeps stored direction after category metadata changes", () => {
+    const transaction = { categoryId: 1, amountCents: 10_000, accountId: 10, direction: "inflow" as const };
+    const changedCategories = [{ id: 1, type: "Expense" }];
+    expect(balanceOf(deriveAccountBalances([checking], [transaction], changedCategories), 10).balanceCents)
+      .toBe(10_000);
+    expect(deriveCashBalanceCents([transaction], changedCategories)).toBe(10_000);
+  });
 });
 
 describe("deriveAccountBalances — transfers", () => {
@@ -219,6 +261,59 @@ describe("deriveAccountBalances — transfers", () => {
 });
 
 describe("deriveNetWorth", () => {
+  it("returns exact currency buckets and no mixed aggregate", () => {
+    const result = deriveNetWorth({
+      accounts: [
+        { ...checking, openingBalanceCents: 500_000, currency: "USD" },
+        { ...savings, openingBalanceCents: 200_000, currency: "EUR" },
+      ],
+      transactions: [],
+      categories: CATEGORIES,
+      standaloneAssets: [
+        { category: "Crypto", currentValueCents: 50_000, currency: "USD" },
+        { category: "Properties", currentValueCents: 25_000, currency: "EUR" },
+      ],
+    });
+
+    expect(result.currencyTotals).toEqual([
+      {
+        currency: "EUR",
+        totalAssetsCents: 225_000,
+        totalLiabilitiesCents: 0,
+        netWorthCents: 225_000,
+        standaloneAssetsCents: 25_000,
+        unbackedAssetsCents: 0,
+        unassignedCents: 0,
+      },
+      {
+        currency: "USD",
+        totalAssetsCents: 550_000,
+        totalLiabilitiesCents: 0,
+        netWorthCents: 550_000,
+        standaloneAssetsCents: 50_000,
+        unbackedAssetsCents: 0,
+        unassignedCents: 0,
+      },
+    ]);
+    expect(result.aggregate).toBeNull();
+    expect(result.aggregateCurrency).toBeNull();
+    // Compatibility fields are a refusal sentinel, never 775_000.
+    expect(result.netWorthCents).toBe(0);
+  });
+
+  it("omits archived holdings from current buckets without deleting the row", () => {
+    const result = deriveNetWorth({
+      accounts: [],
+      transactions: [],
+      categories: CATEGORIES,
+      standaloneAssets: [
+        { category: "Crypto", currentValueCents: 10_000, currency: "USD", archived: true },
+        { category: "Crypto", currentValueCents: 20_000, currency: "USD", archived: false },
+      ],
+    });
+    expect(result.aggregate?.netWorthCents).toBe(20_000);
+  });
+
   it("subtracts liability accounts from asset accounts", () => {
     const result = deriveNetWorth({
       accounts: [{ ...checking, openingBalanceCents: 500_000 }, card],
@@ -274,14 +369,14 @@ describe("deriveNetWorth", () => {
     expect(after.totalAssetsCents - after.totalLiabilitiesCents).toBe(before.netWorthCents);
   });
 
-  it("counts an overdrawn asset account as a negative asset, not as a liability", () => {
+  it("classifies an overdrawn asset account as a liability by current sign", () => {
     const result = deriveNetWorth({
       accounts: [checking],
       transactions: [{ categoryId: 2, amountCents: 5_000, accountId: 10 }],
       categories: CATEGORIES,
     });
-    expect(result.totalAssetsCents).toBe(-5_000);
-    expect(result.totalLiabilitiesCents).toBe(0);
+    expect(result.totalAssetsCents).toBe(0);
+    expect(result.totalLiabilitiesCents).toBe(5_000);
     expect(result.netWorthCents).toBe(-5_000);
   });
 

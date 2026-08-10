@@ -17,25 +17,37 @@ import {
   accountTypes,
   accounts,
   assetHistory,
-  assets,
-  categories,
   netWorthSnapshots,
+  transactionAllocations,
   transactions,
   type Account,
   type AccountKind,
   type AccountType,
+  type Transaction,
 } from "@/lib/db/schema";
 import {
-  deriveAccountBalances,
   deriveNetWorth,
+  normalizeLedgerCurrency,
   type AccountBalance,
   type NetWorth,
 } from "@/lib/cash-balance";
-import { annotateStandaloneAssets } from "@/lib/assets/standalone";
 import { fromDateKey, isDateKey, toDateKey, todayKey, type DateKey } from "@/lib/dates";
 import { parseAmount, type Cents } from "@/lib/money";
-import type { AcquisitionTransaction } from "@/lib/assets/acquisition";
 import { refreshLivePricedAssets } from "./crypto";
+import {
+  buildTransactionMovements,
+  correctLedgerEventInput,
+  deleteLedgerEventInput,
+  postLedgerEventRaw,
+  readAccountMovements,
+  readAccountBalances,
+  readPositionValuations,
+  readUnassignedAccountMovements,
+  registerLedgerAccount,
+  type CanonicalMetadata,
+  type LedgerMovementInput,
+} from "@/lib/ledger";
+import type { Database } from "sql.js";
 
 /**
  * Ledger rows reduced to calendar days, for the acquisition rule.
@@ -44,20 +56,6 @@ import { refreshLivePricedAssets } from "./crypto";
  * first and shifts the day for anyone not on UTC. A purchase dated the 30th must
  * stay the 30th in Beirut and in Honolulu.
  */
-function toAcquisitionLedger(
-  rows: readonly (typeof transactions.$inferSelect)[],
-): AcquisitionTransaction[] {
-  return rows.map((tx) => ({
-    id: tx.id,
-    dateKey: toDateKey(tx.date instanceof Date ? tx.date : new Date(Number(tx.date) * 1000)),
-    amountCents: tx.amountCents,
-    categoryId: tx.categoryId,
-    transferAccountId: tx.transferAccountId,
-    pending: tx.pending,
-    comment: tx.comment,
-  }));
-}
-
 export type ActionResult<T> = { success: true; data: T } | { error: string };
 
 type LivePriceRefresh = Awaited<ReturnType<typeof refreshLivePricedAssets>>;
@@ -74,6 +72,8 @@ export type AccountWithBalance = Account & {
   activityCents: Cents;
   /** For a liability, how much is still owed. 0 for assets and paid-off debts. */
   owedCents: Cents;
+  /** Current balance-sheet side; stored `kind` remains only the UI expectation. */
+  balanceKind: "asset" | "liability";
 };
 
 export type NetWorthView = NetWorth & {
@@ -117,9 +117,193 @@ function resolveKind(type: AccountType, requested: string | null): AccountKind {
   return kind;
 }
 
+function requireMagnitude(cents: Cents, label: string): Cents {
+  if (cents < 0) throw new Error(`${label} cannot be negative`);
+  return cents;
+}
+
+function requireOpeningBalanceDate(value: string | null): DateKey {
+  const dateKey = value ?? todayKey();
+  if (!isDateKey(dateKey)) {
+    throw new Error(`Invalid opening balance date: expected YYYY-MM-DD, received ${JSON.stringify(value)}`);
+  }
+  return dateKey;
+}
+
 // ---------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------
+
+function openingMovements(
+  raw: Database,
+  accountId: number,
+  kind: AccountKind,
+  amount: Cents,
+  currency: string,
+): LedgerMovementInput[] {
+  const accountTarget = registerLedgerAccount(raw, {
+    targetType: "real_account",
+    targetRef: accountId,
+    currency,
+  });
+  const counterTarget = registerLedgerAccount(raw, {
+    targetType: "system",
+    targetRef: "opening-balance",
+    currency,
+  });
+  const signed = kind === "liability" ? -amount : amount;
+  return [
+    { ledgerAccountId: accountTarget, amountMinor: signed, currency },
+    { ledgerAccountId: counterTarget, amountMinor: -signed, currency },
+  ];
+}
+
+function latestOpeningEventId(raw: Database, accountId: number): string | null {
+  const statement = raw.prepare(
+    `SELECT e.event_id
+       FROM ledger_events e
+      WHERE EXISTS (
+        SELECT 1 FROM ledger_movements m JOIN ledger_accounts a ON a.id = m.ledger_account_id
+         WHERE m.event_id = e.event_id AND a.target_type = 'real_account' AND a.target_ref = ?
+      ) AND EXISTS (
+        SELECT 1 FROM ledger_movements m JOIN ledger_accounts a ON a.id = m.ledger_account_id
+         WHERE m.event_id = e.event_id AND a.target_type = 'system' AND a.target_ref = 'opening-balance'
+      )
+      ORDER BY e.sequence DESC LIMIT 1`,
+  );
+  try {
+    statement.bind([String(accountId)]);
+    return statement.step() ? String(statement.get()[0]) : null;
+  } finally {
+    statement.free();
+  }
+}
+
+function postAccountOpening(
+  raw: Database,
+  account: Pick<Account, "id" | "name" | "kind" | "openingBalanceCents" | "openingBalanceDate" | "currency">,
+  prior?: Pick<Account, "kind" | "openingBalanceCents" | "currency">,
+): void {
+  if (account.openingBalanceCents === 0 && (prior?.openingBalanceCents ?? 0) === 0) return;
+  const priorEventId = prior ? latestOpeningEventId(raw, account.id) : null;
+  const common = {
+    effectiveDate: account.openingBalanceDate,
+    description: `Opening balance for ${account.name}`,
+    metadata: {
+      fact: "account-opening",
+      accountId: account.id,
+      openingBalanceCents: account.openingBalanceCents,
+      expectedKind: account.kind,
+      currency: account.currency,
+    },
+  };
+  if (account.openingBalanceCents === 0) {
+    if (!prior || prior.openingBalanceCents === 0 || priorEventId === null) return;
+    const before = openingMovements(
+      raw,
+      account.id,
+      prior.kind,
+      prior.openingBalanceCents,
+      prior.currency,
+    );
+    postLedgerEventRaw(raw, deleteLedgerEventInput(priorEventId, before, common));
+    return;
+  }
+  const next = openingMovements(
+    raw,
+    account.id,
+    account.kind,
+    account.openingBalanceCents,
+    account.currency,
+  );
+  if (!prior || prior.openingBalanceCents === 0 || priorEventId === null) {
+    postLedgerEventRaw(raw, { ...common, movements: next });
+    return;
+  }
+  const before = openingMovements(
+    raw,
+    account.id,
+    prior.kind,
+    prior.openingBalanceCents,
+    prior.currency,
+  );
+  postLedgerEventRaw(raw, correctLedgerEventInput(priorEventId, before, next, common));
+}
+
+function journalBalances(
+  accountRows: readonly Account[],
+  raw: Database,
+  asOfKey: DateKey,
+): AccountBalance[] {
+  const posted = readAccountBalances(raw, { asOfKey });
+  const byId = new Map(posted.map((row) => [row.accountId, { ...row }]));
+  const unassigned = new Map<string, Cents[]>();
+  for (const movement of readUnassignedAccountMovements(raw, { toKey: asOfKey })) {
+    const bucket = unassigned.get(movement.currency) ?? [];
+    bucket.push(movement.amountCents as Cents);
+    unassigned.set(movement.currency, bucket);
+  }
+  const balances: AccountBalance[] = accountRows.map((account) => {
+    const balance = byId.get(account.id);
+    if (balance && balance.currency !== account.currency) {
+      throw new Error(`Account ${account.id} has ${balance.currency} movements but is ${account.currency}`);
+    }
+    const balanceCents = (balance?.balanceCents ?? 0) as Cents;
+    return {
+      accountId: account.id,
+      currency: account.currency,
+      kind: account.kind,
+      openingBalanceCents: Math.abs(balance?.openingCents ?? 0) as Cents,
+      activityCents: (balance?.activityCents ?? 0) as Cents,
+      balanceCents,
+      owedCents: (balanceCents < 0 ? -balanceCents : 0) as Cents,
+      archived: account.archived,
+    };
+  });
+  for (const [currency, effects] of unassigned) {
+    const balanceCents = effects.reduce((sum, amount) => sum + amount, 0) as Cents;
+    balances.push({
+      accountId: null,
+      currency,
+      kind: "asset",
+      openingBalanceCents: 0,
+      activityCents: balanceCents,
+      balanceCents,
+      owedCents: balanceCents < 0 ? -balanceCents as Cents : 0,
+      archived: false,
+    });
+  }
+  return balances;
+}
+
+function worthFromJournal(
+  accountRows: readonly Account[],
+  raw: Database,
+  asOfKey: DateKey,
+): NetWorth {
+  const balances = journalBalances(accountRows, raw, asOfKey);
+  const valuations = readPositionValuations(raw, asOfKey);
+  return deriveNetWorth({
+    accounts: balances.map((balance) => ({
+      id: balance.accountId!,
+      kind: balance.balanceCents < 0 ? "liability" : "asset",
+      openingBalanceCents: Math.abs(balance.balanceCents) as Cents,
+      currency: balance.currency,
+      archived: balance.archived,
+    })),
+    transactions: [],
+    categories: [],
+    standaloneAssets: [
+      ...valuations.map((position) => ({
+        id: position.assetId ?? undefined,
+        category: position.category,
+        currentValueCents: position.valueMinor as Cents,
+        currency: position.currency,
+        archived: position.archived,
+      })),
+    ],
+  });
+}
 
 /** Every account, oldest first. Archived accounts are excluded by default. */
 export async function getAccounts(options?: { includeArchived?: boolean }): Promise<Account[]> {
@@ -148,17 +332,35 @@ export async function getDefaultAccountId(): Promise<number | null> {
   return rows[0]?.id ?? null;
 }
 
+/** Signed real-account legs shaped for the existing dashboard cash chart. */
+export async function getLedgerCashMovements() {
+  return readDb((_db, raw) => {
+    const movements = [
+      ...readAccountMovements(raw),
+      ...readUnassignedAccountMovements(raw).map((movement) => ({ ...movement, accountId: null })),
+    ];
+    return movements.map((movement) => ({
+      date: fromDateKey(movement.dateKey),
+      categoryId: null,
+      amountCents: Math.abs(movement.amountCents) as Cents,
+      direction: movement.amountCents < 0 ? "outflow" as const : "inflow" as const,
+      currency: movement.currency,
+      pending: false,
+      accountId: movement.accountId,
+      transferAccountId: null,
+    }));
+  });
+}
+
 /** Every account with its derived balance. Includes archived accounts by default
  * because hiding an account that still holds money would change net worth. */
 export async function getAccountBalances(options?: {
   includeArchived?: boolean;
 }): Promise<AccountWithBalance[]> {
   const includeArchived = options?.includeArchived !== false;
-  const { rows, balances } = await readDb(async (db) => {
+  const { rows, balances } = await readDb(async (db, raw) => {
     const rows = await db.select().from(accounts).orderBy(asc(accounts.id));
-    const txs = await db.select().from(transactions);
-    const cats = await db.select().from(categories);
-    return { rows, balances: deriveAccountBalances(rows, txs, cats) };
+    return { rows, balances: journalBalances(rows, raw, todayKey()) };
   });
 
   const byId = new Map<number, AccountBalance>();
@@ -175,45 +377,22 @@ export async function getAccountBalances(options?: {
         balanceCents: balance?.balanceCents ?? 0,
         activityCents: balance?.activityCents ?? 0,
         owedCents: balance?.owedCents ?? 0,
+        balanceKind: (balance?.balanceCents ?? 0) < 0 ? "liability" : "asset",
       };
     });
 }
 
 /**
- * Net worth right now: asset accounts + unassigned ledger + standalone assets,
- * minus liability accounts.
- *
- * The derived "Cash" asset row is excluded from the standalone side, because it
- * is computed from the same ledger the accounts are computed from — counting both
- * would double the user's cash.
+ * Net worth right now from current account and instrument movements.
  */
 export async function getNetWorth(): Promise<NetWorthView> {
   // Read the day ONCE, here, and pass it down. Nothing deeper reads the clock,
   // so the whole computation is one consistent calendar day even if it straddles
-  // local midnight — and `npm run test:tz` can pin the behaviour.
+  // local midnight — and `bun run test:tz` can pin the behaviour.
   const dateKey = todayKey();
-  const result = await readDb(async (db) => {
+  const result = await readDb(async (db, raw) => {
     const accountRows = await db.select().from(accounts);
-    const txs = await db.select().from(transactions);
-    const cats = await db.select().from(categories);
-    const assetRows = await db.select().from(assets);
-    // Acquisition-aware: an asset bought AFTER today contributes 0 and is
-    // reported in `notYetAcquired`, and an asset no transaction backs is counted
-    // but named in `unbackedAssetsCents`. For today's figure this is identical
-    // to the cent — everything owned was bought in the past — which is precisely
-    // why it is asserted in the tests rather than assumed.
-    const { standaloneAssets } = annotateStandaloneAssets(
-      assetRows,
-      toAcquisitionLedger(txs),
-      cats,
-    );
-    return deriveNetWorth({
-      accounts: accountRows,
-      transactions: txs,
-      categories: cats,
-      standaloneAssets,
-      asOfKey: dateKey,
-    });
+    return worthFromJournal(accountRows, raw, dateKey);
   });
   return { ...result, dateKey };
 }
@@ -269,9 +448,14 @@ export async function createAccount(formData: FormData): Promise<ActionResult<Ac
     const type = parseType(str(formData, "type"));
     const kind = resolveKind(type, str(formData, "kind"));
     const openingRaw = str(formData, "openingBalance");
-    const openingBalanceCents = openingRaw === null ? 0 : parseAmount(openingRaw);
+    const openingBalanceCents = requireMagnitude(
+      openingRaw === null ? 0 : parseAmount(openingRaw),
+      "Opening balance",
+    );
+    const openingBalanceDate = requireOpeningBalanceDate(str(formData, "openingBalanceDate"));
+    const currency = normalizeLedgerCurrency(str(formData, "currency") ?? "USD");
 
-    const account = await withDb(async (db) => {
+    const account = await withDb(async (db, raw) => {
       const [row] = await db
         .insert(accounts)
         .values({
@@ -279,10 +463,12 @@ export async function createAccount(formData: FormData): Promise<ActionResult<Ac
           kind,
           type,
           openingBalanceCents,
-          currency: str(formData, "currency") ?? "USD",
+          openingBalanceDate,
+          currency,
           archived: formData.get("archived") === "true",
         })
         .returning();
+      postAccountOpening(raw, row);
       return row;
     });
 
@@ -299,7 +485,7 @@ export async function createAccount(formData: FormData): Promise<ActionResult<Ac
 /** Update an account. Only the fields present in `formData` are changed. */
 export async function updateAccount(id: number, formData: FormData): Promise<ActionResult<Account>> {
   try {
-    const account = await withDb(async (db) => {
+    const account = await withDb(async (db, raw) => {
       const [existing] = await db.select().from(accounts).where(eq(accounts.id, id));
       if (!existing) throw new Error(`No account with id ${id}`);
 
@@ -308,6 +494,25 @@ export async function updateAccount(id: number, formData: FormData): Promise<Act
         ? resolveKind(type, formData.has("kind") ? str(formData, "kind") : null)
         : existing.kind;
       const openingRaw = str(formData, "openingBalance");
+      const openingBalanceCents =
+        openingRaw === null
+          ? existing.openingBalanceCents
+          : requireMagnitude(parseAmount(openingRaw), "Opening balance");
+      const openingBalanceDate = formData.has("openingBalanceDate")
+        ? requireOpeningBalanceDate(str(formData, "openingBalanceDate"))
+        : existing.openingBalanceDate;
+      const currency = formData.has("currency")
+        ? normalizeLedgerCurrency(str(formData, "currency"), existing.currency)
+        : existing.currency;
+
+      if (currency !== existing.currency) {
+        const hasPostedActivity = readAccountMovements(raw).some((movement) => movement.accountId === id);
+        if (hasPostedActivity) {
+          throw new Error(
+            `Cannot change ${existing.name} from ${existing.currency} to ${currency} because the account has transaction history.`,
+          );
+        }
+      }
 
       const [row] = await db
         .update(accounts)
@@ -315,9 +520,9 @@ export async function updateAccount(id: number, formData: FormData): Promise<Act
           name: str(formData, "name") ?? existing.name,
           type,
           kind,
-          openingBalanceCents:
-            openingRaw === null ? existing.openingBalanceCents : parseAmount(openingRaw),
-          currency: str(formData, "currency") ?? existing.currency,
+          openingBalanceCents,
+          openingBalanceDate,
+          currency,
           archived: formData.has("archived")
             ? formData.get("archived") === "true"
             : existing.archived,
@@ -325,6 +530,12 @@ export async function updateAccount(id: number, formData: FormData): Promise<Act
         })
         .where(eq(accounts.id, id))
         .returning();
+      const openingChanged =
+        row.openingBalanceCents !== existing.openingBalanceCents ||
+        row.openingBalanceDate !== existing.openingBalanceDate ||
+        row.kind !== existing.kind ||
+        row.currency !== existing.currency;
+      if (openingChanged) postAccountOpening(raw, row, existing);
       return row;
     });
 
@@ -367,7 +578,7 @@ export async function setAccountArchived(id: number, archived: boolean): Promise
  */
 export async function deleteAccount(id: number): Promise<ActionResult<{ id: number }>> {
   try {
-    await withDb(async (db) => {
+    await withDb(async (db, raw) => {
       const referencing = await db
         .select({ id: transactions.id })
         .from(transactions)
@@ -377,6 +588,9 @@ export async function deleteAccount(id: number): Promise<ActionResult<{ id: numb
           `This account has ${referencing.length} transaction(s). Archive it instead of deleting it, ` +
             `so the history is kept.`,
         );
+      }
+      if (readAccountBalances(raw).some((balance) => balance.accountId === id)) {
+        throw new Error("This account has posted ledger history. Archive it instead of deleting it.");
       }
       await db.delete(accounts).where(eq(accounts.id, id));
     });
@@ -410,32 +624,24 @@ export async function snapshotNetWorth(options?: { dateKey?: DateKey }) {
       return { error: `Cannot snapshot a future date (${dateKey}); today is ${todayKey()}.` };
     }
 
-    const snapshot = await withDb(async (db) => {
+    const snapshot = await withDb(async (db, raw) => {
       const accountRows = await db.select().from(accounts);
-      const txs = await db.select().from(transactions);
-      const cats = await db.select().from(categories);
-      const assetRows = await db.select().from(assets);
+      const worth = worthFromJournal(accountRows, raw, dateKey);
 
-      // Same acquisition gate as getNetWorth, so a snapshot and the headline
-      // figure it snapshots cannot be computed by two different rules.
-      const { standaloneAssets, acquisitions } = annotateStandaloneAssets(
-        assetRows,
-        toAcquisitionLedger(txs),
-        cats,
-      );
-      const worth = deriveNetWorth({
-        accounts: accountRows,
-        transactions: txs,
-        categories: cats,
-        standaloneAssets,
-        asOfKey: dateKey,
-      });
+      if (worth.aggregate === null) {
+        const currencies = worth.currencyTotals.map((total) => total.currency);
+        throw new Error(
+          `Cannot record one net-worth snapshot for mixed currencies (${currencies.join(", ")}). ` +
+            "LocalFi has no FX model; keep the per-currency totals separate.",
+        );
+      }
 
       const values = {
         date: dateKey,
-        totalAssetsCents: worth.totalAssetsCents,
-        totalLiabilitiesCents: worth.totalLiabilitiesCents,
-        netWorthCents: worth.netWorthCents,
+        currency: worth.aggregate.currency,
+        totalAssetsCents: worth.aggregate.totalAssetsCents,
+        totalLiabilitiesCents: worth.aggregate.totalLiabilitiesCents,
+        netWorthCents: worth.aggregate.netWorthCents,
         // These figures are MEASURED from the live ledger, so the row is
         // 'recorded' even when it overwrites a reconstruction. Without this,
         // a day that lib/history estimated first and this function measured
@@ -447,24 +653,32 @@ export async function snapshotNetWorth(options?: { dateKey?: DateKey }) {
         updatedAt: new Date(),
       };
 
-      // `asset_history` is the holding-level child ledger of this daily net-worth
-      // row. Replace this day's values inside the SAME transaction so repeated
-      // snapshots are idempotent and the aggregate can never land without its
-      // breakdown. Cash is excluded for the same double-counting reason as above.
+      // `asset_history` is denomination-labelled and unique per holding/day.
+      // Upsert active holdings without deleting archived rows: archive is a
+      // retention operation (DECISION: DEC-006), not erasure.
       const recordedAt = fromDateKey(dateKey);
-      await db.delete(assetHistory).where(eq(assetHistory.recordedAt, recordedAt));
-      const holdingRows = assetRows
-        .filter((asset) => asset.category !== "Cash")
-        .filter((asset) => {
-          const acquiredOn = acquisitions.get(asset.id)?.acquiredOn;
-          return acquiredOn === undefined || acquiredOn <= dateKey;
-        })
-        .map((asset) => ({
-          assetId: asset.id,
-          valueCents: asset.currentValueCents,
+      const holdingRows = readPositionValuations(raw, dateKey)
+        .filter((position) => position.assetId !== null && !position.archived)
+        .map((position) => ({
+          assetId: position.assetId!,
+          valueCents: position.valueMinor as Cents,
+          currency: position.currency,
+          recordedDay: dateKey,
           recordedAt,
         }));
-      if (holdingRows.length > 0) await db.insert(assetHistory).values(holdingRows);
+      for (const holding of holdingRows) {
+        await db
+          .insert(assetHistory)
+          .values(holding)
+          .onConflictDoUpdate({
+            target: [assetHistory.assetId, assetHistory.recordedDay],
+            set: {
+              valueCents: holding.valueCents,
+              currency: holding.currency,
+              recordedAt: holding.recordedAt,
+            },
+          });
+      }
 
       const [existing] = await db
         .select()
@@ -563,7 +777,7 @@ export async function deleteNetWorthSnapshot(dateKey: DateKey) {
     if (!isDateKey(dateKey)) throw new Error(`Invalid dateKey: ${String(dateKey)}`);
     await withDb(async (db) => {
       await db.delete(netWorthSnapshots).where(eq(netWorthSnapshots.date, dateKey));
-      await db.delete(assetHistory).where(eq(assetHistory.recordedAt, fromDateKey(dateKey)));
+      await db.delete(assetHistory).where(eq(assetHistory.recordedDay, dateKey));
     });
     revalidate("/", "/accounts");
     return { success: true as const, data: { dateKey } };
@@ -573,24 +787,203 @@ export async function deleteNetWorthSnapshot(dateKey: DateKey) {
   }
 }
 
+type OrphanAllocation = { categoryId: number; amountCents: Cents };
+
+function transactionEpoch(value: Date): number {
+  const seconds = Math.floor(value.getTime() / 1000);
+  if (!Number.isSafeInteger(seconds)) throw new Error("Transaction timestamp is invalid");
+  return seconds;
+}
+
+function orphanSnapshot(
+  row: Transaction,
+  allocations: readonly OrphanAllocation[],
+  accountId: number,
+  updatedAt: Date,
+) {
+  return {
+    id: row.id,
+    date: transactionEpoch(row.date),
+    categoryId: row.categoryId,
+    accountId,
+    transferAccountId: row.transferAccountId,
+    amountCents: row.amountCents,
+    direction: row.direction,
+    currency: row.currency,
+    comment: row.comment,
+    pending: false,
+    recurringId: row.recurringId,
+    recurringOccurrence: row.recurringOccurrence,
+    instrumentId: row.instrumentId,
+    quantityDelta: row.quantityDelta,
+    transferPrincipalAmountCents: row.transferPrincipalAmountCents,
+    allocations: allocations.map((allocation) => ({ ...allocation })),
+    createdAt: transactionEpoch(row.createdAt),
+    updatedAt: transactionEpoch(updatedAt),
+  };
+}
+
+function targetForCategory(raw: Database, categoryId: number | null, currency: string): string {
+  if (categoryId === null) throw new Error("A posted orphan transaction requires a category");
+  return registerLedgerAccount(raw, {
+    targetType: "category",
+    targetRef: categoryId,
+    currency,
+  });
+}
+
+function orphanCurrentMovements(
+  raw: Database,
+  row: Transaction,
+  allocations: readonly OrphanAllocation[],
+  sourceTargetId: string,
+): LedgerMovementInput[] {
+  const currency = normalizeLedgerCurrency(row.currency);
+  if (row.direction === "transfer") {
+    if (row.transferAccountId === null) throw new Error("A posted orphan transfer requires a destination account");
+    const destinationTargetId = registerLedgerAccount(raw, {
+      targetType: "real_account",
+      targetRef: row.transferAccountId,
+      currency,
+    });
+    const principal = row.transferPrincipalAmountCents ?? row.amountCents;
+    const allocationTotal = allocations.reduce((sum, allocation) => sum + allocation.amountCents, 0);
+    if (principal + allocationTotal !== row.amountCents) {
+      throw new Error("Transfer principal and allocations must equal the total source amount");
+    }
+    return [
+      { ledgerAccountId: sourceTargetId, amountMinor: -row.amountCents, currency },
+      { ledgerAccountId: destinationTargetId, amountMinor: principal, currency },
+      ...allocations.map((allocation) => ({
+        ledgerAccountId: targetForCategory(raw, allocation.categoryId, currency),
+        amountMinor: allocation.amountCents,
+        currency,
+      })),
+    ];
+  }
+
+  let instrumentTargetId: string | null = null;
+  let instrumentBookCounterTargetId: string | null = null;
+  if (row.instrumentId !== null || row.quantityDelta !== null) {
+    if (row.instrumentId === null || row.quantityDelta === null) {
+      throw new Error("Investment instrument and exact quantity must be stored together");
+    }
+    instrumentTargetId = registerLedgerAccount(raw, {
+      targetType: "instrument",
+      targetRef: row.instrumentId,
+      currency,
+      instrumentId: row.instrumentId,
+    });
+    instrumentBookCounterTargetId = registerLedgerAccount(raw, {
+      targetType: "system",
+      targetRef: `instrument-book:${row.instrumentId}`,
+      currency,
+    });
+  }
+  return buildTransactionMovements({
+    direction: row.direction,
+    amountMinor: row.amountCents,
+    currency,
+    accountTargetId: sourceTargetId,
+    categoryTargetId: targetForCategory(raw, row.categoryId, currency),
+    instrumentTargetId,
+    instrumentBookCounterTargetId,
+    quantityDelta: row.quantityDelta,
+  });
+}
+
+function eventMetadata(raw: Database, eventId: string): CanonicalMetadata {
+  const statement = raw.prepare("SELECT metadata_json FROM ledger_events WHERE event_id = ?");
+  try {
+    statement.bind([eventId]);
+    if (!statement.step()) throw new Error(`Missing current ledger event ${eventId}`);
+    const parsed: unknown = JSON.parse(String(statement.get()[0]));
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(`Invalid metadata for current ledger event ${eventId}`);
+    }
+    return parsed as CanonicalMetadata;
+  } finally {
+    statement.free();
+  }
+}
+
 /**
  * Attach every account-less transaction to `accountId`. Useful once, right after
  * the user creates their first real account, to empty the "unassigned" bucket.
  */
 export async function assignOrphanTransactions(accountId: number) {
   try {
-    const moved = await withDb(async (db) => {
+    const moved = await withDb(async (db, raw) => {
       const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId));
       if (!account) throw new Error(`No account with id ${accountId}`);
       const orphans = await db
-        .select({ id: transactions.id })
+        .select()
         .from(transactions)
-        .where(isNull(transactions.accountId));
-      if (orphans.length > 0) {
+        .where(isNull(transactions.accountId))
+        .orderBy(asc(transactions.id));
+      const allocationRows = await db
+        .select()
+        .from(transactionAllocations)
+        .orderBy(asc(transactionAllocations.transactionId), asc(transactionAllocations.position));
+      for (const orphan of orphans) {
+        if (!orphan.pending && orphan.currentEventId === null) {
+          throw new Error(`Posted transaction ${orphan.id} is missing current_event_id`);
+        }
+        if (!orphan.pending && normalizeLedgerCurrency(orphan.currency) !== account.currency) {
+          throw new Error(
+            `Posted transaction ${orphan.id} is ${orphan.currency}, but account ${accountId} is ${account.currency}`,
+          );
+        }
+      }
+      const postedOrphans = orphans.filter((orphan) => !orphan.pending);
+      const realTarget = postedOrphans.length === 0 ? null : registerLedgerAccount(raw, {
+        targetType: "real_account",
+        targetRef: accountId,
+        currency: account.currency,
+      });
+      const legacyTarget = postedOrphans.length === 0 ? null : registerLedgerAccount(raw, {
+        targetType: "system",
+        targetRef: "legacy-unassigned-account",
+        currency: account.currency,
+      });
+      for (const orphan of orphans) {
+        const now = new Date();
+        if (orphan.pending) {
+          await db
+            .update(transactions)
+            .set({ accountId, currency: account.currency, updatedAt: now })
+            .where(eq(transactions.id, orphan.id));
+          continue;
+        }
+        const allocations = allocationRows
+          .filter((allocation) => allocation.transactionId === orphan.id)
+          .map(({ categoryId, amountCents }) => ({ categoryId, amountCents }));
+        const prior = orphanCurrentMovements(raw, orphan, allocations, legacyTarget!);
+        const next = orphanCurrentMovements(raw, orphan, allocations, realTarget!);
+        const priorMetadata = eventMetadata(raw, orphan.currentEventId!);
+        const event = postLedgerEventRaw(raw, correctLedgerEventInput(
+          orphan.currentEventId!,
+          prior,
+          next,
+          {
+            effectiveDate: toDateKey(orphan.date),
+            description: orphan.comment ?? "",
+            metadata: {
+              ...priorMetadata,
+              projectionKey: orphan.id,
+              transaction: orphanSnapshot(orphan, allocations, accountId, now),
+              reassignment: {
+                from: "legacy-unassigned-account",
+                toAccountId: accountId,
+              },
+            },
+            recordedAt: now,
+          },
+        ));
         await db
           .update(transactions)
-          .set({ accountId, updatedAt: new Date() })
-          .where(isNull(transactions.accountId));
+          .set({ accountId, currency: account.currency, updatedAt: now, currentEventId: event.eventId })
+          .where(eq(transactions.id, orphan.id));
       }
       return orphans.length;
     });

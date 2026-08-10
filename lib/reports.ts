@@ -11,9 +11,8 @@
  * ledger rule:
  *
  *   - `isTransfer` / `isSpendable` (lib/cash-balance.ts) decide what counts;
- *   - `cashContributionCents` (components/dashboard/cash-series.ts) — the per-row
- *     form of that same rule, already pinned by a test that reproduces
- *     `deriveCashBalanceCents` exactly — decides the DIRECTION and magnitude;
+ *   - `transactionCashDirection` (lib/cash-balance.ts) decides the stored
+ *     DIRECTION, with category metadata used only for legacy in-memory rows;
  *   - `periodContaining` / `periodsBetween` (lib/budgets.ts) decide where a
  *     period starts and ends, so a report month and a budget month are the same
  *     month;
@@ -21,12 +20,6 @@
  *
  * `reports.test.ts` asserts `flowInRange(...).netCents === deriveCashBalanceCents(...)`
  * over the same rows, so the reports page cannot drift away from the dashboard.
- *
- * (The import of `cashContributionCents` from components/ is a slightly odd
- * direction for a lib/ module. The alternative is copying the six lines that
- * decide "Income adds, Expense and Investment subtract" into a third place, which
- * is exactly the duplication that made the dashboard chart contradict its own
- * headline. One rule, imported.)
  *
  * ## The conventions, restated because reports are where they get broken
  *
@@ -48,18 +41,27 @@
  *     spans; a mixed range is shown one currency at a time with a caveat, never
  *     added together under a "$".
  */
-import { isSpendable, isTransfer, type CashLedgerCategory, type CashLedgerTransaction } from "./cash-balance";
+import {
+  isSpendable,
+  isTransfer,
+  transactionCashDirection,
+  type CashLedgerCategory,
+  type CashLedgerTransaction,
+} from "./cash-balance";
 import { periodContaining, periodsBetween, type BudgetPeriod, type PeriodRange } from "./budgets";
 import { fromDateKey, isDateKey, toDateKey, type DateKey } from "./dates";
 import { assertCents, negateCents, sumCents, type Cents } from "./money";
-import { cashContributionCents } from "@/components/dashboard/cash-series";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 /** A transaction as the report engine sees it: a ledger row on a calendar day. */
-export type ReportTransaction = CashLedgerTransaction & { dateKey: DateKey };
+export type ReportTransaction = CashLedgerTransaction & {
+  dateKey: DateKey;
+  /** CONTRACT-012 journal fact; positive consumption and negative income. */
+  categoryMovementCents?: Cents;
+};
 
 /** A category as the report engine sees it. `name` is for labels only. */
 export type ReportCategory = CashLedgerCategory & { name?: string | null };
@@ -177,6 +179,20 @@ export function flowInRange(
     if (tx.dateKey < startKey || tx.dateKey > endKey) continue;
     assertCents(tx.amountCents, "amountCents");
 
+    if (tx.categoryMovementCents !== undefined) {
+      assertCents(tx.categoryMovementCents, "categoryMovementCents");
+      const type = knownType(tx, typeOf);
+      if (type === undefined) {
+        uncategorizedCount += 1;
+        continue;
+      }
+      countedCount += 1;
+      if (type === "Income") income.push(negateCents(tx.categoryMovementCents));
+      else if (type === "Investment") investment.push(tx.categoryMovementCents);
+      else consumption.push(tx.categoryMovementCents);
+      continue;
+    }
+
     // Order matters: a pending transfer is a TRANSFER, not pending income.
     if (isTransfer(tx)) {
       transferCount += 1;
@@ -184,30 +200,27 @@ export function flowInRange(
     }
 
     const type = knownType(tx, typeOf);
+    const direction = transactionCashDirection(tx, type);
 
     if (!isSpendable(tx)) {
       // The only remaining reason is `pending` (transfers left above).
       pendingCount += 1;
-      if (type === "Income") pendingIncome.push(tx.amountCents);
-      else if (type === "Expense" || type === "Investment") pendingExpense.push(tx.amountCents);
+      if (direction === "inflow") pendingIncome.push(tx.amountCents);
+      else if (direction === "outflow") pendingExpense.push(tx.amountCents);
       continue;
     }
 
-    if (type === undefined) {
-      // A row whose category was deleted. It contributes to nothing — the same
-      // rule as lib/cash-balance.ts — but it is real money the user entered, so
-      // it is counted and surfaced rather than dropped in silence.
+    if (direction === "none") {
+      // Only a legacy fixture with neither stored direction nor usable category
+      // metadata reaches this branch. Surface it rather than inventing meaning.
       uncategorizedCount += 1;
       continue;
     }
 
     countedCount += 1;
-    // The signed effect comes from the shared per-row rule, not from a second
-    // reading of `category.type`.
-    const effect = cashContributionCents(tx, categories);
-    if (type === "Income") income.push(effect);
-    else if (type === "Investment") investment.push(negateCents(effect));
-    else consumption.push(negateCents(effect));
+    if (direction === "inflow") income.push(tx.amountCents);
+    else if (type === "Investment") investment.push(tx.amountCents);
+    else consumption.push(tx.amountCents);
   }
 
   const incomeCents = sumCents(income);
@@ -478,15 +491,39 @@ export function categoryBreakdown(input: CategoryBreakdownInput): CategoryBreakd
   for (const tx of transactions) {
     if (tx.dateKey < startKey || tx.dateKey > endKey) continue;
     assertCents(tx.amountCents, "amountCents");
+    if (tx.categoryMovementCents !== undefined) {
+      assertCents(tx.categoryMovementCents, "categoryMovementCents");
+      const currentType = knownType(tx, typeOf);
+      if (currentType === undefined) continue;
+      const isIncome = currentType === "Income";
+      if (direction === "income" && !isIncome) continue;
+      if (direction === "expense" && isIncome) continue;
+      const key = String(tx.categoryId);
+      const bucket = buckets.get(key) ?? {
+        categoryId: tx.categoryId ?? null,
+        name: nameOf.get(tx.categoryId as number) ?? `#${tx.categoryId}`,
+        type: currentType,
+        amounts: [],
+        count: 0,
+        uncategorized: false,
+      };
+      bucket.amounts.push(
+        (isIncome ? negateCents(tx.categoryMovementCents) : tx.categoryMovementCents) as Cents,
+      );
+      bucket.count += 1;
+      buckets.set(key, bucket);
+      continue;
+    }
     if (!isSpendable(tx)) continue; // transfers and pending rows, one rule
 
-    const type = knownType(tx, typeOf);
-    const isIncome = type === "Income";
-    const isOut = type === "Expense" || type === "Investment";
+    const currentType = knownType(tx, typeOf);
+    const cashDirection = transactionCashDirection(tx, currentType);
+    const isIncome = cashDirection === "inflow";
+    const isOut = cashDirection === "outflow";
 
-    if (type === undefined) {
-      // Money with no label. It belongs to no direction, so it appears only in
-      // the "all" view — where dropping it would hide real money.
+    if (cashDirection === "none") {
+      // A legacy row with no direction and no usable category appears only in
+      // the "all" view; assigning it a direction here would invent history.
       if (direction !== "all") continue;
     } else if (direction === "income" && !isIncome) {
       continue;
@@ -498,15 +535,22 @@ export function categoryBreakdown(input: CategoryBreakdownInput): CategoryBreakd
     const bucket = buckets.get(key) ?? {
       categoryId: tx.categoryId ?? null,
       name:
-        type === undefined
+        cashDirection === "none"
           ? tx.categoryId == null
             ? "No category"
             : `Deleted category #${tx.categoryId}`
           : (nameOf.get(tx.categoryId as number) ?? `#${tx.categoryId}`),
-      type: type ?? "Uncategorized",
+      type:
+        cashDirection === "none"
+          ? "Uncategorized"
+          : isIncome
+            ? "Income"
+            : currentType === "Investment"
+              ? "Investment"
+              : "Expense",
       amounts: [],
       count: 0,
-      uncategorized: type === undefined,
+      uncategorized: cashDirection === "none",
     };
     bucket.amounts.push(tx.amountCents);
     bucket.count += 1;
@@ -562,10 +606,9 @@ export type ReportCurrencyScope = {
 /**
  * Which currencies a set of counted rows spans.
  *
- * Transactions carry no currency; their ACCOUNT does. Pending rows and transfers
- * are ignored here for the same reason they are ignored everywhere else — they
- * are not part of any total, so they must not drag a currency into the report and
- * trigger a caveat about money that was never counted.
+ * A transaction's stored currency is historical truth. Account currency is used
+ * only for pre-0009 in-memory rows that do not carry it. Pending rows and
+ * transfers are ignored because they are not part of report totals.
  */
 export function currencyScope(
   transactions: readonly ReportTransaction[],
@@ -580,7 +623,12 @@ export function currencyScope(
 
   for (const tx of transactions) {
     if (!isSpendable(tx)) continue;
-    const code = tx.accountId == null ? undefined : currencyOfAccount.get(tx.accountId);
+    const code =
+      typeof tx.currency === "string" && tx.currency.trim() !== ""
+        ? normalizeCurrencyCode(tx.currency)
+        : tx.accountId == null
+          ? undefined
+          : currencyOfAccount.get(tx.accountId);
     if (code === undefined) {
       unassignedCount += 1;
       continue;
@@ -616,7 +664,12 @@ export function filterByCurrency<T extends ReportTransaction>(
   );
 
   return transactions.filter((tx) => {
-    const code = tx.accountId == null ? undefined : currencyOfAccount.get(tx.accountId);
+    const code =
+      typeof tx.currency === "string" && tx.currency.trim() !== ""
+        ? normalizeCurrencyCode(tx.currency)
+        : tx.accountId == null
+          ? undefined
+          : currencyOfAccount.get(tx.accountId);
     if (code === undefined) return includeUnassigned;
     return code === wanted;
   });

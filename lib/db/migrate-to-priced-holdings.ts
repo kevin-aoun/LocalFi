@@ -2,7 +2,7 @@
  * One-shot application of migration 0004 (priced holdings: `assets.price_symbol`
  * and `assets.priced_at`) to an existing budget database.
  *
- *   npx tsx lib/db/migrate-to-priced-holdings.ts [--db <path>] [--dry-run]
+ *   bun x tsx lib/db/migrate-to-priced-holdings.ts [--db <path>] [--dry-run]
  *
  * The database this points at by default holds the owner's REAL financial
  * history, so this script is written the same way lib/db/migrate-to-cents.ts and

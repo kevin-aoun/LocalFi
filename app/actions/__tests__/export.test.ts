@@ -17,6 +17,7 @@ import {
   exportJsonBackup,
   exportTransactionsCsv,
 } from "@/app/actions/export";
+import { importTransactions } from "@/app/actions/import";
 import {
   collectDateValues,
   detectDateOrder,
@@ -29,6 +30,7 @@ import { parseAmount } from "@/lib/money";
 
 import {
   createDomainDb,
+  execOn,
   seedAccount,
   seedBudget,
   seedCategory,
@@ -102,6 +104,26 @@ describe("exportTransactionsCsv", () => {
     expect(parsed.map((r) => r.amountCents)).toEqual([512_345, 4_550, 200_000]);
     expect(parsed.map((r) => r.suggestedType)).toEqual(["Income", "Expense", "Investment"]);
     expect(parsed[1].comment).toBe('Coffee, "black"');
+  });
+
+  it("exports an event-backed imported projection through the existing CSV contract", async () => {
+    expect(
+      await importTransactions(
+        [{ date: "2026-02-20", categoryId: 2, amount: "12.34", comment: "Event backed" }],
+        { accountId: 10 },
+      ),
+    ).toMatchObject({ success: true, inserted: 1 });
+
+    const data = ok(await exportTransactionsCsv({ fromKey: "2026-02-20", toKey: "2026-02-20" }));
+    expect(data.rowCount).toBe(1);
+    const [parsed] = parseImportRows(readCsvRows(data.csv), CATEGORIES, { dayFirst: false });
+    expect(parsed).toMatchObject({
+      date: "2026-02-20",
+      categoryId: 2,
+      amountCents: 1234,
+      comment: "Event backed",
+      problems: [],
+    });
   });
 
   it("includes pending rows and transfers on request", async () => {
@@ -226,6 +248,18 @@ describe("exportJsonBackup", () => {
     const data = ok(await exportJsonBackup());
     expect(() => JSON.parse(data.json)).not.toThrow();
     expect(data.byteLength).toBe(Buffer.byteLength(data.json, "utf-8"));
+  });
+
+  it("includes the persisted Ledger explorer preference", async () => {
+    execOn(temp, (db) => {
+      db.run(
+        "INSERT INTO settings (user_name, accent_color, theme, show_ledger) VALUES ('Owner', 'default', 'system', 1)",
+      );
+    });
+    const backup = JSON.parse(ok(await exportJsonBackup()).json);
+    expect(backup.settings).toEqual([
+      expect.objectContaining({ userName: "Owner", showLedger: true }),
+    ]);
   });
 });
 

@@ -1,9 +1,8 @@
 import { getAccounts } from "@/app/actions/accounts";
 import { getCategories } from "@/app/actions/categories";
-import { getTransactions } from "@/app/actions/transactions";
+import { getLedgerReportMovements } from "@/app/actions/transactions";
 import { getInvestmentHistory } from "@/app/actions/assets";
 import { todayKey } from "@/lib/dates";
-import { toReportTransactions } from "@/lib/reports";
 
 import ReportsClient from "./reports-client";
 
@@ -22,22 +21,13 @@ export const dynamic = "force-dynamic";
  */
 export default async function ReportsPage() {
   const [transactions, categories, accounts, investmentHistory] = await Promise.all([
-    getTransactions(),
+    getLedgerReportMovements(),
     getCategories(),
     getAccounts({ includeArchived: true }),
     getInvestmentHistory(),
   ]);
 
-  const ledger = toReportTransactions(
-    transactions.map((tx) => ({
-      date: tx.date,
-      amountCents: tx.amountCents,
-      categoryId: tx.categoryId,
-      accountId: tx.accountId,
-      transferAccountId: tx.transferAccountId,
-      pending: tx.pending,
-    })),
-  );
+  const ledger = transactions;
 
   // Bounds of the data itself, for the "All time" preset. Sorted lexicographically
   // because a DateKey sorts in calendar order by construction.

@@ -15,9 +15,11 @@
  * data/budget.db is never opened.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { verifyLedger } from "@/lib/ledger";
 
 import {
   createDomainDb,
+  execOn,
   form,
   seedAccount,
   seedCategory,
@@ -52,7 +54,8 @@ afterEach(async () => {
 /** Rows this template has materialised, in occurrence order. */
 function generated(templateId: number) {
   return temp.query(
-    `SELECT recurring_occurrence, amount_cents, category_id, account_id, transfer_account_id, date
+    `SELECT recurring_occurrence, amount_cents, direction, currency, category_id, account_id, transfer_account_id, date,
+            current_event_id, instrument_id, quantity_delta
      FROM transactions WHERE recurring_id = ${templateId} ORDER BY recurring_occurrence`,
   );
 }
@@ -89,6 +92,7 @@ describe("createRecurringTransaction", () => {
     expect(created.startDate).toBe("2026-01-31");
     expect(created.nextDue).toBe("2026-01-31");
     expect(created.lastGenerated).toBeNull();
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"))).toBe(0);
   });
 
   it("rejects an interval below one", async () => {
@@ -159,6 +163,35 @@ describe("createRecurringTransaction", () => {
     expect(row.amount_cents).toBe(1235);
     expect(row.t).toBe("integer");
   });
+
+  it("rejects negative magnitudes and cross-currency transfer templates", async () => {
+    expect(
+      await createRecurringTransaction(
+        form({
+          name: "negative",
+          amount: "-1.00",
+          frequency: "monthly",
+          startDate: "2026-01-01",
+          accountId: 1,
+          categoryId: 1,
+        }),
+      ),
+    ).toMatchObject({ error: expect.stringMatching(/negative/i) });
+
+    execOn(temp, (db) => db.run("UPDATE accounts SET currency = 'EUR' WHERE id = 2"));
+    expect(
+      await createRecurringTransaction(
+        form({
+          name: "FX sweep",
+          amount: "1.00",
+          frequency: "monthly",
+          startDate: "2026-01-01",
+          accountId: 1,
+          transferAccountId: 2,
+        }),
+      ),
+    ).toMatchObject({ error: expect.stringMatching(/without an FX model/i) });
+  });
 });
 
 describe("generateDueTransactions — idempotency", () => {
@@ -182,6 +215,41 @@ describe("generateDueTransactions — idempotency", () => {
     expect(occurrences(1)).toEqual(["2026-01-01", "2026-02-01", "2026-03-01"]);
   });
 
+  it("posts confirmed occurrences as balanced, replayable ledger projections", async () => {
+    unwrap(await generateDueTransactions({ throughKey: "2026-02-15" }));
+
+    const projected = generated(1);
+    expect(projected.every((row) => typeof row.current_event_id === "string")).toBe(true);
+    expect(projected.map((row) => row.quantity_delta)).toEqual([null, null]);
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"))).toBe(2);
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM ledger_movements"))).toBe(4);
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM ledger_movements WHERE quantity_delta IS NOT NULL"))).toBe(0);
+
+    const rows = temp.query(
+      `SELECT t.id, t.recurring_occurrence, e.metadata_json
+       FROM transactions t JOIN ledger_events e ON e.event_id = t.current_event_id
+       ORDER BY t.recurring_occurrence`,
+    );
+    for (const row of rows) {
+      const metadata = JSON.parse(String(row.metadata_json));
+      expect(metadata.projectionKey).toBe(row.id);
+      expect(metadata.transaction).toMatchObject({
+        id: row.id,
+        recurringId: 1,
+        recurringOccurrence: row.recurring_occurrence,
+        pending: false,
+        instrumentId: null,
+        quantityDelta: null,
+      });
+      expect(metadata.provenance).toEqual({
+        source: "recurring-occurrence",
+        templateId: 1,
+        occurrence: row.recurring_occurrence,
+      });
+    }
+    expect(await verifyLedger()).toMatchObject({ ok: true });
+  });
+
   it("POSTS NOTHING on a second run for the same day", async () => {
     const first = unwrap(await generateDueTransactions({ throughKey: "2026-03-15" }));
     const second = unwrap(await generateDueTransactions({ throughKey: "2026-03-15" }));
@@ -191,6 +259,7 @@ describe("generateDueTransactions — idempotency", () => {
     expect(second.skipped).toBe(0); // the cursor already covers them
     expect(occurrences(1)).toEqual(["2026-01-01", "2026-02-01", "2026-03-01"]);
     expect(Number(temp.scalar("SELECT COUNT(*) FROM transactions"))).toBe(3);
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"))).toBe(3);
   });
 
   it("posts nothing on a THIRD and FOURTH run either", async () => {
@@ -250,6 +319,8 @@ describe("generateDueTransactions — idempotency", () => {
       expect(row.category_id).toBe(1);
       expect(row.account_id).toBe(1);
       expect(row.transfer_account_id).toBeNull();
+      expect(row.direction).toBe("outflow");
+      expect(row.currency).toBe("USD");
     }
     expect(temp.scalar("SELECT comment FROM transactions LIMIT 1")).toBe("flat");
   });
@@ -528,6 +599,8 @@ describe("generateDueTransactions — transfers and other templates", () => {
       expect(row.category_id).toBeNull();
       expect(row.account_id).toBe(1);
       expect(row.transfer_account_id).toBe(2);
+      expect(row.direction).toBe("transfer");
+      expect(row.currency).toBe("USD");
     }
     // A transfer is not spend, so the derived Cash figure does not move.
     expect(Number(temp.scalar("SELECT current_value_cents FROM assets WHERE category = 'Cash'"))).toBe(0);
@@ -691,12 +764,27 @@ describe("deleteRecurringTransaction", () => {
     });
     await generateDueTransactions({ throughKey: "2026-03-15" });
     expect(Number(temp.scalar("SELECT COUNT(*) FROM transactions"))).toBe(3);
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"))).toBe(3);
 
     unwrap(await deleteRecurringTransaction(1));
 
     // Real spending survives; only the link is dropped.
     expect(Number(temp.scalar("SELECT COUNT(*) FROM transactions"))).toBe(3);
     expect(Number(temp.scalar("SELECT COUNT(*) FROM transactions WHERE recurring_id IS NULL"))).toBe(3);
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"))).toBe(6);
+    expect(await verifyLedger()).toMatchObject({ ok: true });
+    expect(await getRecurringTransactions()).toEqual([]);
+  });
+
+  it("deletes an unmaterialized template without creating an event", async () => {
+    seedRecurring(temp, {
+      id: 1, name: "Rent", accountId: 1, categoryId: 1, amountCents: 120_000,
+      frequency: "monthly", startDate: "2027-01-01",
+    });
+
+    unwrap(await deleteRecurringTransaction(1));
+
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"))).toBe(0);
     expect(await getRecurringTransactions()).toEqual([]);
   });
 });

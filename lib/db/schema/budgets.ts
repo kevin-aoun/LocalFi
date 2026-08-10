@@ -43,6 +43,13 @@ export const budgets = sqliteTable(
     effectiveTo: text("effective_to"),
     /** When true, an unused surplus is available in the next period. */
     rollover: integer("rollover", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Optional savings-target label. DECISION: DEC-008 — this is presentation
+     * metadata for the existing rollover balance, never a contribution ledger.
+     */
+    goalName: text("goal_name"),
+    /** Positive target in cents when goalName is populated; otherwise NULL. */
+    goalAmountCents: integer("goal_amount_cents").$type<Cents>(),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -58,6 +65,20 @@ export const budgets = sqliteTable(
     windowValid: check(
       "budgets_window_valid",
       sql`${table.effectiveTo} IS NULL OR ${table.effectiveTo} >= ${table.effectiveFrom}`,
+    ),
+    goalValid: check(
+      "budgets_goal_valid",
+      sql`(
+        ${table.goalName} IS NULL AND ${table.goalAmountCents} IS NULL
+      ) OR (
+        ${table.goalName} IS NOT NULL
+        AND ${table.goalAmountCents} IS NOT NULL
+        AND length(trim(${table.goalName})) > 0
+        AND typeof(${table.goalAmountCents}) = 'integer'
+        AND ${table.goalAmountCents} > 0
+        AND ${table.period} = 'monthly'
+        AND ${table.rollover} = 1
+      )`,
     ),
   }),
 );

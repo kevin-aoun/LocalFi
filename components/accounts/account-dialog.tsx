@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   Select,
   SelectContent,
@@ -30,6 +31,7 @@ import {
   type AccountKind,
   type AccountTypeName,
 } from "./account-form-logic";
+import { SUPPORTED_CURRENCIES, currencyOption, normalizeAccountCurrency } from "./currencies";
 
 /** Only what the dialog needs; `getAccountBalances` rows satisfy this. */
 export type AccountForEdit = {
@@ -38,6 +40,7 @@ export type AccountForEdit = {
   kind: string;
   type: string;
   openingBalanceCents: number;
+  openingBalanceDate?: import("@/lib/dates").DateKey;
   currency: string;
 };
 
@@ -196,6 +199,7 @@ export function AccountDialog({ open, onOpenChange, account, onSuccess }: Accoun
               // parseAmount accepts it exactly. Validation happens on submit.
               type="text"
               inputMode="decimal"
+              data-private-input
               value={formState.openingBalance}
               onChange={(event) =>
                 setFormState((prev) => ({ ...prev, openingBalance: event.target.value }))
@@ -207,7 +211,7 @@ export function AccountDialog({ open, onOpenChange, account, onSuccess }: Accoun
                 user stated, and hiding its confirmation is the same falsy-0
                 mistake that has already been found twice in this codebase. */}
             {openingPreviewCents !== null && (
-              <p className="text-xs font-medium">
+              <p className="text-xs font-medium" data-private-value>
                 Starts at {formatMoney(openingPreviewCents, formState.currency || "USD")}
                 {formState.kind === "liability" ? " owed" : ""}
               </p>
@@ -217,19 +221,50 @@ export function AccountDialog({ open, onOpenChange, account, onSuccess }: Accoun
                 That is not an amount: try 1,234.56
               </p>
             )}
+            <div className="space-y-2 pt-1">
+              <Label htmlFor="account-opening-balance-date">Effective from</Label>
+              <DatePicker
+                id="account-opening-balance-date"
+                value={formState.openingBalanceDate}
+                onChange={(value) =>
+                  setFormState((prev) => ({ ...prev, openingBalanceDate: value ?? prev.openingBalanceDate }))
+                }
+                aria-label="Opening balance effective date"
+                className="w-full"
+              />
+              <p className="text-xs text-muted-foreground">
+                Historical balances before this day exclude the opening amount.
+              </p>
+            </div>
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="account-currency">Currency</Label>
-            <Input
-              id="account-currency"
-              value={formState.currency}
-              onChange={(event) =>
-                setFormState((prev) => ({ ...prev, currency: event.target.value }))
+            <Select
+              value={normalizeAccountCurrency(formState.currency)}
+              onValueChange={(value) =>
+                setFormState((prev) => ({ ...prev, currency: normalizeAccountCurrency(value) }))
               }
-              placeholder="USD"
-              maxLength={3}
-            />
+            >
+              <SelectTrigger id="account-currency" aria-label="Account currency">
+                <SelectValue placeholder="Choose a currency" />
+              </SelectTrigger>
+              <SelectContent>
+                {SUPPORTED_CURRENCIES.map((currency) => (
+                  <SelectItem key={currency.code} value={currency.code}>
+                    <span className="mr-2 inline-flex w-8 justify-center font-medium" aria-hidden="true">
+                      {currency.icon}
+                    </span>
+                    <span>{currency.name}</span>
+                    <span className="ml-2 text-muted-foreground">({currency.code})</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {currencyOption(formState.currency)?.name ?? "Choose a supported ISO currency."}
+            </p>
+            {/* The selector submits the ISO code, never the display name or icon. */}
           </div>
 
           <div className="flex justify-end gap-2 pt-2">

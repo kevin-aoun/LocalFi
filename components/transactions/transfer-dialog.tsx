@@ -40,6 +40,7 @@ type TransferDialogProps = {
   /** The transfer being edited, or null/undefined to create a new one. */
   transfer?: StoredTransfer | null;
   accounts: AccountOption[];
+  expenseCategories?: Array<{ id: number; name: string; type: string }>;
   /** Pre-selected source account for a new transfer. */
   defaultAccountId: number | null;
   onSuccess: () => void;
@@ -59,6 +60,7 @@ export function TransferDialog({
   onOpenChange,
   transfer,
   accounts,
+  expenseCategories = [],
   defaultAccountId,
   onSuccess,
 }: TransferDialogProps) {
@@ -80,13 +82,19 @@ export function TransferDialog({
 
   // `!== null`, never a truthiness test: a 0-cent transfer is a real value.
   const previewCents = tryParseAmount(form.amount);
+  const principalPreview = form.principalAmount.trim() === ""
+    ? previewCents
+    : tryParseAmount(form.principalAmount);
+  const interestPreview = previewCents !== null && principalPreview !== null
+    ? previewCents - principalPreview
+    : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // Validated here first so the user is told without a round trip. The action
     // enforces all of it again — this is a courtesy, not the only check.
-    const problem = validateTransferForm(form);
+    const problem = validateTransferForm(form, accounts);
     if (problem) {
       setError(problem);
       return;
@@ -232,6 +240,56 @@ export function TransferDialog({
             )}
           </div>
 
+          <div className="space-y-3 rounded-md border p-3">
+            <div>
+              <p className="text-sm font-medium">Principal and interest (optional)</p>
+              <p className="text-xs text-muted-foreground">
+                Leave blank for a normal transfer. For a debt payment, enter the amount that
+                reduces principal; the remainder is recorded once as interest or a fee.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="transfer-principal">Principal amount</Label>
+                <Input
+                  id="transfer-principal"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.principalAmount}
+                  onChange={(event) => set("principalAmount", event.target.value)}
+                  placeholder="Same as total"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="transfer-interest-category">Interest / fee category</Label>
+                <Select
+                  value={form.interestCategoryId}
+                  onValueChange={(value) => set("interestCategoryId", value)}
+                >
+                  <SelectTrigger id="transfer-interest-category">
+                    <SelectValue placeholder="Choose category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {expenseCategories
+                      .filter((category) => category.type.toLowerCase() !== "income")
+                      .map((category) => (
+                        <SelectItem key={category.id} value={String(category.id)}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {interestPreview !== null && interestPreview > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Principal {formatMoney(principalPreview ?? 0, currencyOf(form.toAccountId))}
+                {" · "}Interest / fee {formatMoney(interestPreview, currencyOf(form.fromAccountId))}
+              </p>
+            )}
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="transfer-comment">Note</Label>
             <Input
@@ -273,6 +331,7 @@ export function TransferDialog({
               id="transfer-pending"
               checked={form.pending}
               onCheckedChange={(checked) => set("pending", checked === true)}
+              disabled={Boolean(transfer && !transfer.pending)}
             />
             <Label htmlFor="transfer-pending" className="text-sm font-normal cursor-pointer">
               Pending (not yet cleared)

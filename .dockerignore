@@ -45,6 +45,7 @@ README.md
 # Caches
 .eslintcache
 .cache
+*.tsbuildinfo
 .agent
 .strip-em-dashes-backups
 backups

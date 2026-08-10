@@ -1,5 +1,19 @@
 /** Pure form transport for the category dialog. Budget limits have their own form. */
 
+import type { BudgetPeriod } from "@/lib/budgets";
+import type { DateKey } from "@/lib/dates";
+import { centsToDecimal, tryParseAmount, type Cents } from "@/lib/money";
+
+import {
+  budgetFormStateFrom as baseBudgetFormStateFrom,
+  buildBudgetFormValues as buildBaseBudgetFormValues,
+  validateBudgetForm as validateBaseBudgetForm,
+  withPeriod as withBasePeriod,
+  type BudgetRuleFormState as BaseBudgetRuleFormState,
+  type CategoryOption,
+  type EditableBudget as BaseEditableBudget,
+} from "./budget-view-logic";
+
 export type BudgetFormState = {
   name: string;
   type: string;
@@ -22,4 +36,80 @@ export function toCategoryFormData(state: BudgetFormState): FormData {
     formData.append(key, value);
   }
   return formData;
+}
+
+// ---------------------------------------------------------------------------
+// Savings-goal fields for the budget rule dialog
+// ---------------------------------------------------------------------------
+
+export type BudgetRuleFormState = BaseBudgetRuleFormState & {
+  goalName: string;
+  /** Decimal string; empty together with goalName means no goal. */
+  goalAmount: string;
+};
+
+export type EditableBudget = BaseEditableBudget & {
+  goalName?: string | null;
+  goalAmountCents?: Cents | null;
+};
+
+export function validateBudgetForm(
+  state: BudgetRuleFormState,
+  categories?: readonly CategoryOption[],
+): string | null {
+  const baseError = validateBaseBudgetForm(state, categories);
+  if (baseError) return baseError;
+
+  const goalName = state.goalName.trim();
+  const goalAmount = state.goalAmount.trim();
+  if (goalName === "" && goalAmount === "") return null;
+  if (goalName === "" || goalAmount === "") {
+    return "Enter both a goal name and a target amount, or clear both fields.";
+  }
+  const targetCents = tryParseAmount(goalAmount);
+  if (targetCents === null || targetCents <= 0) {
+    return "A savings goal target must be greater than zero.";
+  }
+  if (state.period !== "monthly") return "A savings goal requires a monthly budget.";
+  if (!state.rollover) return "Turn on rollover to use a savings goal.";
+  return null;
+}
+
+export function buildBudgetFormValues(state: BudgetRuleFormState): Record<string, string> {
+  return {
+    ...buildBaseBudgetFormValues(state),
+    // Always send both keys so editing can clear the pair atomically.
+    goalName: state.goalName.trim(),
+    goalAmount: state.goalAmount.trim(),
+  };
+}
+
+export function toBudgetFormData(state: BudgetRuleFormState): FormData {
+  const formData = new FormData();
+  for (const [key, value] of Object.entries(buildBudgetFormValues(state))) {
+    formData.append(key, value);
+  }
+  return formData;
+}
+
+export function budgetFormStateFrom(
+  budget: EditableBudget | null,
+  dateKey: DateKey,
+  defaults?: { period?: BudgetPeriod; categoryId?: number },
+): BudgetRuleFormState {
+  return {
+    ...baseBudgetFormStateFrom(budget, dateKey, defaults),
+    goalName: budget?.goalName ?? "",
+    goalAmount:
+      budget?.goalAmountCents == null
+        ? ""
+        : centsToDecimal(budget.goalAmountCents).toString(),
+  };
+}
+
+export function withPeriod(
+  state: BudgetRuleFormState,
+  period: BudgetPeriod,
+): BudgetRuleFormState {
+  return withBasePeriod(state, period) as BudgetRuleFormState;
 }

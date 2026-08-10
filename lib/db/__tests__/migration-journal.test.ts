@@ -138,6 +138,40 @@ describe("migration journal", () => {
     }
   });
 
+  it("ends with nullable budget goal columns and enforces their invariant", () => {
+    const db = replayJournal();
+    try {
+      const budgetColumns = columnInfo(db, "budgets");
+      expect(budgetColumns.get("goal_name")).toMatchObject({ type: "text", notNull: false });
+      expect(budgetColumns.get("goal_amount_cents")).toMatchObject({
+        type: "integer",
+        notNull: false,
+      });
+      const tableSql = String(
+        db.exec("SELECT sql FROM sqlite_master WHERE type='table' AND name='budgets'")[0]
+          .values[0][0],
+      );
+      expect(tableSql).toContain("budgets_goal_valid");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("defaults Ledger explorer visibility off", () => {
+    const db = replayJournal();
+    try {
+      const settingsColumns = columnInfo(db, "settings");
+      expect(settingsColumns.get("show_ledger")).toMatchObject({
+        type: "integer",
+        notNull: true,
+      });
+      db.run("INSERT INTO settings DEFAULT VALUES");
+      expect(db.exec("SELECT show_ledger FROM settings")[0].values).toEqual([[0]]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps the categories.name unique index and the FKs", () => {
     const db = replayJournal();
     try {
@@ -166,7 +200,9 @@ describe("migration journal", () => {
         "INSERT INTO transactions (date, category_id, amount_cents, comment) VALUES (0, 1, 123456, 'x')",
       );
       db.run("INSERT INTO assets (category, current_value_cents) VALUES ('Cash', 449618)");
-      db.run("INSERT INTO asset_history (asset_id, value_cents) VALUES (1, 70)");
+      db.run(
+        "INSERT INTO asset_history (asset_id, value_cents, currency, recorded_day) VALUES (1, 70, 'USD', '2026-01-01')",
+      );
       db.run(
         "INSERT INTO quick_commands (command, category_name, amount_cents, comment) VALUES ('salary', 'Salary', 140000, 'c')",
       );

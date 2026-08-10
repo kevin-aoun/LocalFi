@@ -1,9 +1,9 @@
 /**
  * Create a fresh database by replaying every migration in journal order.
  *
- *   npm run db:init                  # -> data/budget.db
- *   BUDGET_DB_PATH=/tmp/x.db npm run db:init
- *   npm run db:init -- --force       # discard an existing file
+ *   bun run db:init                  # -> data/budget.db
+ *   BUDGET_DB_PATH=/tmp/x.db bun run db:init
+ *   bun run db:init -- --force       # discard an existing file
  *
  * The target is resolved through BUDGET_DB_PATH — the same variable
  * lib/db/client.ts reads — so scripts and tests can point this at a temp file.

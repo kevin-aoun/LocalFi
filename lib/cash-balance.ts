@@ -31,7 +31,7 @@
  *
  * `accounts.opening_balance_cents` is stored as a MAGNITUDE in the direction the
  * user thinks about that account:
- *   - `kind: "asset"`    — how much is in it (negative only if genuinely overdrawn);
+ *   - `kind: "asset"`    — how much is in it, as a non-negative magnitude;
  *   - `kind: "liability"` — how much is OWED, as a positive number. A credit card
  *     with $500 outstanding stores 50000, not -50000.
  *
@@ -58,13 +58,21 @@
  * the past — which is exactly why it is tested to the cent. `asOfKey` is a
  * parameter and is never read from the clock here.
  *
- * `acquiredOn` is resolved in ONE place, `resolveAcquisitions` in
- * lib/assets/acquisition.ts. This module consumes the answer; it does not have
- * a second opinion about when something was bought.
  */
-import type { AcquisitionEvidence } from "./assets/acquisition";
 import { isDateKey, type DateKey } from "./dates";
 import { assertCents, negateCents, sumCents, type Cents } from "./money";
+
+type AcquisitionEvidence = "linked_transaction" | "inferred_unique_purchase" | "asset_created_at";
+
+/** Normalize and validate the ISO-style currency code stored on ledger rows. */
+export function normalizeLedgerCurrency(value: unknown, fallback = "USD"): string {
+  const raw = typeof value === "string" && value.trim() !== "" ? value.trim() : fallback;
+  const code = raw.toUpperCase();
+  if (!/^[A-Z]{3}$/.test(code)) {
+    throw new Error(`Invalid currency: ${JSON.stringify(value)}. Expected a three-letter code.`);
+  }
+  return code;
+}
 
 /** Discriminates the two halves of the accounts table. */
 export type AccountKind = "asset" | "liability";
@@ -72,8 +80,15 @@ export type AccountKind = "asset" | "liability";
 export type CashLedgerTransaction = {
   /** NULL for a transfer, or for a row whose category was deleted. */
   categoryId?: number | null;
-  /** Positive magnitude. Direction comes from the category type / transfer legs. */
+  /** Non-negative magnitude. */
   amountCents: Cents;
+  /**
+   * Historical row meaning (DECISION: DEC-003). Optional only so pure helpers
+   * can still consume pre-0009 in-memory fixtures; persisted rows always carry it.
+   */
+  direction?: "inflow" | "outflow" | "transfer" | null;
+  /** Historical denomination. Optional only for legacy in-memory fixtures. */
+  currency?: string | null;
   pending?: boolean | null;
   /** The account the money moves out of / into. NULL = not yet assigned. */
   accountId?: number | null;
@@ -93,12 +108,18 @@ export type LedgerAccount = {
   kind: string;
   /** Magnitude; see the sign convention in the module docstring. */
   openingBalanceCents: Cents;
+  /** First calendar day on which the opening balance contributes. */
+  openingBalanceDate?: DateKey | null;
+  /** ISO denomination for the opening balance and every attached ledger row. */
+  currency?: string | null;
   archived?: boolean | null;
 };
 
 export type AccountBalance = {
   /** `null` identifies the synthetic bucket for rows with no (or an unknown) account. */
   accountId: number | null;
+  /** The one denomination of every cent in this row. */
+  currency: string;
   kind: string;
   /** As stored: a magnitude. */
   openingBalanceCents: Cents;
@@ -117,6 +138,10 @@ export type StandaloneAsset = {
   id?: number;
   category: string;
   currentValueCents: Cents;
+  /** ISO denomination of `currentValueCents`. */
+  currency?: string | null;
+  /** Archived holdings are retained but do not contribute to current net worth. */
+  archived?: boolean | null;
   /**
    * The first day this asset contributes anything, from `resolveAcquisitions`.
    * `undefined`/`null` means the caller did not resolve one, and the asset is
@@ -139,13 +164,35 @@ export type NotYetAcquiredAsset = {
   acquiredOn: DateKey;
   /** What it is worth NOW — and what it did NOT contribute on `asOfKey`. */
   currentValueCents: Cents;
+  currency: string;
+};
+
+/** One mathematically valid net-worth aggregate, scoped to one denomination. */
+export type CurrencyNetWorth = {
+  currency: string;
+  totalAssetsCents: Cents;
+  totalLiabilitiesCents: Cents;
+  netWorthCents: Cents;
+  standaloneAssetsCents: Cents;
+  unbackedAssetsCents: Cents;
+  unassignedCents: Cents;
 };
 
 export type NetWorth = {
-  /** Asset-kind accounts + the unassigned bucket + standalone assets. */
+  /**
+   * DECISION: DEC-004 — sorted, denomination-scoped totals. No row contains a
+   * cent from another currency.
+   */
+  currencyTotals: CurrencyNetWorth[];
+  /** The valid scalar aggregate, available only for a single denomination. */
+  aggregate: CurrencyNetWorth | null;
+  /** Exactly one currency when a scalar aggregate is valid; otherwise null. */
+  aggregateCurrency: string | null;
+  /** Single-currency compatibility scalar; zero when `aggregate` is null. */
   totalAssetsCents: Cents;
-  /** Positive magnitude of everything owed. */
+  /** Single-currency compatibility scalar; zero when `aggregate` is null. */
   totalLiabilitiesCents: Cents;
+  /** Single-currency compatibility scalar; zero when `aggregate` is null. */
   netWorthCents: Cents;
   /** Standalone assets that were counted (Cash-category rows excluded by default). */
   standaloneAssetsCents: Cents;
@@ -173,6 +220,7 @@ export type NetWorth = {
  * row must never be counted as income, expense or budget spend.
  */
 export function isTransfer(tx: CashLedgerTransaction): boolean {
+  if (tx.direction !== null && tx.direction !== undefined) return tx.direction === "transfer";
   return tx.transferAccountId !== null && tx.transferAccountId !== undefined;
 }
 
@@ -191,18 +239,41 @@ export function categoryCashDirection(categoryType: string | undefined): Categor
 }
 
 /**
- * The signed effect of a NON-transfer row on the account holding it.
- * Returns 0 for an unknown category, which is what keeps a row whose category
- * was deleted from silently moving the user's balance.
+ * Stored direction wins. Category metadata is consulted only for legacy
+ * in-memory rows that predate migration 0009.
+ */
+export function transactionCashDirection(
+  tx: CashLedgerTransaction,
+  categoryType: string | undefined,
+): CategoryCashDirection | "transfer" {
+  if (tx.direction === "inflow" || tx.direction === "outflow" || tx.direction === "transfer") {
+    return tx.direction;
+  }
+  if (tx.direction !== null && tx.direction !== undefined) {
+    throw new Error(`Invalid transaction direction: ${String(tx.direction)}`);
+  }
+  if (isTransfer(tx)) return "transfer";
+  return categoryCashDirection(categoryType);
+}
+
+function assertMagnitude(cents: Cents, label: string): void {
+  assertCents(cents, label);
+  if (cents < 0) throw new Error(`${label} must be a non-negative magnitude`);
+}
+
+/**
+ * The signed effect of a NON-transfer row on the account holding it. A persisted
+ * direction remains effective after category deletion; only a legacy fixture
+ * with neither direction nor usable category metadata contributes 0.
  */
 function categoryEffect(tx: CashLedgerTransaction, categoryType: string | undefined): Cents {
-  switch (categoryCashDirection(categoryType)) {
+  assertMagnitude(tx.amountCents, "amountCents");
+  switch (transactionCashDirection(tx, categoryType)) {
     case "inflow":
       return tx.amountCents;
     case "outflow":
       return negateCents(tx.amountCents);
     default:
-      assertCents(tx.amountCents, "amountCents");
       return 0;
   }
 }
@@ -212,35 +283,97 @@ function categoryTypeIndex(categories: readonly CashLedgerCategory[]): Map<numbe
 }
 
 /** The single sign flip: a liability's stored magnitude becomes a negative contribution. */
-function signedOpening(account: LedgerAccount): Cents {
-  assertCents(account.openingBalanceCents, `account ${account.id} openingBalanceCents`);
+function signedOpening(account: LedgerAccount, asOfKey?: DateKey): Cents {
+  assertMagnitude(account.openingBalanceCents, `account ${account.id} openingBalanceCents`);
+  if (account.openingBalanceDate !== null && account.openingBalanceDate !== undefined) {
+    if (!isDateKey(account.openingBalanceDate)) {
+      throw new Error(
+        `account ${account.id} has invalid openingBalanceDate ${JSON.stringify(account.openingBalanceDate)}`,
+      );
+    }
+    if (asOfKey !== undefined && asOfKey < account.openingBalanceDate) return 0;
+  }
   return account.kind === "liability"
     ? negateCents(account.openingBalanceCents)
     : account.openingBalanceCents;
 }
 
 /**
- * Exact cash balance of the WHOLE ledger in integer cents — the legacy figure
- * written to the derived "Cash" asset and shown on the dashboard.
+ * One exact cash balance, scoped to a single denomination.
  *
- * Unchanged rules: pending rows skipped, Income adds, Expense/Investment
- * subtract, unknown category contributes nothing. Transfers are excluded
- * explicitly (they would net to zero anyway, but relying on that would break the
- * moment a transfer row carried a category).
+ * Pending rows are skipped; stored inflows add and stored outflows subtract.
+ * Legacy rows without direction fall back to category type, and an unknown
+ * legacy category contributes nothing. Transfers are excluded explicitly (they
+ * would net to zero anyway, but relying on that would break the moment a
+ * transfer row carried a category).
  *
  * Throws if any `amountCents` is not an integer, so a leaked float fails loudly
  * instead of quietly shifting the user's net worth.
  */
+export type CurrencyCashBalance = {
+  currency: string;
+  balanceCents: Cents;
+};
+
+function countedCashTransactions(
+  transactions: readonly CashLedgerTransaction[],
+  categories: readonly CashLedgerCategory[],
+): Array<{ transaction: CashLedgerTransaction; contributionCents: Cents; currency: string }> {
+  const typeOf = categoryTypeIndex(categories);
+  return transactions.map((tx) => {
+    assertMagnitude(tx.amountCents, "amountCents");
+    const currency = normalizeLedgerCurrency(tx.currency, "USD");
+    const contributionCents =
+      tx.pending || isTransfer(tx)
+        ? 0
+        : categoryEffect(tx, tx.categoryId == null ? undefined : typeOf.get(tx.categoryId));
+    return { transaction: tx, contributionCents, currency };
+  });
+}
+
+/**
+ * DECISION: DEC-004 — derive one sorted cash subtotal per stored transaction
+ * currency. Pending rows and transfers do not create otherwise-empty buckets.
+ */
+export function deriveCashBalancesByCurrency(
+  transactions: readonly CashLedgerTransaction[],
+  categories: readonly CashLedgerCategory[],
+): CurrencyCashBalance[] {
+  const contributions = new Map<string, Cents[]>();
+  for (const row of countedCashTransactions(transactions, categories)) {
+    if (row.transaction.pending || isTransfer(row.transaction)) continue;
+    const bucket = contributions.get(row.currency);
+    if (bucket) bucket.push(row.contributionCents);
+    else contributions.set(row.currency, [row.contributionCents]);
+  }
+
+  return [...contributions.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, cents]) => ({ currency, balanceCents: sumCents(cents) }));
+}
+
+/**
+ * Exact cash balance for one denomination. Passing `currency` is required when
+ * the counted ledger contains more than one denomination; an unscoped mixed
+ * scalar would violate DEC-004 and therefore fails loudly.
+ */
 export function deriveCashBalanceCents(
   transactions: readonly CashLedgerTransaction[],
   categories: readonly CashLedgerCategory[],
+  options?: { currency?: string },
 ): Cents {
-  const typeOf = categoryTypeIndex(categories);
-  const contributions = transactions
-    .filter((tx) => !tx.pending && !isTransfer(tx))
-    .map((tx) => categoryEffect(tx, tx.categoryId == null ? undefined : typeOf.get(tx.categoryId)));
+  const balances = deriveCashBalancesByCurrency(transactions, categories);
+  if (options?.currency !== undefined) {
+    const currency = normalizeLedgerCurrency(options.currency);
+    return balances.find((balance) => balance.currency === currency)?.balanceCents ?? 0;
+  }
+  if (balances.length > 1) {
+    throw new Error(
+      `Cash balance spans ${balances.map((balance) => balance.currency).join(", ")}; select one currency`,
+    );
+  }
 
-  return sumCents(contributions);
+  return balances[0]?.balanceCents ?? 0;
 }
 
 /**
@@ -258,52 +391,99 @@ export function deriveAccountBalances(
   accounts: readonly LedgerAccount[],
   transactions: readonly CashLedgerTransaction[],
   categories: readonly CashLedgerCategory[],
+  options?: { asOfKey?: DateKey },
 ): AccountBalance[] {
+  const asOfKey = options?.asOfKey;
+  if (asOfKey !== undefined && !isDateKey(asOfKey)) {
+    throw new Error(`deriveAccountBalances: invalid asOfKey ${JSON.stringify(asOfKey)}`);
+  }
   const typeOf = categoryTypeIndex(categories);
   const known = new Map(accounts.map((a) => [a.id, a]));
+  const accountCurrency = new Map(
+    accounts.map((account) => [
+      account.id,
+      normalizeLedgerCurrency(account.currency, "USD"),
+    ]),
+  );
 
-  /** accountId (or null) -> signed effects, kept as a list for exact summation. */
-  const activity = new Map<number | null, Cents[]>();
+  /** Account id -> signed effects, kept as a list for exact summation. */
+  const activity = new Map<number, Cents[]>();
   for (const account of accounts) activity.set(account.id, []);
-  const push = (accountId: number | null | undefined, cents: Cents) => {
-    const key = accountId != null && known.has(accountId) ? accountId : null;
-    const bucket = activity.get(key);
+  /** Unknown/unassigned rows can legitimately span currencies, so bucket them separately. */
+  const unassignedActivity = new Map<string, Cents[]>();
+  const push = (
+    accountId: number | null | undefined,
+    cents: Cents,
+    transactionCurrency: string,
+  ) => {
+    if (accountId != null && known.has(accountId)) {
+      const expected = accountCurrency.get(accountId)!;
+      if (transactionCurrency !== expected) {
+        throw new Error(
+          `Transaction currency ${transactionCurrency} does not match account ${accountId} currency ${expected}`,
+        );
+      }
+      activity.get(accountId)!.push(cents);
+      return;
+    }
+    const bucket = unassignedActivity.get(transactionCurrency);
     if (bucket) bucket.push(cents);
-    else activity.set(key, [cents]);
+    else unassignedActivity.set(transactionCurrency, [cents]);
   };
 
   for (const tx of transactions) {
+    assertMagnitude(tx.amountCents, "amountCents");
     if (tx.pending) continue;
+    const sourceCurrency = normalizeLedgerCurrency(
+      tx.currency,
+      tx.accountId == null ? "USD" : accountCurrency.get(tx.accountId) ?? "USD",
+    );
     if (isTransfer(tx)) {
       // Both legs, same magnitude, opposite signs: net-neutral by construction.
-      assertCents(tx.amountCents, "amountCents");
-      push(tx.accountId, negateCents(tx.amountCents));
-      push(tx.transferAccountId, tx.amountCents);
+      const destinationCurrency =
+        tx.transferAccountId == null
+          ? sourceCurrency
+          : accountCurrency.get(tx.transferAccountId) ?? sourceCurrency;
+      if (destinationCurrency !== sourceCurrency) {
+        throw new Error(
+          `Cannot derive a cross-currency transfer (${sourceCurrency} to ${destinationCurrency}) without FX`,
+        );
+      }
+      push(tx.accountId, negateCents(tx.amountCents), sourceCurrency);
+      push(tx.transferAccountId, tx.amountCents, sourceCurrency);
       continue;
     }
-    push(tx.accountId, categoryEffect(tx, tx.categoryId == null ? undefined : typeOf.get(tx.categoryId)));
+    push(
+      tx.accountId,
+      categoryEffect(tx, tx.categoryId == null ? undefined : typeOf.get(tx.categoryId)),
+      sourceCurrency,
+    );
   }
 
   const rows: AccountBalance[] = accounts.map((account) => {
-    const opening = signedOpening(account);
+    const opening = signedOpening(account, asOfKey);
     const activityCents = sumCents(activity.get(account.id) ?? []);
     const balanceCents = sumCents([opening, activityCents]);
     return {
       accountId: account.id,
+      currency: accountCurrency.get(account.id)!,
       kind: account.kind,
       openingBalanceCents: account.openingBalanceCents,
       activityCents,
       balanceCents,
-      owedCents: account.kind === "liability" && balanceCents < 0 ? negateCents(balanceCents) : 0,
+      // CONTRACT-012: the stored kind is an input/UI expectation. Current sign
+      // alone says whether money is owned or owed (overdrafts and overpayments
+      // therefore cross sides without rewriting account metadata).
+      owedCents: balanceCents < 0 ? negateCents(balanceCents) : 0,
       archived: account.archived === true,
     };
   });
 
-  const unassigned = activity.get(null);
-  if (unassigned && unassigned.length > 0) {
+  for (const [currency, unassigned] of [...unassignedActivity].sort(([a], [b]) => a.localeCompare(b))) {
     const activityCents = sumCents(unassigned);
     rows.push({
       accountId: null,
+      currency,
       kind: "asset",
       openingBalanceCents: 0,
       activityCents,
@@ -363,29 +543,46 @@ export function deriveNetWorth(input: NetWorthInput): NetWorth {
     throw new Error(`deriveNetWorth: invalid asOfKey ${JSON.stringify(asOfKey)}`);
   }
 
-  const balances = deriveAccountBalances(accounts, transactions, categories);
+  const balances = deriveAccountBalances(accounts, transactions, categories, { asOfKey });
 
-  const assetParts: Cents[] = [];
-  const liabilityParts: Cents[] = [];
-  let unassignedCents: Cents = 0;
+  type BucketParts = {
+    assetParts: Cents[];
+    liabilityParts: Cents[];
+    standaloneParts: Cents[];
+    unbackedParts: Cents[];
+    unassignedParts: Cents[];
+  };
+  const buckets = new Map<string, BucketParts>();
+  const bucketFor = (currency: string): BucketParts => {
+    const existing = buckets.get(currency);
+    if (existing) return existing;
+    const created: BucketParts = {
+      assetParts: [],
+      liabilityParts: [],
+      standaloneParts: [],
+      unbackedParts: [],
+      unassignedParts: [],
+    };
+    buckets.set(currency, created);
+    return created;
+  };
 
   for (const row of balances) {
+    const bucket = bucketFor(row.currency);
     if (row.accountId === null) {
-      unassignedCents = row.balanceCents;
-      assetParts.push(row.balanceCents);
+      bucket.unassignedParts.push(row.balanceCents);
+      bucket.assetParts.push(row.balanceCents);
       continue;
     }
-    if (row.kind === "liability") {
-      // Owed -> a positive liability; overpaid -> a positive asset.
-      if (row.balanceCents < 0) liabilityParts.push(negateCents(row.balanceCents));
-      else assetParts.push(row.balanceCents);
-      continue;
-    }
-    assetParts.push(row.balanceCents);
+    // CONTRACT-012: current sign, never expected account kind, classifies the
+    // balance-sheet side. This covers asset overdrafts and liability overpayments.
+    if (row.balanceCents < 0) bucket.liabilityParts.push(negateCents(row.balanceCents));
+    else bucket.assetParts.push(row.balanceCents);
   }
 
   const eligible = standaloneAssets.filter(
-    (asset) => includeCashAsset || asset.category !== "Cash",
+    (asset) =>
+      asset.archived !== true && (includeCashAsset || asset.category !== "Cash"),
   );
 
   // An asset acquired after the day being computed did not exist yet, so it
@@ -414,32 +611,56 @@ export function deriveNetWorth(input: NetWorthInput): NetWorth {
         category: asset.category,
         acquiredOn,
         currentValueCents: asset.currentValueCents,
+        currency: normalizeLedgerCurrency(asset.currency, "USD"),
       });
       continue;
     }
     counted.push(asset);
   }
 
-  const standaloneAssetsCents = sumCents(counted.map((asset) => asset.currentValueCents));
-  // Counted, but backed by nothing in the ledger. Named, never removed.
-  const unbackedAssetsCents = sumCents(
-    counted
-      .filter((asset) => asset.acquisitionEvidence === "asset_created_at")
-      .map((asset) => asset.currentValueCents),
-  );
-  assetParts.push(standaloneAssetsCents);
+  for (const asset of counted) {
+    assertCents(asset.currentValueCents, "currentValueCents");
+    const bucket = bucketFor(normalizeLedgerCurrency(asset.currency, "USD"));
+    bucket.standaloneParts.push(asset.currentValueCents);
+    bucket.assetParts.push(asset.currentValueCents);
+    if (asset.acquisitionEvidence === "asset_created_at") {
+      bucket.unbackedParts.push(asset.currentValueCents);
+    }
+  }
 
-  const totalAssetsCents = sumCents(assetParts);
-  const totalLiabilitiesCents = sumCents(liabilityParts);
+  // A brand-new USD-default ledger can still record an honest zero snapshot.
+  if (buckets.size === 0) bucketFor("USD");
+
+  const currencyTotals: CurrencyNetWorth[] = [...buckets.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, parts]) => {
+      const totalAssetsCents = sumCents(parts.assetParts);
+      const totalLiabilitiesCents = sumCents(parts.liabilityParts);
+      return {
+        currency,
+        totalAssetsCents,
+        totalLiabilitiesCents,
+        netWorthCents: sumCents([totalAssetsCents, negateCents(totalLiabilitiesCents)]),
+        standaloneAssetsCents: sumCents(parts.standaloneParts),
+        unbackedAssetsCents: sumCents(parts.unbackedParts),
+        unassignedCents: sumCents(parts.unassignedParts),
+      };
+    });
+  const aggregate = currencyTotals.length === 1 ? currencyTotals[0] : null;
 
   return {
-    totalAssetsCents,
-    totalLiabilitiesCents,
-    netWorthCents: sumCents([totalAssetsCents, negateCents(totalLiabilitiesCents)]),
-    standaloneAssetsCents,
-    unbackedAssetsCents,
+    currencyTotals,
+    aggregate,
+    aggregateCurrency: aggregate?.currency ?? null,
+    // Compatibility scalars are zero in mixed state, never the invalid sum.
+    // Rendering and persistence use `currencyTotals` / `aggregate` exclusively.
+    totalAssetsCents: aggregate?.totalAssetsCents ?? 0,
+    totalLiabilitiesCents: aggregate?.totalLiabilitiesCents ?? 0,
+    netWorthCents: aggregate?.netWorthCents ?? 0,
+    standaloneAssetsCents: aggregate?.standaloneAssetsCents ?? 0,
+    unbackedAssetsCents: aggregate?.unbackedAssetsCents ?? 0,
     notYetAcquired,
-    unassignedCents,
+    unassignedCents: aggregate?.unassignedCents ?? 0,
     accounts: balances,
   };
 }

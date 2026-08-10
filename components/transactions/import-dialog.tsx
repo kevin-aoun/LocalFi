@@ -14,8 +14,10 @@ import {
   collectDateValues,
   detectDateOrder,
   describeImportResult,
+  assertImportFileSize,
   isCsvFilename,
   isImportable,
+  isSupportedImportFilename,
   missingCategories,
   parseImportRows,
   planImport,
@@ -158,12 +160,16 @@ export function ImportDialog({
     setSummary(null);
 
     try {
-      // CSV is read as TEXT and .xlsx/.xls as BYTES, but both go through the same
-      // SheetJS reader, the same row conversion and the same parse/dedupe
-      // pipeline — see READ_OPTIONS in import-logic.ts for why that matters.
+      if (!isSupportedImportFilename(file.name)) {
+        throw new Error("Choose an .xlsx or .csv file.");
+      }
+      assertImportFileSize(file.size);
+
+      // The maintained xlsx reader and bounded CSV reader converge on the same
+      // review/dedupe pipeline before any row is sent to the server.
       const rows = isCsvFilename(file.name)
         ? readCsvRows(await file.text())
-        : readSpreadsheetRows(await file.arrayBuffer());
+        : await readSpreadsheetRows(file);
 
       if (rows.length === 0) {
         setError(
@@ -325,7 +331,7 @@ export function ImportDialog({
                     Click to upload or drag and drop
                   </span>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Excel or CSV file (.xlsx, .xls, .csv)
+                    Excel or CSV file (.xlsx, .csv)
                   </p>
                 </div>
               </Label>
@@ -534,7 +540,7 @@ export function ImportDialog({
                         <td className="px-3 py-2 text-right text-sm font-medium">
                           {formatMoney(row.amountCents)}
                         </td>
-                        <td className="px-3 py-2 text-sm">{row.comment}</td>
+                        <td className="px-3 py-2 text-sm" data-privacy-exempt>{row.comment}</td>
                         <td className="px-3 py-2 text-center">
                           <Button
                             variant="ghost"

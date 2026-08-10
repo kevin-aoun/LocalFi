@@ -64,6 +64,41 @@
       "when": 1786032578429,
       "tag": "0008_travel-routes",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1786060800000,
+      "tag": "0009_ledger-semantics",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1786127525614,
+      "tag": "0010_currency-safe-holdings",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1786133532976,
+      "tag": "0011_budget-goals",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1786233600000,
+      "tag": "0012_immutable-ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1786340546877,
+      "tag": "0013_ledger-explorer",
+      "breakpoints": true
     }
   ]
 }

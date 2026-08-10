@@ -26,6 +26,9 @@ export type TransferFormState = {
   comment: string;
   date: Date;
   pending: boolean;
+  /** Optional amount credited to the destination; the remainder is interest/fee expense. */
+  principalAmount: string;
+  interestCategoryId: string;
 };
 
 /** The stored shape a transfer row arrives in when the user edits one. */
@@ -37,6 +40,8 @@ export type StoredTransfer = {
   comment?: string | null;
   date: Date | string | number;
   pending?: boolean | null;
+  transferPrincipalAmountCents?: Cents | null;
+  allocations?: Array<{ categoryId: number; amountCents: Cents }>;
 };
 
 /**
@@ -48,7 +53,7 @@ export type StoredTransfer = {
  * category" invariant a matter of luck.
  */
 export function buildTransferFormValues(state: TransferFormState): Record<string, string> {
-  return {
+  const values: Record<string, string> = {
     fromAccountId: state.fromAccountId.trim(),
     toAccountId: state.toAccountId.trim(),
     amount: state.amount,
@@ -56,6 +61,11 @@ export function buildTransferFormValues(state: TransferFormState): Record<string
     date: toTransactionDateValue(state.date),
     pending: state.pending ? "true" : "false",
   };
+  if (state.principalAmount.trim() !== "" || state.interestCategoryId.trim() !== "") {
+    values.principalAmount = state.principalAmount.trim();
+    values.interestCategoryId = state.interestCategoryId.trim();
+  }
+  return values;
 }
 
 /** Copy the values onto a real FormData (what the dialog actually submits). */
@@ -74,7 +84,10 @@ export function toTransferFormData(state: TransferFormState): FormData {
  *
  * Returns the message to show, or null when the form is fine.
  */
-export function validateTransferForm(state: TransferFormState): string | null {
+export function validateTransferForm(
+  state: TransferFormState,
+  accounts?: readonly { id: number; currency?: string | null }[],
+): string | null {
   const from = state.fromAccountId.trim();
   const to = state.toAccountId.trim();
 
@@ -91,12 +104,37 @@ export function validateTransferForm(state: TransferFormState): string | null {
     return "A transfer must move money between two DIFFERENT accounts.";
   }
 
+  if (accounts) {
+    const source = accounts.find((account) => account.id === fromId);
+    const destination = accounts.find((account) => account.id === toId);
+    const sourceCurrency = source?.currency?.trim().toUpperCase() || "USD";
+    const destinationCurrency = destination?.currency?.trim().toUpperCase() || "USD";
+    if (source && destination && sourceCurrency !== destinationCurrency) {
+      return `Cannot transfer between ${sourceCurrency} and ${destinationCurrency} accounts without an FX model.`;
+    }
+  }
+
   // `tryParseAmount` returns null for unparseable input and 0 for "0" — and 0 is
   // a REAL value here, not "absent". Testing truthiness would reject it.
   const cents = tryParseAmount(state.amount);
   if (cents === null) return "Enter an amount to transfer.";
   if (cents < 0) {
     return "A transfer amount cannot be negative: swap the two accounts instead.";
+  }
+
+  const principalText = state.principalAmount.trim();
+  const interestCategoryText = state.interestCategoryId.trim();
+  if (principalText !== "" || interestCategoryText !== "") {
+    const principal = tryParseAmount(principalText);
+    if (principal === null || principal < 0) return "Enter a valid non-negative principal amount.";
+    if (principal > cents) return "Principal amount cannot exceed the total payment.";
+    const interest = cents - principal;
+    if (interest > 0) {
+      const categoryId = Number(interestCategoryText);
+      if (!Number.isInteger(categoryId) || categoryId <= 0) {
+        return "Choose an interest or fee category for the non-principal amount.";
+      }
+    }
   }
 
   return null;
@@ -113,6 +151,8 @@ export function emptyTransferForm(defaultAccountId: number | null | undefined): 
     comment: "",
     date: new Date(),
     pending: false,
+    principalAmount: "",
+    interestCategoryId: "",
   };
 }
 
@@ -127,6 +167,16 @@ export function transferFormFromTransaction(transfer: StoredTransfer): TransferF
     comment: transfer.comment ?? "",
     date: transfer.date instanceof Date ? transfer.date : new Date(transfer.date),
     pending: transfer.pending === true,
+    principalAmount:
+      transfer.transferPrincipalAmountCents != null && (
+        transfer.transferPrincipalAmountCents !== transfer.amountCents ||
+        (transfer.allocations?.length ?? 0) > 0
+      )
+        ? centsToDecimal(transfer.transferPrincipalAmountCents).toString()
+        : "",
+    interestCategoryId: transfer.allocations?.[0]?.categoryId == null
+      ? ""
+      : String(transfer.allocations[0].categoryId),
   };
 }
 

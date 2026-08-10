@@ -41,6 +41,8 @@ export const netWorthSnapshots = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     /** 'YYYY-MM-DD' local calendar day. Unique. */
     date: text("date").notNull(),
+    /** The single denomination shared by all three money columns. */
+    currency: text("currency").notNull().default("USD"),
     /** Asset accounts + unassigned ledger + standalone assets, in integer cents. */
     totalAssetsCents: integer("total_assets_cents").notNull().$type<Cents>(),
     /** Positive magnitude of everything owed, in integer cents. */

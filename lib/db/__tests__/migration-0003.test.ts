@@ -249,6 +249,8 @@ describe("0003 — schema after replaying from empty", () => {
       expect(fks.map((f) => `${f.from}->${f.to}`).sort()).toEqual([
         "account_id->accounts",
         "category_id->categories",
+        "current_event_id->ledger_events",
+        "instrument_id->instruments",
         "recurring_id->recurring_transactions",
         "transfer_account_id->accounts",
       ]);

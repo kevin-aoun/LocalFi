@@ -7,7 +7,8 @@
  *   - a day that already holds a RECORDED snapshot is skipped, never replaced;
  *   - re-running changes nothing at all — no duplicates, no drift, not even
  *     `updated_at`;
- *   - a price-fetch failure leaves the table exactly as it was.
+ *   - reconstruction replays exact journal positions and observations without
+ *     consulting mutable assets or a live price API.
  *
  * Every test gets its own mkdtemp database via the shared domain fixture, so
  * data/budget.db is never opened, and every fetch is injected or stubbed.
@@ -24,7 +25,8 @@ import {
 import { applyNetWorthReconstruction, neededSymbols, planNetWorthReconstruction, runNetWorthReconstruction } from "../run";
 import { renderPlan, renderWriteReport } from "../format";
 import { previewNetWorthReconstruction } from "@/app/actions/history";
-import type { PriceFetchLike } from "@/lib/prices";
+import { postLedgerEventRaw, registerLedgerAccount } from "@/lib/ledger";
+import { prepareInvestmentPurchase, projectInvestmentPurchase } from "@/lib/investments";
 
 let temp: DomainDb;
 
@@ -34,35 +36,39 @@ function secondsFor(dateKey: string): number {
   return Math.floor(new Date(y, m - 1, d).getTime() / 1000);
 }
 
-/** A CoinGecko market_chart body for a flat $1,900.00/oz week. */
-function goldBody() {
-  const prices: Array<[number, number]> = [];
-  for (let day = 8; day <= 15; day++) {
-    prices.push([Date.UTC(2026, 0, day), 1900]);
-  }
-  return { prices, market_caps: [], total_volumes: [] };
-}
-
-const goldFetch: PriceFetchLike = async () => ({ ok: true, status: 200, json: async () => goldBody() });
-
-const failingFetch: PriceFetchLike = async () => {
-  throw new Error("getaddrinfo ENOTFOUND api.coingecko.com");
-};
-
 function seedGoldHolding() {
   execOn(temp, (db) => {
-    db.run(
-      `INSERT INTO assets (id, category, current_value_cents, currency, commodity_type, quantity, unit,
-                           price_symbol, use_live_price, created_at, updated_at)
-       VALUES (2, 'Commodities', 400000, 'USD', 'Gold', 1.1376, 'oz', 'XAU', 1, ?, ?)`,
-      [secondsFor("2026-01-20"), secondsFor("2026-01-20")],
-    );
-    // The derived Cash row: must never be counted (it IS the ledger).
-    db.run(
-      `INSERT INTO assets (id, category, current_value_cents, currency, notes, created_at, updated_at)
-       VALUES (1, 'Cash', 620000, 'USD', 'Auto-calculated from transactions', ?, ?)`,
-      [secondsFor("2026-01-01"), secondsFor("2026-01-01")],
-    );
+    const purchase = prepareInvestmentPurchase(db, {
+      symbol: "XAU",
+      currency: "USD",
+      quantity: "1.1376",
+      unit: "oz",
+      unitPriceMinor: 190_000,
+      observedAt: secondsFor("2026-01-08"),
+      observedDay: "2026-01-08",
+      source: "test-exact-observation",
+    });
+    const bookTarget = registerLedgerAccount(db, {
+      targetType: "system",
+      targetRef: `instrument-book:${purchase.instrumentId}`,
+      currency: "USD",
+    });
+    postLedgerEventRaw(db, {
+      effectiveDate: "2026-01-10",
+      description: "Exact gold position",
+      metadata: { fixture: true, fact: "position" },
+      movements: [
+        {
+          ledgerAccountId: purchase.instrumentTargetId,
+          amountMinor: 380_000,
+          currency: "USD",
+          quantityDelta: purchase.quantityDelta,
+        },
+        { ledgerAccountId: bookTarget, amountMinor: -380_000, currency: "USD" },
+      ],
+      recordedAt: secondsFor("2026-01-10"),
+    });
+    projectInvestmentPurchase(db, purchase);
   });
 }
 
@@ -128,30 +134,29 @@ describe("neededSymbols", () => {
 describe("the dry run", () => {
   it("computes the whole series and writes absolutely nothing", async () => {
     seedGoldHolding();
-    const run = await runNetWorthReconstruction({ ...RANGE, fetchImpl: goldFetch });
+    const run = await runNetWorthReconstruction(RANGE);
     expect(run.ok).toBe(true);
     if (!run.ok) return;
 
     expect(run.write).toBeNull();
     expect(snapshots()).toEqual([]);
     expect(run.plan.days).toHaveLength(8);
-    // Continuous purchase day: 1.1376 oz at $1,900.00 is $2,161.44 against
-    // $3,800.00 paid, so this ledger does NOT balance — and it says so.
-    expect(run.plan.continuity[0]).toMatchObject({ dateKey: "2026-01-10", paidCents: 380_000 });
+    expect(run.plan.continuity).toEqual([]);
+    expect(run.plan.days.find((day) => day.dateKey === "2026-01-10"))
+      .toMatchObject({ accountsCents: 620_000, holdingsCents: 216_144, netWorthCents: 836_144 });
   });
 
   it("renders a report that names the proxy, the acquisition source and the residual", async () => {
     seedGoldHolding();
-    const planned = await planNetWorthReconstruction({ ...RANGE, fetchImpl: goldFetch });
+    const planned = await planNetWorthReconstruction(RANGE);
     expect(planned.ok).toBe(true);
     if (!planned.ok) return;
 
     const report = renderPlan(planned.plan);
     expect(report).toMatch(/PRICE SERIES/);
-    expect(report).toMatch(/pax-gold/);
-    expect(report).toMatch(/\[PROXY\]/);
+    expect(report).toMatch(/none needed/);
     expect(report).toMatch(/PURCHASE-DAY CONTINUITY/);
-    expect(report).toMatch(/transaction #2/);
+    expect(planned.plan.days[0].sourceNote).toMatch(/Exact ledger position replay/);
     expect(report).toMatch(/2026-01-08/);
   });
 });
@@ -159,7 +164,7 @@ describe("the dry run", () => {
 describe("writing", () => {
   it("inserts one labelled, annotated row per day", async () => {
     seedGoldHolding();
-    const run = await runNetWorthReconstruction({ ...RANGE, fetchImpl: goldFetch, apply: true });
+    const run = await runNetWorthReconstruction({ ...RANGE, apply: true });
     expect(run.ok).toBe(true);
     if (!run.ok) return;
 
@@ -168,25 +173,25 @@ describe("writing", () => {
     expect(rows).toHaveLength(8);
     expect(rows.every((r) => r.source === "reconstructed")).toBe(true);
     expect(rows.every((r) => typeof r.source_note === "string" && r.source_note.length > 0)).toBe(true);
-    expect(String(rows[3].source_note)).toMatch(/pax-gold proxy/);
+    expect(String(rows[3].source_note)).toMatch(/Exact ledger position replay/);
     expect(renderWriteReport(run.write!)).toMatch(/inserted\s+8/);
     // The same transaction also writes the holding-level child ledger. Gold is
     // first held on Jan 10, so there are six values through Jan 15 and no fake
     // zeroes before acquisition.
-    expect(Number(temp.scalar("SELECT COUNT(*) FROM asset_history WHERE asset_id = 2"))).toBe(6);
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM asset_history"))).toBe(6);
   });
 
   it("is idempotent: a second run changes nothing, not even updated_at", async () => {
     seedGoldHolding();
-    await runNetWorthReconstruction({ ...RANGE, fetchImpl: goldFetch, apply: true });
+    await runNetWorthReconstruction({ ...RANGE, apply: true });
     const before = snapshots();
 
-    const again = await runNetWorthReconstruction({ ...RANGE, fetchImpl: goldFetch, apply: true });
+    const again = await runNetWorthReconstruction({ ...RANGE, apply: true });
     expect(again.ok).toBe(true);
     if (!again.ok) return;
     expect(again.write).toMatchObject({ inserted: 0, updated: 0, unchanged: 8 });
     expect(snapshots()).toEqual(before);
-    expect(Number(temp.scalar("SELECT COUNT(*) FROM asset_history WHERE asset_id = 2"))).toBe(6);
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM asset_history"))).toBe(6);
   });
 
   it("NEVER overwrites a recorded snapshot, and reports how many it skipped", async () => {
@@ -198,7 +203,7 @@ describe("writing", () => {
       );
     });
 
-    const run = await runNetWorthReconstruction({ ...RANGE, fetchImpl: goldFetch, apply: true });
+    const run = await runNetWorthReconstruction({ ...RANGE, apply: true });
     expect(run.ok).toBe(true);
     if (!run.ok) return;
     expect(run.write).toMatchObject({ inserted: 7, skippedRecorded: 1 });
@@ -216,7 +221,7 @@ describe("writing", () => {
          VALUES ('2026-01-12', 1, 0, 1, 'reconstructed', 'stale')`,
       );
     });
-    const run = await runNetWorthReconstruction({ ...RANGE, fetchImpl: goldFetch, apply: true });
+    const run = await runNetWorthReconstruction({ ...RANGE, apply: true });
     expect(run.ok).toBe(true);
     if (!run.ok) return;
     expect(run.write).toMatchObject({ inserted: 7, updated: 1, skippedRecorded: 0 });
@@ -224,44 +229,58 @@ describe("writing", () => {
   });
 });
 
-describe("failure cannot corrupt anything", () => {
-  it("writes nothing when the price API is unreachable", async () => {
-    seedGoldHolding();
-    const run = await runNetWorthReconstruction({ ...RANGE, fetchImpl: failingFetch, apply: true });
-    expect(run.ok).toBe(false);
-    if (run.ok) return;
-    expect(run.error.code).toBe("price_fetch_failed");
-    expect(run.error.message).toMatch(/NOTHING was written/);
-    expect(snapshots()).toEqual([]);
+describe("journal-native replay", () => {
+  it("includes an event-backed unassigned account exactly once", async () => {
+    seedTransaction(temp, {
+      id: 90,
+      dateKey: "2026-01-05",
+      categoryId: 1,
+      accountId: null,
+      amountCents: 12_345,
+    });
+    const planned = await planNetWorthReconstruction({
+      fromKey: "2026-01-08",
+      toKey: "2026-01-08",
+      today: "2026-01-15",
+    });
+    expect(planned).toMatchObject({
+      ok: true,
+      plan: { days: [{ accountsCents: 1_012_345, netWorthCents: 1_012_345 }] },
+    });
   });
 
-  it("leaves an earlier successful backfill intact when a later run fails", async () => {
+  it("does not call an injected price API", async () => {
     seedGoldHolding();
-    await runNetWorthReconstruction({ ...RANGE, fetchImpl: goldFetch, apply: true });
+    const fetchImpl = vi.fn(async () => { throw new Error("must not fetch"); });
+    const run = await runNetWorthReconstruction({ ...RANGE, fetchImpl, apply: true });
+    expect(run.ok).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(snapshots()).toHaveLength(8);
+  });
+
+  it("is unchanged when a later run is given a failing fetch implementation", async () => {
+    seedGoldHolding();
+    await runNetWorthReconstruction({ ...RANGE, apply: true });
     const before = snapshots();
 
-    const failed = await runNetWorthReconstruction({ ...RANGE, fetchImpl: failingFetch, apply: true });
-    expect(failed.ok).toBe(false);
+    const fetchImpl = vi.fn(async () => { throw new Error("must not fetch"); });
+    const replayed = await runNetWorthReconstruction({ ...RANGE, fetchImpl, apply: true });
+    expect(replayed.ok).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
     expect(snapshots()).toEqual(before);
   });
 
-  it("refuses a day it cannot price rather than writing a guess", async () => {
+  it("contributes zero before the exact position exists", async () => {
     seedGoldHolding();
-    // The window starts on the 8th; ask for the 1st, when the gold was already held.
-    execOn(temp, (db) => db.run("UPDATE assets SET created_at = ? WHERE id = 2", [secondsFor("2026-01-01")]));
-    execOn(temp, (db) => db.run("DELETE FROM transactions WHERE id = 2"));
-
     const run = await runNetWorthReconstruction({
       fromKey: "2026-01-01",
       toKey: "2026-01-15",
       today: "2026-01-15",
-      fetchImpl: goldFetch,
       apply: true,
     });
-    expect(run.ok).toBe(false);
-    if (run.ok) return;
-    expect(run.error.code).toBe("no_price_for_day");
-    expect(snapshots()).toEqual([]);
+    expect(run.ok).toBe(true);
+    if (!run.ok) return;
+    expect(run.plan.days.find((day) => day.dateKey === "2026-01-09")?.holdingsCents).toBe(0);
   });
 });
 
@@ -272,7 +291,6 @@ describe("range defaults", () => {
       today: "2026-01-15",
       toKey: "2027-01-01",
       fromKey: "2026-01-08",
-      fetchImpl: goldFetch,
     });
     expect(planned.ok).toBe(true);
     if (!planned.ok) return;
@@ -282,10 +300,8 @@ describe("range defaults", () => {
 });
 
 describe("the server action", () => {
-  it("previews without writing, using the ambient fetch", async () => {
+  it("previews without writing", async () => {
     seedGoldHolding();
-    vi.stubGlobal("fetch", async () => ({ ok: true, status: 200, json: async () => goldBody() }));
-
     const result = await previewNetWorthReconstruction(RANGE);
     expect("success" in result).toBe(true);
     if (!("success" in result)) return;
@@ -295,13 +311,13 @@ describe("the server action", () => {
     expect(snapshots()).toEqual([]);
   });
 
-  it("reports a fetch failure as an error instead of throwing", async () => {
+  it("ignores an unavailable ambient fetch because observations are journal-native", async () => {
     seedGoldHolding();
     vi.stubGlobal("fetch", async () => {
       throw new Error("offline");
     });
     const result = await previewNetWorthReconstruction(RANGE);
-    expect("error" in result).toBe(true);
+    expect("success" in result).toBe(true);
     expect(snapshots()).toEqual([]);
   });
 });
@@ -313,7 +329,6 @@ describe("applyNetWorthReconstruction on a plan with no days", () => {
       fromKey: "2026-01-15",
       toKey: "2026-01-15",
       today: "2026-01-15",
-      fetchImpl: goldFetch,
     });
     if (!planned.ok) throw new Error(planned.error.message);
     const report = await applyNetWorthReconstruction({ ...planned.plan, days: [] });

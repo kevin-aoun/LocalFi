@@ -1,23 +1,28 @@
 /**
  * Regression tests for the Excel import (items 2, 3 and the dedupe half of 4).
  *
- * The date tests must pass under `npm run test:tz` (UTC+14 and UTC-11), so they
- * build real .xlsx bytes with SheetJS and assert on the resulting calendar day.
+ * The date tests must pass under `bun run test:tz` (UTC+14 and UTC-11), so they
+ * parse a real .xlsx fixture and assert on the resulting calendar day.
  */
 import { describe, expect, it } from "vitest";
-import * as XLSX from "xlsx";
 import {
+  assertImportFileSize,
+  assertXlsxDeclaredExpandedSize,
   collectDateValues,
   dedupeKey,
   describeImportResult,
   detectDateOrder,
   isImportable,
+  MAX_IMPORT_FILE_BYTES,
+  MAX_IMPORT_EXPANDED_BYTES,
+  MAX_IMPORT_ROWS,
   missingCategories,
   parseImportRows,
   pickColumn,
   planImport,
   readSpreadsheetRows,
   resolveAmount,
+  spreadsheetMatrixToRows,
   type ImportCategory,
 } from "../import-logic";
 
@@ -27,23 +32,20 @@ const CATEGORIES: ImportCategory[] = [
   { id: 3, name: "Brokerage", type: "Investment" },
 ];
 
-/** Build real .xlsx bytes from an array of row objects. */
-function xlsx(rows: Array<Record<string, unknown>>): Uint8Array {
-  const sheet = XLSX.utils.json_to_sheet(rows);
-  const book = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(book, sheet, "Sheet1");
-  return XLSX.write(book, { type: "array", bookType: "xlsx" }) as Uint8Array;
+/** Real OOXML workbook: headers plus date-formatted, text-date and amount cells. */
+const XLSX_FIXTURE_BASE64 =
+  "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";
+
+function xlsxFixture(): ArrayBuffer {
+  const bytes = Buffer.from(XLSX_FIXTURE_BASE64, "base64");
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
 /**
  * The Excel serial for a calendar day, computed in UTC so the FIXTURE is not
  * itself timezone-dependent.
  *
- * Deliberately not `json_to_sheet({ Date: new Date(y, m, d) })`: SheetJS's
- * Date -> serial conversion goes via UTC, so in a UTC+14 process it writes the
- * PREVIOUS day's serial into the file. That is a quirk of writing with SheetJS,
- * not of reading — a real bank export contains a serial written by Excel — and
- * baking it into the fixture would hide the behaviour under test.
+ * This keeps the direct serial fixtures independent of the process timezone.
  */
 function excelSerial(year: number, month1: number, day: number): number {
   return (Date.UTC(year, month1 - 1, day) - Date.UTC(1899, 11, 30)) / 86_400_000;
@@ -147,20 +149,11 @@ describe("the sign rule", () => {
 // ---------------------------------------------------------------------------
 
 describe("dates survive the spreadsheet round trip in every timezone", () => {
-  it("reads a real date cell as the day the spreadsheet shows", () => {
-    // readSpreadsheetRows keeps the cell a serial (cellDates OFF, raw ON), and
-    // parseExcelSerial converts it without ever touching UTC.
-    const bytes = xlsx([
-      {
-        Date: excelSerial(2026, 7, 28),
-        Category: "Groceries",
-        Amount: -45,
-        Description: "Spinneys",
-      },
-    ]);
-    const rows = readSpreadsheetRows(bytes);
+  it("reads a real xlsx date cell with the maintained parser", async () => {
+    const rows = await readSpreadsheetRows(xlsxFixture());
     const parsed = parseImportRows(rows, CATEGORIES, { dayFirst: false });
     expect(parsed[0].date).toBe("2026-07-28");
+    expect(parsed[0]).toMatchObject({ amountCents: 4500, categoryId: 1, comment: "Spinneys" });
   });
 
   it("reads a whole month of date cells without drifting a day", () => {
@@ -169,7 +162,7 @@ describe("dates survive the spreadsheet round trip in every timezone", () => {
       Category: "Groceries",
       Amount: 1,
     }));
-    const parsed = parseImportRows(readSpreadsheetRows(xlsx(days)), CATEGORIES, {
+    const parsed = parseImportRows(days, CATEGORIES, {
       dayFirst: false,
     });
     parsed.forEach((row, i) => {
@@ -178,12 +171,12 @@ describe("dates survive the spreadsheet round trip in every timezone", () => {
   });
 
   it("reads ISO date strings written as text, in any timezone", () => {
-    const bytes = xlsx([
+    const rows = [
       { Date: "2026-01-01", Category: "Groceries", Amount: 1 },
       { Date: "2025-12-31", Category: "Groceries", Amount: 1 },
       { Date: "2026-07-28", Category: "Groceries", Amount: 1 },
-    ]);
-    const parsed = parseImportRows(readSpreadsheetRows(bytes), CATEGORIES, { dayFirst: false });
+    ];
+    const parsed = parseImportRows(rows, CATEGORIES, { dayFirst: false });
     expect(parsed.map((r) => r.date)).toEqual(["2026-01-01", "2025-12-31", "2026-07-28"]);
   });
 
@@ -247,6 +240,46 @@ describe("dates survive the spreadsheet round trip in every timezone", () => {
   });
 });
 
+describe("untrusted import bounds", () => {
+  it("rejects files larger than the byte limit", () => {
+    expect(() => assertImportFileSize(MAX_IMPORT_FILE_BYTES + 1)).toThrow(/too large/i);
+    expect(() => assertImportFileSize(MAX_IMPORT_FILE_BYTES)).not.toThrow();
+  });
+
+  it("rejects more than the maximum number of data rows", () => {
+    const matrix = [
+      ["Date", "Category", "Amount"],
+      ...Array.from({ length: MAX_IMPORT_ROWS + 1 }, () => ["2026-01-01", "Groceries", 1]),
+    ];
+    expect(() => spreadsheetMatrixToRows(matrix)).toThrow(/too many rows/i);
+  });
+
+  it("rejects an XLSX whose declared expanded size is excessive before parsing", async () => {
+    const archive = xlsxFixture().slice(0);
+    const view = new DataView(archive);
+    let centralEntry = -1;
+    for (let offset = 0; offset <= view.byteLength - 4; offset += 1) {
+      if (view.getUint32(offset, true) === 0x02014b50) {
+        centralEntry = offset;
+        break;
+      }
+    }
+    expect(centralEntry).toBeGreaterThanOrEqual(0);
+    view.setUint32(centralEntry + 24, MAX_IMPORT_EXPANDED_BYTES + 1, true);
+
+    expect(() => assertXlsxDeclaredExpandedSize(archive)).toThrow(/expands beyond/i);
+    await expect(readSpreadsheetRows(archive)).rejects.toThrow(/expands beyond/i);
+  });
+
+  it("normalizes maintained-parser UTC dates before timezone-sensitive parsing", () => {
+    const rows = spreadsheetMatrixToRows([
+      ["Date", "Category", "Amount"],
+      [new Date("2026-07-28T00:00:00.000Z"), "Groceries", -45],
+    ]);
+    expect(rows[0].Date).toBe("2026-07-28");
+  });
+});
+
 describe("detectDateOrder seeds the day-first toggle from the file itself", () => {
   it("detects day-first from an unambiguous day > 12", () => {
     expect(detectDateOrder(["03/12/2026", "25/12/2026"])).toEqual({
@@ -306,8 +339,17 @@ describe("duplicate detection", () => {
     comment: "Spinneys",
   };
 
-  it("keys on date + amount + category + comment", () => {
-    expect(dedupeKey(row)).toBe("2026-07-28|4500|1|spinneys");
+  it("keys on account, currency, direction, and the original row identity", () => {
+    const complete = {
+      ...row,
+      accountId: 7,
+      currency: "eur",
+      direction: "outflow" as const,
+    };
+    expect(dedupeKey(complete)).toBe("2026-07-28|4500|1|7|EUR|outflow|spinneys");
+    expect(dedupeKey({ ...complete, accountId: 8 })).not.toBe(dedupeKey(complete));
+    expect(dedupeKey({ ...complete, currency: "USD" })).not.toBe(dedupeKey(complete));
+    expect(dedupeKey({ ...complete, direction: "inflow" })).not.toBe(dedupeKey(complete));
   });
 
   it("ignores cosmetic comment differences a re-export introduces", () => {

@@ -4,15 +4,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import * as Icons from "lucide-react";
 import {
   AlertCircle,
   AlertTriangle,
   ArrowLeftRight,
   CalendarRange,
   CircleSlash,
-  Loader2,
-  Pencil,
   Plus,
   PiggyBank,
   Trash2,
@@ -28,29 +25,28 @@ import {
   type BudgetPerformanceRow,
 } from "@/app/actions/budgets";
 import { deleteCategory } from "@/app/actions/categories";
+import { BudgetCard, type BudgetCategory } from "@/components/budgets/budget-cards";
+import { BudgetCategoriesTab } from "@/components/budgets/budget-categories-tab";
 import { BudgetDialog } from "@/components/budgets/budget-dialog";
+import type { EditableBudget } from "@/components/budgets/budget-form-logic";
+import { BudgetHistoryTab } from "@/components/budgets/budget-history-tab";
+import { BudgetReallocationsTab } from "@/components/budgets/budget-reallocations-tab";
 import { BudgetRuleDialog } from "@/components/budgets/budget-rule-dialog";
 import { BudgetReallocationDialog } from "@/components/budgets/budget-reallocation-dialog";
 import {
   budgetableCategories,
   classifyBudgetRow,
-  describeRollover,
-  formatPeriodRange,
   groupHistory,
   historyRange,
-  historyVerdict,
   isIgnoredRow,
   periodLabel,
-  periodUnitLabel,
   rowsForPeriodFilter,
   sortBudgetRows,
   strandedIncomeBudgets,
   summarizeBudgets,
   unbudgetedCategories,
   usagePercent,
-  visualBudgetUsage,
   type BudgetRowView,
-  type EditableBudget,
   type PeriodFilter,
 } from "@/components/budgets/budget-view-logic";
 import {
@@ -63,7 +59,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -74,34 +69,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   budgetPeriods,
   monthlyReallocationAdjustment,
   monthlyReallocationFlow,
-  type BudgetReallocationFlow,
   type BudgetPeriod,
 } from "@/lib/budgets";
 import type { DateKey } from "@/lib/dates";
 import { formatMoney, type Cents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
-type Category = {
-  id: number;
-  name: string;
-  type: string;
-  color: string;
-  icon: string;
-};
+type Category = BudgetCategory;
 
 /** A `budgets` row as it arrives from the server. */
 type BudgetRecord = {
@@ -112,6 +91,8 @@ type BudgetRecord = {
   effectiveFrom: DateKey;
   effectiveTo: DateKey | null;
   rollover: boolean;
+  goalName: string | null;
+  goalAmountCents: Cents | null;
 };
 
 /** The little a delete confirmation needs; `BudgetRowView` satisfies it. */
@@ -129,8 +110,6 @@ type BudgetsClientProps = {
   monthlySpendByCategory: Record<number, Cents>;
   currentMonthLabel: string;
 };
-
-const HISTORY_LENGTHS = [3, 6, 12, 24];
 
 export default function BudgetsClient({
   todayKey,
@@ -264,6 +243,8 @@ export default function BudgetsClient({
       effectiveFrom: record?.effectiveFrom ?? row.effectiveFrom ?? row.startKey,
       effectiveTo: record?.effectiveTo ?? row.effectiveTo ?? null,
       rollover: record?.rollover ?? row.rollover,
+      goalName: record?.goalName ?? row.goalName ?? null,
+      goalAmountCents: record?.goalAmountCents ?? row.goalAmountCents ?? null,
     });
     setBudgetDefaultCategoryId(undefined);
     setBudgetDialogOpen(true);
@@ -316,12 +297,6 @@ export default function BudgetsClient({
 
   const handleSuccess = () => {
     router.refresh();
-  };
-
-  const groupedCategories = {
-    Income: initialCategories.filter((c) => c.type === "Income"),
-    Expense: initialCategories.filter((c) => c.type === "Expense"),
-    Investment: initialCategories.filter((c) => c.type === "Investment"),
   };
 
   const historyGroups = groupHistory(historyRows);
@@ -622,324 +597,46 @@ export default function BudgetsClient({
 
         {/* ================= History ================= */}
         <TabsContent value="history" className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={historyPeriod}
-              onValueChange={(value) => setHistoryPeriod(value as BudgetPeriod)}
-            >
-              <SelectTrigger className="w-[160px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {budgetPeriods.map((period) => (
-                  <SelectItem key={period} value={period}>
-                    {periodLabel(period)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={String(historyLength)}
-              onValueChange={(value) => setHistoryLength(Number(value))}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {HISTORY_LENGTHS.map((count) => (
-                  <SelectItem key={count} value={String(count)}>
-                    Last {count} periods
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={historyCategory} onValueChange={setHistoryCategory}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All categories</SelectItem>
-                {/* Income is omitted: it can hold no budget, so it has no history. */}
-                {creatableCategories.map((category) => (
-                  <SelectItem key={category.id} value={String(category.id)}>
-                    {category.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {historyLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-          </div>
-
-          {historyError && (
-            <div
-              role="alert"
-              className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-            >
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{historyError}</span>
-            </div>
-          )}
-
-          {historyGroups.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-16">
-                <CalendarRange className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No history for this selection</h3>
-                <p className="text-sm text-muted-foreground text-center max-w-sm">
-                  A period only appears once a budget was in force for it. Widen the range or
-                  add a budget with an earlier start date.
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            historyGroups.map((group) => (
-              <Card key={`${group.period}-${group.periodKey}`}>
-                <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-                  <CardTitle className="text-base">
-                    {group.label}
-                    <span className="ml-2 text-xs font-normal text-muted-foreground">
-                      {group.startKey} → {group.endKey}
-                    </span>
-                  </CardTitle>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {formatMoney(group.totalSpentCents)} of{" "}
-                      {formatMoney(group.totalLimitCents)}
-                    </span>
-                    {group.overCount > 0 ? (
-                      <Badge variant="destructive">
-                        {group.overCount} over budget
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary">All within budget</Badge>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Category</TableHead>
-                        <TableHead className="text-right">Limit</TableHead>
-                        <TableHead className="text-right">Carried in</TableHead>
-                        <TableHead className="text-right">Spent</TableHead>
-                        <TableHead className="text-right">Remaining</TableHead>
-                        <TableHead className="text-right">Result</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {group.rows.map((row) => {
-                        const verdict = historyVerdict(row, todayKey);
-                        return (
-                          <TableRow key={`${row.budgetId}-${row.periodKey}`}>
-                            <TableCell className="font-medium">
-                              {row.categoryName}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {formatMoney(row.limitCents)}
-                            </TableCell>
-                            <TableCell className="text-right text-muted-foreground">
-                              {row.rollover ? formatMoney(row.carriedInCents) : "—"}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {formatMoney(row.spentCents)}
-                            </TableCell>
-                            <TableCell
-                              className={cn(
-                                "text-right",
-                                row.remainingCents < 0 && "text-destructive",
-                              )}
-                            >
-                              {formatMoney(row.remainingCents)}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <span
-                                className={cn(
-                                  "text-xs font-medium",
-                                  verdict.status === "over" && "text-destructive",
-                                  verdict.status === "under" && "text-emerald-600",
-                                  verdict.status === "ignored" && "text-muted-foreground",
-                                )}
-                              >
-                                {verdict.label}
-                              </span>
-                              {verdict.inProgress && (
-                                <span className="ml-2 text-xs text-muted-foreground">
-                                  (in progress)
-                                </span>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            ))
-          )}
+          <BudgetHistoryTab
+            historyPeriod={historyPeriod}
+            setHistoryPeriod={setHistoryPeriod}
+            historyLength={historyLength}
+            setHistoryLength={setHistoryLength}
+            historyCategory={historyCategory}
+            setHistoryCategory={setHistoryCategory}
+            categories={creatableCategories}
+            historyLoading={historyLoading}
+            historyError={historyError}
+            historyGroups={historyGroups}
+            todayKey={todayKey}
+          />
         </TabsContent>
 
         {/* ================= Reallocations ================= */}
         <TabsContent value="reallocations" className="space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold">One-off monthly reallocations</h2>
-              <p className="text-sm text-muted-foreground">
-                Each entry changes only the named month. It never edits either permanent budget.
-              </p>
-            </div>
-            <Button
-              onClick={() => setReallocationDialogOpen(true)}
-              disabled={creatableCategories.length < 2}
-            >
-              <ArrowLeftRight className="mr-2 h-4 w-4" />
-              Reallocate budget
-            </Button>
-          </div>
-
-          {reallocationError && (
-            <div
-              role="alert"
-              className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-            >
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{reallocationError}</span>
-            </div>
-          )}
-
-          {sortedReallocations.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-14 text-center">
-                <ArrowLeftRight className="mb-3 h-10 w-10 text-muted-foreground" />
-                <h3 className="font-semibold">No reallocations yet</h3>
-                <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                  Move a fixed amount or a percentage from one monthly category budget to another.
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Month</TableHead>
-                      <TableHead>From</TableHead>
-                      <TableHead>To</TableHead>
-                      <TableHead className="text-right">Moved</TableHead>
-                      <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sortedReallocations.map((allocation) => (
-                      <TableRow key={allocation.id}>
-                        <TableCell className="font-medium">{allocation.month}</TableCell>
-                        <TableCell>{allocation.fromCategoryName}</TableCell>
-                        <TableCell>{allocation.toCategoryName}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="font-medium">{formatMoney(allocation.amountCents)}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {allocation.inputMode === "percentage"
-                              ? `${allocation.inputValue}% when created`
-                              : "fixed amount"}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            disabled={reallocationDeleteId === allocation.id}
-                            onClick={() => void handleDeleteReallocation(allocation.id)}
-                            aria-label={`Delete ${allocation.month} reallocation`}
-                          >
-                            {reallocationDeleteId === allocation.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            )}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          )}
+          <BudgetReallocationsTab
+            reallocations={sortedReallocations}
+            canReallocate={creatableCategories.length >= 2}
+            onOpen={() => setReallocationDialogOpen(true)}
+            error={reallocationError}
+            deletingId={reallocationDeleteId}
+            onDelete={(id) => void handleDeleteReallocation(id)}
+          />
         </TabsContent>
 
         {/* ================= Categories ================= */}
         <TabsContent value="categories" className="space-y-8">
-          {initialCategories.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-16">
-                <WalletIcon className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No categories yet</h3>
-                <p className="text-sm text-muted-foreground mb-4 text-center max-w-sm">
-                  Create your first category to start tracking your spending and income
-                </p>
-                <Button onClick={() => openCategoryDialog(null)}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Your First Category
-                </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            Object.entries(groupedCategories).map(
-              ([type, cats]) =>
-                cats.length > 0 && (
-                  <div key={type} className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-xl font-semibold">{type}</h2>
-                      <Badge
-                        variant={
-                          type === "Income"
-                            ? "default"
-                            : type === "Expense"
-                              ? "destructive"
-                              : "secondary"
-                        }
-                      >
-                        {cats.length} {cats.length === 1 ? "category" : "categories"}
-                      </Badge>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                      {cats.map((category) => (
-                        <CategoryCard
-                          key={category.id}
-                          category={category}
-                          spendingCents={monthlySpendByCategory[category.id] ?? 0}
-                          monthLabel={currentMonthLabel}
-                          budgetCount={
-                            new Set([
-                              ...initialBudgets
-                                .filter((budget) => budget.categoryId === category.id)
-                                .map((budget) => budget.id),
-                              ...currentRows
-                                .filter((budget) => budget.categoryId === category.id)
-                                .map((budget) => budget.budgetId),
-                            ]).size
-                          }
-                          onEdit={() => openCategoryDialog(category)}
-                          onAddBudget={() => openNewBudget(category.id)}
-                          canBudget={category.type !== "Income"}
-                          onDelete={() => {
-                            setDeleteError(null);
-                            setCategoryToDelete(category.id);
-                            setDeleteDialogOpen(true);
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ),
-            )
-          )}
+          <BudgetCategoriesTab
+            categories={initialCategories}
+            budgets={initialBudgets}
+            rows={currentRows}
+            spending={monthlySpendByCategory}
+            monthLabel={currentMonthLabel}
+            onAdd={() => openCategoryDialog(null)}
+            onEdit={openCategoryDialog}
+            onBudget={openNewBudget}
+            onDelete={(id) => { setDeleteError(null); setCategoryToDelete(id); setDeleteDialogOpen(true); }}
+          />
         </TabsContent>
       </Tabs>
 
@@ -1058,231 +755,5 @@ export default function BudgetsClient({
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Cards
-// ---------------------------------------------------------------------------
-
-function CategoryIcon({ name, color }: { name: string; color: string }) {
-  const Component = (Icons as unknown as Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>>)[
-    name
-  ];
-  if (!Component) return null;
-  return <Component className="h-4 w-4" style={{ color }} />;
-}
-
-/** One budget for the period in progress. */
-function BudgetCard({
-  row,
-  onEdit,
-  onDelete,
-  reallocationFlow,
-}: {
-  row: BudgetRowView;
-  onEdit: () => void;
-  onDelete: () => void;
-  reallocationFlow?: BudgetReallocationFlow;
-}) {
-  const reallocationCents = reallocationFlow?.netCents ?? 0;
-  const visualUsage = visualBudgetUsage(
-    row.spentCents,
-    row.availableCents,
-    reallocationFlow?.outgoingCents ?? 0,
-  );
-  const status = classifyBudgetRow({
-    ...row,
-    spentCents: visualUsage.usedCents,
-    availableCents: visualUsage.capacityCents,
-  });
-  const percent = visualUsage.percent;
-  const rollover = describeRollover(row);
-
-  return (
-    <Card
-      className={cn(
-        status === "over" && "border-destructive",
-        status === "near" && "border-orange-500/60",
-      )}
-    >
-      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
-        <div className="space-y-1">
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <CategoryIcon name={row.categoryIcon} color={row.categoryColor} />
-            {row.categoryName}
-          </CardTitle>
-          <div className="flex flex-wrap items-center gap-1">
-            <Badge variant="secondary" className="text-[10px]">
-              {periodLabel(row.period)}
-            </Badge>
-            {row.rollover && (
-              <Badge variant="outline" className="text-[10px]">
-                Rollover
-              </Badge>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={onEdit}
-                aria-label="Edit budget"
-              >
-                <Pencil className="h-3 w-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Edit budget</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={onDelete}
-                aria-label="Delete budget"
-              >
-                <Trash2 className="h-3 w-3 text-destructive" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Delete budget</TooltipContent>
-          </Tooltip>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-baseline gap-2">
-          <div className="text-2xl font-bold">{formatMoney(row.spentCents)}</div>
-          {status === "over" && <AlertTriangle className="h-4 w-4 text-destructive" />}
-        </div>
-        <p className="text-xs text-muted-foreground mt-1">
-          of {formatMoney(row.availableCents)} available {periodUnitLabel(row.period)}
-        </p>
-        {reallocationCents !== 0 && (
-          <p className={cn("mt-1 text-xs", reallocationCents > 0 ? "text-emerald-600" : "text-orange-600")}>
-            {reallocationCents > 0 ? "+" : "−"}
-            {formatMoney(Math.abs(reallocationCents))} {reallocationCents > 0 ? "moved in" : "moved out"} this month
-          </p>
-        )}
-
-        <Progress
-          className={cn("mt-3", status === "over" && "bg-destructive/25")}
-          value={Math.min(percent, 100)}
-        />
-
-        <p className="text-xs text-muted-foreground mt-2">
-          {formatPeriodRange(row.period, row.periodKey, row.startKey, row.endKey)} ·{" "}
-          {Math.round(percent)}% used
-        </p>
-
-        {status === "over" && (
-          <p className="text-xs text-destructive mt-2 font-medium">
-            {formatMoney(-row.remainingCents)} over budget
-          </p>
-        )}
-        {status === "near" && (
-          <p className="text-xs text-orange-600 mt-2 font-medium">
-            {formatMoney(row.remainingCents)} left
-          </p>
-        )}
-        {status === "on-track" && (
-          <p className="text-xs text-muted-foreground mt-2">
-            {formatMoney(row.remainingCents)} left
-          </p>
-        )}
-
-        {/* Carry-over is stated explicitly: an "available" figure that silently
-            differs from the limit is worse than no rollover at all. */}
-        {rollover.carriedInLabel && (
-          <p className="text-xs text-muted-foreground mt-2">+ {rollover.carriedInLabel}</p>
-        )}
-        {rollover.carriedOutLabel && (
-          <p className="text-xs text-muted-foreground mt-1">{rollover.carriedOutLabel}</p>
-        )}
-        {rollover.deficitAbsorbed && (
-          <p className="text-xs text-muted-foreground mt-1">
-            Nothing carries forward: an overspend is absorbed here, and the next period starts
-            at {formatMoney(row.limitCents)}.
-          </p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-/** One category in the manager tab. */
-function CategoryCard({
-  category,
-  spendingCents,
-  monthLabel,
-  budgetCount,
-  canBudget,
-  onEdit,
-  onAddBudget,
-  onDelete,
-}: {
-  category: Category;
-  spendingCents: Cents;
-  monthLabel: string;
-  budgetCount: number;
-  /** False for Income: a budget is a spending limit, so none is offered. */
-  canBudget: boolean;
-  onEdit: () => void;
-  onAddBudget: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium flex items-center gap-2">
-          <CategoryIcon name={category.icon} color={category.color} />
-          {category.name}
-        </CardTitle>
-        <div className="flex items-center gap-1">
-          {canBudget && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0"
-                  onClick={onAddBudget}
-                  aria-label="Add a budget for this category"
-                >
-                  <Plus className="h-3 w-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Add a budget for this category</TooltipContent>
-            </Tooltip>
-          )}
-          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onEdit}>
-            <Pencil className="h-3 w-3" />
-          </Button>
-          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onDelete}>
-            <Trash2 className="h-3 w-3 text-destructive" />
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-baseline gap-2">
-          <div className="text-2xl font-bold">{formatMoney(spendingCents)}</div>
-        </div>
-        <p className="text-xs text-muted-foreground mt-1">
-          in {monthLabel}
-        </p>
-
-        <p className="text-xs text-muted-foreground mt-2">
-          {!canBudget
-            ? "Income: a budget is a spending limit, so there is none"
-            : budgetCount === 0
-              ? "No budget yet"
-              : `${budgetCount} ${budgetCount === 1 ? "budget" : "budgets"}`}
-        </p>
-      </CardContent>
-    </Card>
   );
 }

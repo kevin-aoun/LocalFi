@@ -27,6 +27,12 @@
  *     and the snapshot table could disagree.
  */
 import { absCents, centsToDecimal, formatMoney, tryParseAmount, type Cents } from "@/lib/money";
+import { isDateKey, todayKey, type DateKey } from "@/lib/dates";
+import {
+  isSupportedCurrency,
+  normalizeAccountCurrency,
+  type SupportedCurrencyCode,
+} from "./currencies";
 
 /** 'asset' | 'liability'. Mirrors `accountKinds` in lib/db/schema/accounts.ts. */
 export type AccountKind = "asset" | "liability";
@@ -78,8 +84,6 @@ export const ACCOUNT_TYPE_LABELS: Record<AccountTypeName, string> = {
   Other: "Other",
 };
 
-const CURRENCY_CODE = /^[A-Za-z]{3}$/;
-
 export function isAccountType(value: string): value is AccountTypeName {
   return (ACCOUNT_TYPES as readonly string[]).includes(value);
 }
@@ -119,6 +123,7 @@ export type AccountFormState = {
   type: string;
   /** Raw text from the input. "" means "not stated" — see rule 1 above. */
   openingBalance: string;
+  openingBalanceDate: string;
   currency: string;
 };
 
@@ -130,6 +135,7 @@ export function emptyAccountFormState(): AccountFormState {
     // NOT "0": a blank field must stay blank, or every edit would rewrite the
     // stored opening balance to zero.
     openingBalance: "",
+    openingBalanceDate: todayKey(),
     currency: "USD",
   };
 }
@@ -140,6 +146,7 @@ export type EditableAccount = {
   kind: string;
   type: string;
   openingBalanceCents: Cents;
+  openingBalanceDate?: DateKey;
   currency: string;
 };
 
@@ -158,7 +165,8 @@ export function accountFormStateFromAccount(account: EditableAccount): AccountFo
     kind,
     type: account.type,
     openingBalance: centsToDecimal(account.openingBalanceCents).toString(),
-    currency: account.currency,
+    openingBalanceDate: account.openingBalanceDate ?? todayKey(),
+    currency: normalizeAccountCurrency(account.currency),
   };
 }
 
@@ -171,6 +179,7 @@ export type AccountFormValues = {
   kind: AccountKind;
   type: AccountTypeName;
   currency: string;
+  openingBalanceDate: DateKey;
   /** ABSENT when the user stated no opening balance. Present — including "0" —
    * whenever they did. */
   openingBalance?: string;
@@ -200,25 +209,39 @@ export function validateAccountForm(state: AccountFormState): AccountFormValidat
   }
   const kind = resolveFormKind(state.type, state.kind);
 
-  const currencyRaw = state.currency.trim();
-  if (currencyRaw !== "" && !CURRENCY_CODE.test(currencyRaw)) {
+  const currency = normalizeAccountCurrency(state.currency) || "USD";
+  if (!isSupportedCurrency(currency)) {
     return {
       ok: false,
-      error: `"${currencyRaw}" is not a currency code. Use a three-letter code such as USD.`,
+      error: `"${state.currency}" is not supported. Choose a currency from the list.`,
     };
   }
-  const currency = currencyRaw === "" ? "USD" : currencyRaw.toUpperCase();
 
-  const values: AccountFormValues = { name, kind, type: state.type, currency };
+  const openingBalanceDate = state.openingBalanceDate ?? todayKey();
+  if (!isDateKey(openingBalanceDate)) {
+    return { ok: false, error: "Choose a valid opening balance date." };
+  }
+
+  const values: AccountFormValues = {
+    name,
+    kind,
+    type: state.type,
+    currency: currency as SupportedCurrencyCode,
+    openingBalanceDate,
+  };
 
   // Only an EMPTY field means "not stated". "0" is a stated zero and must be sent.
   const openingRaw = state.openingBalance.trim();
   if (openingRaw !== "") {
-    if (tryParseAmount(openingRaw) === null) {
+    const parsed = tryParseAmount(openingRaw);
+    if (parsed === null) {
       return {
         ok: false,
         error: `Opening balance "${openingRaw}" is not an amount. Enter a number such as 1,234.56.`,
       };
+    }
+    if (parsed < 0) {
+      return { ok: false, error: "Opening balance cannot be negative." };
     }
     values.openingBalance = openingRaw;
   }
@@ -243,6 +266,7 @@ export function toAccountFormData(state: AccountFormState): FormData {
   formData.append("kind", result.values.kind);
   formData.append("type", result.values.type);
   formData.append("currency", result.values.currency);
+  formData.append("openingBalanceDate", result.values.openingBalanceDate);
   if (result.values.openingBalance !== undefined) {
     formData.append("openingBalance", result.values.openingBalance);
   }
@@ -260,11 +284,14 @@ export type AccountRow = {
   kind: string;
   type: string;
   openingBalanceCents: Cents;
+  openingBalanceDate?: DateKey;
   currency: string;
   archived: boolean;
   balanceCents: Cents;
   activityCents: Cents;
   owedCents: Cents;
+  /** Current sign classification from the journal; absent on legacy fixtures. */
+  balanceKind?: "asset" | "liability";
 };
 
 export type GroupedAccounts = {
@@ -298,8 +325,8 @@ export function groupAccountsByKind(
   };
 
   return {
-    assets: visible.filter((row) => row.kind !== "liability").sort(byName),
-    liabilities: visible.filter((row) => row.kind === "liability").sort(byName),
+    assets: visible.filter((row) => (row.balanceKind ?? row.kind) !== "liability").sort(byName),
+    liabilities: visible.filter((row) => (row.balanceKind ?? row.kind) === "liability").sort(byName),
     archivedCount,
     isEmpty: rows.length === 0,
   };
@@ -321,10 +348,10 @@ export type BalanceDisplay = {
  * positive has been overpaid and reads as money held. Throws (via `formatMoney`)
  * on a non-integer balance rather than printing a drifted figure.
  */
-export function describeBalance(account: Pick<AccountRow, "kind" | "currency" | "balanceCents" | "owedCents">): BalanceDisplay {
+export function describeBalance(account: Pick<AccountRow, "kind" | "balanceKind" | "currency" | "balanceCents" | "owedCents">): BalanceDisplay {
   const currency = normalizeCurrency(account.currency);
 
-  if (account.kind === "liability") {
+  if ((account.balanceKind ?? account.kind) === "liability") {
     if (account.balanceCents < 0) {
       return {
         amountLabel: formatMoney(absCents(account.balanceCents), currency),

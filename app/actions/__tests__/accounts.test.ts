@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   createDomainDb,
+  execOn,
   form,
   seedAccount,
   seedAsset,
@@ -28,14 +29,16 @@ import {
   getAccounts,
   getDefaultAccountId,
   getLatestNetWorthSnapshot,
+  getLedgerCashMovements,
   getNetWorth,
   getNetWorthHistory,
   setAccountArchived,
   snapshotNetWorth,
   updateAccount,
 } from "@/app/actions/accounts";
-import { createTransfer, getTransfers, updateTransfer } from "@/app/actions/transactions";
+import { createTransaction, createTransfer, getTransfers, updateTransfer } from "@/app/actions/transactions";
 import { todayKey } from "@/lib/dates";
+import { verifyLedger } from "@/lib/ledger";
 
 let temp: DomainDb;
 
@@ -61,6 +64,43 @@ function balanceOf(rows: Awaited<ReturnType<typeof getAccountBalances>>, name: s
   return found;
 }
 
+describe("managed Cash projection provenance", () => {
+  it("establishes one stable marker and keeps it across normal transaction syncs", async () => {
+    const firstTransaction = await createTransaction(form({
+      accountId: 1,
+      categoryId: 1,
+      amount: "12.34",
+      date: "2026-07-01",
+    }));
+    if ("error" in firstTransaction) {
+      throw new Error(firstTransaction.error);
+    }
+    const firstMarker = temp.query(
+      "SELECT projection FROM ledger_projection_state WHERE projection LIKE 'cash:%' ORDER BY projection",
+    );
+    const managedId = Number(temp.scalar(
+      "SELECT id FROM assets WHERE category = 'Cash' ORDER BY id LIMIT 1",
+    ));
+    expect(firstMarker).toEqual([{ projection: `cash:USD:${managedId}` }]);
+
+    const secondTransaction = await createTransaction(form({
+      accountId: 1,
+      categoryId: 1,
+      amount: "5.00",
+      date: "2026-07-02",
+    }));
+    if ("error" in secondTransaction) {
+      throw new Error(secondTransaction.error);
+    }
+    expect(temp.query(
+      "SELECT projection FROM ledger_projection_state WHERE projection LIKE 'cash:%' ORDER BY projection",
+    )).toEqual(firstMarker);
+    expect(Number(temp.scalar(
+      `SELECT current_value_cents FROM assets WHERE id = ${managedId}`,
+    ))).toBe(-1_734);
+  });
+});
+
 describe("createAccount", () => {
   it("creates an asset account and infers its kind from the type", async () => {
     const account = unwrap(await createAccount(form({ name: "Savings", type: "Savings" })));
@@ -84,6 +124,76 @@ describe("createAccount", () => {
     expect(temp.query("SELECT typeof(opening_balance_cents) AS t FROM accounts WHERE id = 2")[0].t).toBe(
       "integer",
     );
+    expect(temp.query(
+      `SELECT la.target_type, m.amount_minor
+         FROM ledger_movements m JOIN ledger_accounts la ON la.id = m.ledger_account_id
+        JOIN ledger_events e ON e.event_id = m.event_id
+        WHERE json_extract(e.metadata_json, '$.accountId') = ${account.id}
+        ORDER BY m.position`,
+    )).toEqual([
+      { target_type: "real_account", amount_minor: 250_075 },
+      { target_type: "system", amount_minor: -250_075 },
+    ]);
+  });
+
+  it("stores the opening balance effective date and rejects invalid magnitudes/dates", async () => {
+    const account = unwrap(
+      await createAccount(
+        form({
+          name: "Dated",
+          type: "Checking",
+          openingBalance: "100.00",
+          openingBalanceDate: "2024-02-29",
+        }),
+      ),
+    );
+    expect(account.openingBalanceDate).toBe("2024-02-29");
+    expect(await createAccount(form({ name: "Negative", type: "Checking", openingBalance: "-1" })))
+      .toMatchObject({ error: expect.stringMatching(/negative/i) });
+    expect(
+      await createAccount(
+        form({ name: "Bad date", type: "Checking", openingBalanceDate: "2024-02-30" }),
+      ),
+    ).toMatchObject({ error: expect.stringMatching(/opening balance date/i) });
+  });
+
+  it("clears an opening balance with a valid deletion event", async () => {
+    const account = unwrap(await createAccount(form({
+      name: "Cleared opening",
+      type: "Checking",
+      openingBalance: "125.00",
+      openingBalanceDate: "2026-01-01",
+    })));
+    const beforeEvents = Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"));
+
+    unwrap(await updateAccount(account.id, form({ openingBalance: "0" })));
+
+    expect(balanceOf(await getAccountBalances(), "Cleared opening").balanceCents).toBe(0);
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"))).toBe(beforeEvents + 1);
+    expect(temp.query(
+      `SELECT m.amount_minor
+         FROM ledger_events e JOIN ledger_movements m ON m.event_id = e.event_id
+        WHERE e.sequence = (SELECT MAX(sequence) FROM ledger_events)
+        ORDER BY m.amount_minor`,
+    )).toEqual([{ amount_minor: -12_500 }, { amount_minor: 12_500 }]);
+    expect(await verifyLedger()).toMatchObject({ ok: true });
+  });
+
+  it("normalizes currency and refuses to change it after account activity", async () => {
+    const account = unwrap(
+      await createAccount(form({ name: "Euro", type: "Checking", currency: "eur" })),
+    );
+    expect(account.currency).toBe("EUR");
+    seedTransaction(temp, {
+      categoryId: 1,
+      accountId: account.id,
+      amountCents: 100,
+      dateKey: "2026-07-01",
+    });
+    const result = await updateAccount(account.id, form({ currency: "USD" }));
+    expect(result).toMatchObject({ error: expect.stringMatching(/transaction history/i) });
+    expect((await getAccounts({ includeArchived: true })).find((row) => row.id === account.id)?.currency)
+      .toBe("EUR");
   });
 
   it("refuses to file a mortgage as an asset", async () => {
@@ -159,6 +269,68 @@ describe("getAccountBalances", () => {
 });
 
 describe("createTransfer", () => {
+  it("counts a liability charge and a principal/interest split exactly once", async () => {
+    const wallet = unwrap(await createAccount(form({
+      name: "Split Wallet",
+      type: "Checking",
+      openingBalance: "5000.00",
+      openingBalanceDate: "2026-01-01",
+    })));
+    const card = unwrap(await createAccount(form({
+      name: "Card",
+      type: "CreditCard",
+      openingBalance: "500.00",
+      openingBalanceDate: "2026-01-01",
+    })));
+    seedCategory(temp, { id: 4, name: "Interest", type: "Expense" });
+    const charge = await createTransaction(form({
+      accountId: card.id,
+      categoryId: 1,
+      amount: "100.00",
+      date: "2026-02-01",
+    }));
+    if ("error" in charge) throw new Error(charge.error);
+    unwrap(await createTransfer(form({
+      fromAccountId: wallet.id,
+      toAccountId: card.id,
+      amount: "200.00",
+      principalAmount: "150.00",
+      interestCategoryId: 4,
+      date: "2026-02-02",
+    })));
+
+    const balances = await getAccountBalances();
+    expect(balanceOf(balances, "Split Wallet").balanceCents).toBe(480_000);
+    expect(balanceOf(balances, "Card")).toMatchObject({
+      balanceCents: -45_000,
+      owedCents: 45_000,
+      balanceKind: "liability",
+    });
+    expect(temp.query(
+      `SELECT la.target_ref, SUM(m.amount_minor) AS amount
+         FROM ledger_movements m JOIN ledger_accounts la ON la.id = m.ledger_account_id
+        WHERE la.target_type = 'category' AND la.target_ref IN ('1', '4')
+        GROUP BY la.target_ref ORDER BY la.target_ref`,
+    )).toEqual([
+      { target_ref: "1", amount: 10_000 },
+      { target_ref: "4", amount: 5_000 },
+    ]);
+  });
+
+  it("feeds dashboard cash from real-account movements including openings", async () => {
+    unwrap(await updateAccount(1, form({ openingBalance: "100.00", openingBalanceDate: "2026-01-01" })));
+    const savings = unwrap(await createAccount(form({ name: "Journal Savings", type: "Savings" })));
+    unwrap(await createTransfer(form({
+      fromAccountId: 1,
+      toAccountId: savings.id,
+      amount: "25.00",
+      date: "2026-02-01",
+    })));
+    const movements = await getLedgerCashMovements();
+    expect(movements.reduce((sum, movement) =>
+      sum + (movement.direction === "inflow" ? movement.amountCents : -movement.amountCents), 0))
+      .toBe(510_000);
+  });
   beforeEach(() => {
     seedAccount(temp, { id: 2, name: "Savings", kind: "asset", type: "Savings" });
     seedTransaction(temp, { categoryId: 2, accountId: 1, amountCents: 500_000, dateKey: "2026-07-01" });
@@ -219,6 +391,32 @@ describe("createTransfer", () => {
     expect(Number(temp.scalar("SELECT COUNT(*) FROM transactions WHERE transfer_account_id IS NOT NULL"))).toBe(0);
   });
 
+  it("refuses a cross-currency transfer without writing a row", async () => {
+    unwrap(await updateAccount(2, form({ currency: "EUR" })));
+    const before = (await getTransfers()).length;
+    const result = await createTransfer(
+      form({ fromAccountId: 1, toAccountId: 2, amount: "10.00", date: "2026-07-10" }),
+    );
+    expect(result).toMatchObject({ error: expect.stringMatching(/without an FX model/i) });
+    expect(await getTransfers()).toHaveLength(before);
+  });
+
+  it("refuses a negative transfer magnitude", async () => {
+    const result = await createTransfer(
+      form({ fromAccountId: 1, toAccountId: 2, amount: "-10.00", date: "2026-07-10" }),
+    );
+    expect(result).toMatchObject({ error: expect.stringMatching(/negative/i) });
+  });
+
+  it("refuses an impossible transfer date without writing a row", async () => {
+    const before = (await getTransfers()).length;
+    const result = await createTransfer(
+      form({ fromAccountId: 1, toAccountId: 2, amount: "10.00", date: "2026-02-30" }),
+    );
+    expect(result).toMatchObject({ error: expect.stringMatching(/invalid.*date/i) });
+    expect(await getTransfers()).toHaveLength(before);
+  });
+
   it("is listed by getTransfers and excluded from the derived Cash figure", async () => {
     await createTransfer(form({ fromAccountId: 1, toAccountId: 2, amount: "1000.00", date: "2026-07-10" }));
     expect(await getTransfers()).toHaveLength(1);
@@ -234,6 +432,20 @@ describe("createTransfer", () => {
     expect(updated.amountCents).toBe(150_000);
     expect(updated.categoryId).toBeNull();
     expect(balanceOf(await getAccountBalances(), "Savings").balanceCents).toBe(150_000);
+  });
+
+  it("refuses an impossible date edit and preserves the transfer", async () => {
+    const created = unwrap(
+      await createTransfer(form({ fromAccountId: 1, toAccountId: 2, amount: "10.00", date: "2026-07-10" })),
+    );
+    const result = await updateTransfer(
+      created.id,
+      form({ amount: "20.00", date: "2026-02-30" }),
+    );
+    expect(result).toMatchObject({ error: expect.stringMatching(/invalid.*date/i) });
+    expect((await getTransfers()).find((row) => row.id === created.id)).toMatchObject({
+      amountCents: 1_000,
+    });
   });
 
   it("refuses to edit a non-transfer row as a transfer", async () => {
@@ -283,17 +495,36 @@ describe("snapshotNetWorth", () => {
   });
 
   it("records assets, liabilities and net worth for a day", async () => {
-    const snapshot = unwrap(await snapshotNetWorth({ dateKey: "2026-07-28" }));
-    expect(snapshot.date).toBe("2026-07-28");
+    const snapshot = unwrap(await snapshotNetWorth({ dateKey: todayKey() }));
+    expect(snapshot.date).toBe(todayKey());
     expect(snapshot.totalAssetsCents).toBe(200_000);
     expect(snapshot.totalLiabilitiesCents).toBe(50_000);
     expect(snapshot.netWorthCents).toBe(150_000);
   });
 
+  it("refuses a mixed-currency snapshot without writing aggregate or holding rows", async () => {
+    unwrap(
+      await createAccount(
+        form({
+          name: "Euro savings",
+          type: "Savings",
+          openingBalance: "250.00",
+          currency: "EUR",
+        }),
+      ),
+    );
+
+    const result = await snapshotNetWorth({ dateKey: todayKey() });
+
+    expect(result).toMatchObject({ error: expect.stringMatching(/mixed currencies.*EUR.*USD/i) });
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM net_worth_snapshots"))).toBe(0);
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM asset_history"))).toBe(0);
+  });
+
   it("UPDATES rather than duplicating when re-run on the same day", async () => {
-    unwrap(await snapshotNetWorth({ dateKey: "2026-07-28" }));
+    unwrap(await snapshotNetWorth({ dateKey: todayKey() }));
     seedTransaction(temp, { categoryId: 2, accountId: 1, amountCents: 100_000, dateKey: "2026-07-28" });
-    const second = unwrap(await snapshotNetWorth({ dateKey: "2026-07-28" }));
+    const second = unwrap(await snapshotNetWorth({ dateKey: todayKey() }));
 
     expect(Number(temp.scalar("SELECT COUNT(*) FROM net_worth_snapshots"))).toBe(1);
     expect(second.netWorthCents).toBe(250_000);
@@ -401,6 +632,10 @@ describe("assignOrphanTransactions", () => {
     seedTransaction(temp, { categoryId: 1, accountId: 1, amountCents: 1_000, dateKey: "2026-07-03" });
 
     expect((await getNetWorth()).unassignedCents).toBe(96_000);
+    expect((await getLedgerCashMovements()).reduce(
+      (sum, movement) => sum + (movement.direction === "inflow" ? movement.amountCents : -movement.amountCents),
+      0,
+    )).toBe(95_000);
     const { moved } = unwrap(await assignOrphanTransactions(1));
     expect(moved).toBe(2);
 
@@ -413,6 +648,71 @@ describe("assignOrphanTransactions", () => {
     expect(await assignOrphanTransactions(99)).toMatchObject({
       error: expect.stringMatching(/No account with id 99/),
     });
+  });
+
+  it("reassigns posted orphans with immutable corrections and preserves projections", async () => {
+    seedTransaction(temp, {
+      id: 81,
+      categoryId: 2,
+      accountId: null,
+      amountCents: 100_000,
+      dateKey: "2026-07-01",
+      comment: "salary import",
+    });
+    seedTransaction(temp, {
+      id: 82,
+      categoryId: 1,
+      accountId: null,
+      amountCents: 4_000,
+      dateKey: "2026-07-02",
+      comment: "food import",
+    });
+    const beforeEvents = Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"));
+    const beforeIds = temp.query(
+      "SELECT id, current_event_id FROM transactions WHERE id IN (81, 82) ORDER BY id",
+    );
+
+    expect(unwrap(await assignOrphanTransactions(1))).toEqual({ moved: 2 });
+
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"))).toBe(beforeEvents + 2);
+    expect(temp.query(
+      "SELECT id, account_id, category_id, comment, current_event_id FROM transactions WHERE id IN (81, 82) ORDER BY id",
+    )).toEqual([
+      {
+        id: 81,
+        account_id: 1,
+        category_id: 2,
+        comment: "salary import",
+        current_event_id: expect.not.stringContaining(String(beforeIds[0].current_event_id)),
+      },
+      {
+        id: 82,
+        account_id: 1,
+        category_id: 1,
+        comment: "food import",
+        current_event_id: expect.not.stringContaining(String(beforeIds[1].current_event_id)),
+      },
+    ]);
+    expect(balanceOf(await getAccountBalances(), "Main").balanceCents).toBe(96_000);
+    expect((await getNetWorth()).unassignedCents).toBe(0);
+    const verification = await verifyLedger();
+    expect(verification.failures).toEqual([]);
+    expect(verification.ok).toBe(true);
+  });
+
+  it("rolls the whole reassignment batch back when a posted orphan is corrupt", async () => {
+    seedTransaction(temp, { id: 91, categoryId: 2, accountId: null, amountCents: 10_000, dateKey: "2026-07-01" });
+    seedTransaction(temp, { id: 92, categoryId: 1, accountId: null, amountCents: 1_000, dateKey: "2026-07-02" });
+    execOn(temp, (raw) => raw.run("UPDATE transactions SET current_event_id = NULL WHERE id = 92"));
+    const beforeEvents = Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"));
+
+    expect(await assignOrphanTransactions(1)).toMatchObject({
+      error: expect.stringMatching(/missing current_event_id/),
+    });
+    expect(Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"))).toBe(beforeEvents);
+    expect(temp.query(
+      "SELECT id, account_id FROM transactions WHERE id IN (91, 92) ORDER BY id",
+    )).toEqual([{ id: 91, account_id: null }, { id: 92, account_id: null }]);
   });
 });
 

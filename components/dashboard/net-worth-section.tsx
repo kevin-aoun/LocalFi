@@ -30,7 +30,8 @@ import {
   type AccountWithBalance,
   type NetWorthView,
 } from "@/app/actions/accounts";
-import { describeBalance, presentNetWorth } from "@/components/accounts/account-form-logic";
+import { describeBalance } from "@/components/accounts/account-form-logic";
+import { formatCurrencyTotals } from "@/components/assets/currency-totals";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
@@ -43,7 +44,6 @@ import {
   describeSnapshotDrift,
   liabilitiesForDisplay,
   netWorthChangeVsLastMonth,
-  netWorthCurrencies,
   netWorthDomain,
   type NetWorthSnapshotRow,
 } from "./net-worth-series";
@@ -53,8 +53,6 @@ type NetWorthSectionProps = {
   netWorth: NetWorthView;
   /** From `getAccountBalances()`; drives the liability list and the currency check. */
   accounts: AccountWithBalance[];
-  /** Standalone asset rows, for the currency check only. */
-  assets: readonly { currency?: string | null }[];
   /** `net_worth_snapshots`, oldest first, from `getNetWorthHistory()`. */
   history: readonly NetWorthSnapshotRow[];
   /** Called after a snapshot is recorded so the caller can reload. */
@@ -70,10 +68,48 @@ const chartConfig = {
   netWorth: { label: "Net worth", color: "hsl(var(--chart-1))" },
 } satisfies ChartConfig;
 
+type BucketMoneyField =
+  | "totalAssetsCents"
+  | "totalLiabilitiesCents"
+  | "netWorthCents"
+  | "standaloneAssetsCents";
+
+function bucketLabel(netWorth: NetWorthView, field: BucketMoneyField): string {
+  return formatCurrencyTotals(
+    netWorth.currencyTotals.map((total) => ({
+      currency: total.currency,
+      totalCents: total[field],
+      count: 1,
+    })),
+  );
+}
+
+function BucketValues({
+  netWorth,
+  field,
+  className,
+}: {
+  netWorth: NetWorthView;
+  field: BucketMoneyField;
+  className: string;
+}) {
+  return (
+    <div className="space-y-0.5">
+      {netWorth.currencyTotals.map((total) => (
+        <div
+          key={total.currency}
+          className={cn(className, field === "netWorthCents" && total[field] < 0 && "text-red-600 dark:text-red-400")}
+        >
+          {formatMoney(total[field], total.currency)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function NetWorthSection({
   netWorth,
   accounts,
-  assets,
   history,
   onRecorded,
 }: NetWorthSectionProps) {
@@ -82,16 +118,23 @@ export function NetWorthSection({
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [snapshotNote, setSnapshotNote] = useState<string | null>(null);
 
-  // No FX in this app: the totals may only carry a currency symbol when every
-  // account AND every standalone asset agrees on one. Otherwise say so.
-  const { currency, mixed, currencies } = netWorthCurrencies([...accounts, ...assets]);
-  // Formatting only — `presentNetWorth` echoes `netWorthCents`, it never
-  // re-subtracts the halves, which is why this page and /accounts agree.
-  const summary = presentNetWorth(netWorth, currency);
-
-  const series = buildNetWorthSeries(history);
-  const change = netWorthChangeVsLastMonth(history, netWorth.netWorthCents);
-  const drift = describeSnapshotDrift(netWorth.netWorthCents, series.latest, currency);
+  const mixed = netWorth.aggregateCurrency === null;
+  const currencies = netWorth.currencyTotals.map((total) => total.currency);
+  const series = buildNetWorthSeries(history, netWorth.aggregateCurrency ?? undefined);
+  const chartCurrency = series.currency ?? netWorth.aggregateCurrency ?? "USD";
+  const change =
+    netWorth.aggregate === null
+      ? null
+      : netWorthChangeVsLastMonth(
+          history,
+          netWorth.aggregate.netWorthCents,
+          new Date(),
+          netWorth.aggregate.currency,
+        );
+  const drift =
+    netWorth.aggregate === null
+      ? null
+      : describeSnapshotDrift(netWorth.aggregate.netWorthCents, series.latest, chartCurrency);
   const domain = netWorthDomain(series.points);
 
   // Largest debt first, selected by `kind` — see liabilitiesForDisplay.
@@ -110,7 +153,7 @@ export function NetWorthSection({
         return;
       }
       setSnapshotNote(
-        `Recorded ${formatMoney(result.data.netWorthCents, currency)} for ` +
+        `Recorded ${formatMoney(result.data.netWorthCents, result.data.currency)} for ` +
           `${formatDateKey(result.data.date)}. ${result.data.priceSummary}`,
       );
       await onRecorded();
@@ -134,16 +177,16 @@ export function NetWorthSection({
         <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-muted-foreground">
           <span>Assets</span>
           <span className="text-right font-mono text-foreground">
-            {formatMoney(point.totalAssetsCents, currency)}
+            {formatMoney(point.totalAssetsCents, point.currency)}
           </span>
           <span>Liabilities</span>
           <span className="text-right font-mono text-foreground">
-            {formatMoney(point.totalLiabilitiesCents, currency)}
+            {formatMoney(point.totalLiabilitiesCents, point.currency)}
           </span>
         </div>
         <div className="mt-1.5 flex items-center justify-between gap-4 border-t pt-1.5 font-medium">
           <span>Net worth</span>
-          <span className="font-mono">{formatMoney(point.netWorthCents, currency)}</span>
+          <span className="font-mono">{formatMoney(point.netWorthCents, point.currency)}</span>
         </div>
       </div>
     );
@@ -183,17 +226,17 @@ export function NetWorthSection({
         <Card>
           <CardContent className="p-6">
             <div className="text-sm text-muted-foreground">Total assets</div>
-            <div className="mt-1 text-2xl font-bold">{summary.assetsLabel}</div>
+            <BucketValues netWorth={netWorth} field="totalAssetsCents" className="mt-1 text-2xl font-bold" />
             <div className="mt-1 text-xs text-muted-foreground">
               Account balances (opening balance included), plus standalone assets (
-              {summary.standaloneAssetsLabel})
+              {bucketLabel(netWorth, "standaloneAssetsCents")})
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-6">
             <div className="text-sm text-muted-foreground">Total liabilities</div>
-            <div className="mt-1 text-2xl font-bold">{summary.liabilitiesLabel}</div>
+            <BucketValues netWorth={netWorth} field="totalLiabilitiesCents" className="mt-1 text-2xl font-bold" />
             <div className="mt-1 text-xs text-muted-foreground">
               What you owe, shown as a positive amount; it reduces net worth
             </div>
@@ -202,14 +245,7 @@ export function NetWorthSection({
         <Card>
           <CardContent className="p-6">
             <div className="text-sm text-muted-foreground">Net worth</div>
-            <div
-              className={cn(
-                "mt-1 text-3xl font-bold",
-                summary.isNegative && "text-red-600 dark:text-red-400",
-              )}
-            >
-              {summary.netWorthLabel}
-            </div>
+            <BucketValues netWorth={netWorth} field="netWorthCents" className="mt-1 text-3xl font-bold" />
             {/* Real or absent. When no snapshot predates this month there is
                 nothing to compare against, and the block is hidden rather than
                 printing a made-up 0. */}
@@ -222,7 +258,7 @@ export function NetWorthSection({
                   )}
                 >
                   {change.changeCents >= 0 ? "+" : "−"}
-                  {formatMoney(absCents(change.changeCents), currency)}
+                  {formatMoney(absCents(change.changeCents), chartCurrency)}
                 </span>
                 {change.changePercent !== null && (
                   <span
@@ -307,7 +343,7 @@ export function NetWorthSection({
                 )}
               >
                 {series.spanChangeCents >= 0 ? "+" : "−"}
-                {formatMoney(absCents(series.spanChangeCents), currency)}
+                {formatMoney(absCents(series.spanChangeCents), chartCurrency)}
               </span>{" "}
               since {formatDateKey(series.first.dateKey)}
             </span>
@@ -346,7 +382,7 @@ export function NetWorthSection({
                   tickFormatter={(value) => {
                     // Ticks arrive as decimals; render them as money.
                     const cents = tryParseAmount(Number(value));
-                    return cents === null ? "" : formatMoney(cents, currency);
+                    return cents === null ? "" : formatMoney(cents, chartCurrency);
                   }}
                 />
                 <RechartsTooltip content={<NetWorthTooltip />} cursor={false} />
@@ -372,7 +408,7 @@ export function NetWorthSection({
             <p className="max-w-md text-sm text-muted-foreground">{series.message}</p>
             {series.status === "single" && series.latest && (
               <p className="text-sm font-medium">
-                {formatMoney(series.latest.netWorthCents, currency)} on{" "}
+                {formatMoney(series.latest.netWorthCents, series.latest.currency)} on{" "}
                 {formatDateKey(series.latest.dateKey)}
               </p>
             )}
@@ -406,12 +442,19 @@ export function NetWorthSection({
               </span>
             </p>
           )}
-          {summary.hasUnassigned && (
+          {netWorth.currencyTotals.some((total) => total.unassignedCents !== 0) && (
             <p className="flex items-start gap-2">
               <Info className="mt-0.5 h-3 w-3 shrink-0" />
               <span>
-                {summary.unassignedLabel} of the total comes from transactions with no account. It
-                counts towards net worth but towards no account&apos;s balance.
+                {formatCurrencyTotals(
+                  netWorth.currencyTotals
+                    .filter((total) => total.unassignedCents !== 0)
+                    .map((total) => ({
+                      currency: total.currency,
+                      totalCents: total.unassignedCents,
+                      count: 1,
+                    })),
+                )} of the totals comes from transactions with no account.
               </span>
             </p>
           )}
@@ -427,15 +470,13 @@ export function NetWorthSection({
                 >
                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                   <span>
-                    Your accounts and assets use {currencies.join(", ")}. No exchange rates are
-                    applied, so these totals add different currencies together; read them per
-                    account instead.
+                    Net worth is shown as separate {currencies.join(", ")} buckets. No exchange
+                    rates are applied, and no combined amount exists.
                   </span>
                 </p>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                No exchange rates are applied. Amounts in different currencies are added
-                together only because there is no FX source in this app.
+                No exchange rates are applied. Each displayed amount contains one currency only.
               </TooltipContent>
             </Tooltip>
           )}

@@ -2,7 +2,7 @@
  * One-shot conversion of an existing budget database from `real` (float64)
  * money columns to integer minor units ("cents").
  *
- *   npx tsx lib/db/migrate-to-cents.ts [--db <path>] [--dry-run]
+ *   bun x tsx lib/db/migrate-to-cents.ts [--db <path>] [--dry-run]
  *
  * Safety properties, in order of importance:
  *

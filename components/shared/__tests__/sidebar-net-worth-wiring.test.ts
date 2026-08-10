@@ -74,6 +74,15 @@ describe("the sidebar cannot disagree with the home page", () => {
       totalLiabilitiesCents: input.netWorth.totalLiabilitiesCents,
       netWorthCents: input.netWorth.netWorthCents,
       standaloneAssetsCents: input.netWorth.standaloneAssetsCents,
+      currencyTotals: [
+        {
+          currency: "USD",
+          totalAssetsCents: input.netWorth.totalAssetsCents,
+          totalLiabilitiesCents: input.netWorth.totalLiabilitiesCents,
+          netWorthCents: input.netWorth.netWorthCents,
+          standaloneAssetsCents: input.netWorth.standaloneAssetsCents,
+        },
+      ],
     });
   });
 

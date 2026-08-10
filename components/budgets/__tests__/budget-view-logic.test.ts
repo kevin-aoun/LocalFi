@@ -11,7 +11,7 @@
  *   1. a limit of exactly 0 is a REAL ceiling, never "no limit";
  *   2. rollover carries a SURPLUS forward and never a DEFICIT;
  *   3. a period boundary at a month end lands on the right day in every timezone
- *      (the suite is also run at UTC+14 / UTC-11 by `npm run test:tz`);
+ *      (the suite is also run at UTC+14 / UTC-11 by `bun run test:tz`);
  *   4. an Income category can NOT have a budget — a budget is a spending limit,
  *      and a paycheque is not spending. This file used to pin the opposite (an
  *      income "target"); those cases are inverted here rather than deleted, so
@@ -763,7 +763,7 @@ describe("editing an existing budget round-trips through the form", () => {
 
   it("uses the local calendar day, not a UTC one, for that default", () => {
     // Guard for the off-by-one-day class of bug: at UTC+14 and UTC-11 (see
-    // `npm run test:tz`) a toISOString()-derived default would land in the wrong
+    // `bun run test:tz`) a toISOString()-derived default would land in the wrong
     // month here.
     expect(budgetFormStateFrom(null, "2026-03-01").effectiveFrom).toBe("2026-03-01");
     expect(budgetFormStateFrom(null, "2026-12-31").effectiveFrom).toBe("2026-12-01");
@@ -853,7 +853,7 @@ describe("the Budgets UI keeps the house conventions", () => {
   it("the create/update actions refuse an Income budget themselves", () => {
     // The UI is not the only caller: POST /api/agent and the CLI reach these
     // actions directly, so the gate has to live here.
-    const source = stripComments(read("app/actions/budgets.ts"));
+    const source = stripComments(read("app/actions/budgets/mutations.ts"));
     expect(source).toMatch(/incomeBudgetRefusal/);
     expect(source).toMatch(/category\.type === "Income"/);
   });

@@ -3,14 +3,13 @@
  * transactions, and decide what to skip. No React, no DOM, no server actions —
  * so every rule below is unit-testable, including under extreme timezones.
  *
- * ## Formats
+ * ## Formats and trust boundary
  *
- * `.xlsx`, `.xls` and `.csv`. All three go through the SAME reader
- * (`XLSX.read` with `READ_OPTIONS`), the same row conversion and the same
- * parse/dedupe pipeline — CSV is not a second parser, it is the same one fed
- * text instead of bytes. See `READ_OPTIONS` for why `raw: true` is what makes
- * that safe, and `import-csv.test.ts` for the assertions that hold the two
- * paths to identical results.
+ * `.xlsx` is read by the maintained `read-excel-file` parser. CSV has a small
+ * RFC-4180-style reader because `read-excel-file` intentionally only handles
+ * xlsx. Both readers feed the same row conversion and parse/dedupe pipeline.
+ * File bytes and data rows are bounded before anything can reach the server
+ * action, and the server independently enforces the row bound.
  *
  * ## The three bugs this module exists to prevent
  *
@@ -19,13 +18,10 @@
  *    from `category.type`, so an Expense row of `-45.00` *increased* cash by
  *    $45. See `resolveAmount` for the rule that replaced it.
  *
- * 2. **Corrupted dates.** The old code built the Excel epoch in local time and
- *    then called `toISOString()` (off by one east of UTC), and because SheetJS
- *    ran with `raw: false` most date cells arrived as *formatted strings* that
- *    went through `new Date(string)` — which reads `25/12/2026` as an invalid
- *    date and `03/12/2026` as **March 12th**. Now the sheet is read with
- *    `raw: true` so date cells stay Excel serials, and every value goes through
- *    `parseExcelSerial` / `parseFlexibleDate`.
+ * 2. **Corrupted dates.** Spreadsheet date cells arrive from
+ *    `read-excel-file` as UTC `Date`s and are immediately normalized to an ISO
+ *    calendar-day string. Plain strings and unformatted serials continue
+ *    through `parseFlexibleDate`, so timezone and date-order rules remain ours.
  *
  * 3. **Silent wrong-but-plausible days.** `parseFlexibleDate` defaults to US
  *    `MM/DD`, which misreads every EU/Lebanese export. So `dayFirst` is never
@@ -34,7 +30,6 @@
  *    A row whose date cannot be read is REPORTED, never silently replaced with
  *    today's date (which is what the old code did).
  */
-import * as XLSX from "xlsx";
 import {
   parseFlexibleDate,
   toDateKey,
@@ -43,6 +38,39 @@ import {
 import { absCents, tryParseAmount, type Cents } from "@/lib/money";
 
 export type SpreadsheetRow = Record<string, unknown>;
+
+/** Hard bounds for untrusted import input. Keep the server row check in place. */
+export const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024;
+/** Upper bound for the sum of ZIP central-directory uncompressed entry sizes. */
+export const MAX_IMPORT_EXPANDED_BYTES = 50 * 1024 * 1024;
+export const MAX_IMPORT_ROWS = 5_000;
+const MAX_IMPORT_COLUMNS = 100;
+
+export class ImportFileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ImportFileError";
+  }
+}
+
+export function assertImportFileSize(size: number): void {
+  if (!Number.isSafeInteger(size) || size < 0) {
+    throw new ImportFileError("Could not determine the import file size.");
+  }
+  if (size > MAX_IMPORT_FILE_BYTES) {
+    throw new ImportFileError(
+      `The import file is too large. Maximum size is ${MAX_IMPORT_FILE_BYTES / 1024 / 1024} MiB.`,
+    );
+  }
+}
+
+function assertImportRowCount(count: number): void {
+  if (count > MAX_IMPORT_ROWS) {
+    throw new ImportFileError(
+      `The import contains too many rows. Maximum is ${MAX_IMPORT_ROWS.toLocaleString("en-US")} data rows.`,
+    );
+  }
+}
 
 export type ImportCategory = {
   id: number;
@@ -105,72 +133,233 @@ export function detectDateOrder(values: readonly unknown[]): DateOrderDetection 
   return { dayFirst: null, evidence: "none", samples };
 }
 
-/**
- * The ONE set of options every format is read with, and the reason for each.
- *
- * `cellDates: false` keeps date cells as Excel serial NUMBERS, which
- * `parseExcelSerial` converts without ever touching UTC. Letting SheetJS build
- * the `Date` (or, worse, format it to a locale string) is exactly how the day
- * used to shift.
- *
- * `raw: true` is what makes CSV safe. SheetJS's CSV reader runs its own
- * cell-type guessing, and it guesses in US order: without `raw` it converts
- * `01/02/2026` into the serial 46024 — 2 January 2026 — *before* our code sees
- * the cell, so the explicit `dayFirst` toggle has nothing left to decide and is
- * silently ignored. Worse, that conversion goes via the local timezone and comes
- * back FRACTIONAL away from UTC (46023.9997 at UTC+14), so flooring it lands on
- * 1 January: wrong day/month order AND off by one. It also turns `-45.00` into
- * the number -45 before `parseAmount` can see the text.
- * With `raw: true` every cell arrives as written and OUR rules decide.
- *
- * For .xlsx/.xls `raw` at read time is a no-op (dates are already serials in the
- * file), which is why one option set can serve both formats — verified by the
- * "CSV and XLSX produce the same transactions" tests.
- */
-const READ_OPTIONS = { cellDates: false, raw: true } as const;
+type SpreadsheetCell = string | number | boolean | Date | null;
 
-/** First sheet of a parsed workbook -> raw rows. The single conversion point. */
-function firstSheetRows(workbook: XLSX.WorkBook): SpreadsheetRow[] {
-  const name = workbook.SheetNames[0];
-  if (!name) return [];
-  const sheet = workbook.Sheets[name];
-  if (!sheet) return [];
-  return XLSX.utils.sheet_to_json(sheet, { raw: true, defval: null }) as SpreadsheetRow[];
+function isoDayFromUtcDate(value: Date): string {
+  return [
+    String(value.getUTCFullYear()).padStart(4, "0"),
+    String(value.getUTCMonth() + 1).padStart(2, "0"),
+    String(value.getUTCDate()).padStart(2, "0"),
+  ].join("-");
 }
 
-/** Read a BINARY spreadsheet (.xlsx / .xls) into raw rows. */
-export function readSpreadsheetRows(data: ArrayBuffer | Uint8Array): SpreadsheetRow[] {
-  return firstSheetRows(XLSX.read(data, READ_OPTIONS));
+/** Header + cell matrix -> the object shape consumed by the review pipeline. */
+export function spreadsheetMatrixToRows(
+  matrix: readonly (readonly SpreadsheetCell[])[],
+): SpreadsheetRow[] {
+  if (matrix.length === 0) return [];
+  const headers = matrix[0];
+  if (headers.length > MAX_IMPORT_COLUMNS) {
+    throw new ImportFileError(`The import has too many columns. Maximum is ${MAX_IMPORT_COLUMNS}.`);
+  }
+  const data = matrix.slice(1).filter((row) => row.some((cell) => cell !== null && cell !== ""));
+  assertImportRowCount(data.length);
+
+  return data.map((cells) => {
+    if (cells.length > MAX_IMPORT_COLUMNS) {
+      throw new ImportFileError(`The import has too many columns. Maximum is ${MAX_IMPORT_COLUMNS}.`);
+    }
+    const row: SpreadsheetRow = Object.create(null) as SpreadsheetRow;
+    for (let index = 0; index < headers.length; index += 1) {
+      const header = headers[index];
+      if (header === null || String(header).trim() === "") continue;
+      const cell = cells[index] ?? null;
+      row[String(header)] = cell instanceof Date ? isoDayFromUtcDate(cell) : cell;
+    }
+    return row;
+  });
+}
+
+const ZIP_CENTRAL_FILE_SIGNATURE = 0x02014b50;
+const ZIP_END_SIGNATURE = 0x06054b50;
+const ZIP64_SENTINEL = 0xffffffff;
+
+function findZipEnd(view: DataView): number {
+  const minimumOffset = Math.max(0, view.byteLength - 65_557);
+  for (let offset = view.byteLength - 22; offset >= minimumOffset; offset -= 1) {
+    if (view.getUint32(offset, true) === ZIP_END_SIGNATURE) return offset;
+  }
+  throw new ImportFileError("The XLSX archive has no valid central directory.");
 }
 
 /**
- * Read CSV TEXT into raw rows — the same reader, the same options, the same
- * row conversion as .xlsx, so every rule downstream (sign, `dayFirst`, dedupe)
- * is not merely "kept in sync" but is literally the same code.
- *
- * Only two things are CSV-specific:
- *   - the bytes are decoded to text by the caller (SheetJS sniffs a binary
- *     buffer, and a CSV that happens to start with odd bytes can be
- *     mis-sniffed);
- *   - a UTF-8 BOM is stripped, because it would otherwise become part of the
- *     first column's NAME and `pickColumn` would stop finding "Date".
- *
- * The delimiter (`,`, `;`, tab) is detected by SheetJS, so a European export
- * works without a setting.
+ * Reject a ZIP bomb from declared central-directory metadata before any entry
+ * is inflated by `read-excel-file`. ZIP64 and multi-disk inputs are refused
+ * because this small browser-side gate cannot bound them safely.
  */
+export function assertXlsxDeclaredExpandedSize(data: ArrayBuffer): void {
+  const view = new DataView(data);
+  const endOffset = findZipEnd(view);
+  const diskNumber = view.getUint16(endOffset + 4, true);
+  const centralDisk = view.getUint16(endOffset + 6, true);
+  const entryCount = view.getUint16(endOffset + 10, true);
+  const centralSize = view.getUint32(endOffset + 12, true);
+  const centralOffset = view.getUint32(endOffset + 16, true);
+  if (
+    diskNumber !== 0 ||
+    centralDisk !== 0 ||
+    entryCount === 0xffff ||
+    centralSize === ZIP64_SENTINEL ||
+    centralOffset === ZIP64_SENTINEL
+  ) {
+    throw new ImportFileError("ZIP64 or multi-disk XLSX archives are not supported.");
+  }
+  if (centralOffset + centralSize > view.byteLength || centralOffset + centralSize > endOffset) {
+    throw new ImportFileError("The XLSX central directory is invalid.");
+  }
+
+  let offset = centralOffset;
+  let totalExpandedBytes = 0;
+  for (let entry = 0; entry < entryCount; entry += 1) {
+    if (offset + 46 > endOffset || view.getUint32(offset, true) !== ZIP_CENTRAL_FILE_SIGNATURE) {
+      throw new ImportFileError("The XLSX central directory is invalid.");
+    }
+    const expandedBytes = view.getUint32(offset + 24, true);
+    if (expandedBytes === ZIP64_SENTINEL) {
+      throw new ImportFileError("ZIP64 XLSX entries are not supported.");
+    }
+    totalExpandedBytes += expandedBytes;
+    if (!Number.isSafeInteger(totalExpandedBytes) || totalExpandedBytes > MAX_IMPORT_EXPANDED_BYTES) {
+      throw new ImportFileError(
+        `The XLSX archive expands beyond the ${MAX_IMPORT_EXPANDED_BYTES / 1024 / 1024} MiB limit.`,
+      );
+    }
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  if (offset !== centralOffset + centralSize) {
+    throw new ImportFileError("The XLSX central directory size is inconsistent.");
+  }
+}
+
+async function readXlsxRows(data: File | Blob | ArrayBuffer): Promise<SpreadsheetRow[]> {
+  const buffer = data instanceof ArrayBuffer ? data : await data.arrayBuffer();
+  assertXlsxDeclaredExpandedSize(buffer);
+  // Dynamic so the server action can reuse pure `dedupeKey` without evaluating
+  // browser-only file APIs. This function is called only by the client dialog.
+  const { readSheet } = await import("read-excel-file/browser");
+  const matrix = await readSheet(buffer);
+  return spreadsheetMatrixToRows(matrix as unknown as readonly (readonly SpreadsheetCell[])[]);
+}
+
+/**
+ * Read the first sheet of a maintained-parser `.xlsx` input.
+ *
+ * The Buffer overload preserves one legacy report round-trip that feeds CSV
+ * bytes through this function. New UI code routes CSV text to `readCsvRows`.
+ */
+export function readSpreadsheetRows(data: Buffer): SpreadsheetRow[];
+export function readSpreadsheetRows(
+  data: File | Blob | ArrayBuffer | Uint8Array,
+): Promise<SpreadsheetRow[]>;
+export function readSpreadsheetRows(
+  data: File | Blob | ArrayBuffer | Uint8Array,
+): SpreadsheetRow[] | Promise<SpreadsheetRow[]> {
+  if (data instanceof Uint8Array) {
+    assertImportFileSize(data.byteLength);
+    const isZip = data[0] === 0x50 && data[1] === 0x4b;
+    if (!isZip) return readCsvRows(new TextDecoder().decode(data));
+    const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+    return readXlsxRows(buffer);
+  }
+  if (data instanceof ArrayBuffer) assertImportFileSize(data.byteLength);
+  else assertImportFileSize(data.size);
+  return readXlsxRows(data);
+}
+
+function delimiterFor(text: string): "," | ";" | "\t" {
+  const counts = new Map<"," | ";" | "\t", number>([
+    [",", 0],
+    [";", 0],
+    ["\t", 0],
+  ]);
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') {
+      if (quoted && text[index + 1] === '"') index += 1;
+      else quoted = !quoted;
+    } else if (!quoted && (char === "\n" || char === "\r")) {
+      break;
+    } else if (!quoted && counts.has(char as "," | ";" | "\t")) {
+      const delimiter = char as "," | ";" | "\t";
+      counts.set(delimiter, counts.get(delimiter)! + 1);
+    }
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function csvMatrix(text: string): SpreadsheetCell[][] {
+  const delimiter = delimiterFor(text);
+  const rows: SpreadsheetCell[][] = [];
+  let row: SpreadsheetCell[] = [];
+  let cell = "";
+  let quoted = false;
+
+  const finishCell = () => {
+    row.push(cell);
+    cell = "";
+    if (row.length > MAX_IMPORT_COLUMNS) {
+      throw new ImportFileError(`The import has too many columns. Maximum is ${MAX_IMPORT_COLUMNS}.`);
+    }
+  };
+  const finishRow = () => {
+    finishCell();
+    if (row.some((value) => value !== "")) rows.push(row);
+    row = [];
+    if (rows.length > MAX_IMPORT_ROWS + 1) assertImportRowCount(rows.length - 1);
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quoted) {
+      if (char === '"') {
+        if (text[index + 1] === '"') {
+          cell += '"';
+          index += 1;
+        } else {
+          quoted = false;
+        }
+      } else {
+        cell += char;
+      }
+    } else if (char === '"' && cell === "") {
+      quoted = true;
+    } else if (char === delimiter) {
+      finishCell();
+    } else if (char === "\n" || char === "\r") {
+      if (char === "\r" && text[index + 1] === "\n") index += 1;
+      finishRow();
+    } else {
+      cell += char;
+    }
+  }
+  if (quoted) throw new ImportFileError("The CSV contains an unterminated quoted field.");
+  if (cell !== "" || row.length > 0) finishRow();
+  return rows;
+}
+
+/** Read bounded CSV text without guessing cell types or date order. */
 export function readCsvRows(text: string): SpreadsheetRow[] {
   if (typeof text !== "string") return [];
+  assertImportFileSize(new TextEncoder().encode(text).byteLength);
   const withoutBom = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   if (withoutBom.trim() === "") return [];
-  return firstSheetRows(XLSX.read(withoutBom, { ...READ_OPTIONS, type: "string" }));
+  return spreadsheetMatrixToRows(csvMatrix(withoutBom));
 }
 
-/** Extensions the import dialog accepts, for the file input and the copy. */
-export const IMPORT_ACCEPT = ".xlsx,.xls,.csv" as const;
+/** Extensions the import dialog accepts. Legacy binary `.xls` is unsupported. */
+export const IMPORT_ACCEPT = ".xlsx,.csv" as const;
 
 /** True for a `.csv` filename — the only case that needs the text reader. */
 export function isCsvFilename(name: string): boolean {
   return typeof name === "string" && /\.csv$/i.test(name.trim());
+}
+
+export function isSupportedImportFilename(name: string): boolean {
+  return typeof name === "string" && /\.(?:xlsx|csv)$/i.test(name.trim());
 }
 
 /** Case-/space-insensitive column lookup: "Amount", "amount", " AMOUNT " all match. */
@@ -367,18 +556,26 @@ export type DedupeKeyInput = {
   amountCents: Cents;
   /** null for a transfer or a row whose category was deleted. */
   categoryId: number | null;
+  accountId?: number | null;
+  currency?: string | null;
+  direction?: "inflow" | "outflow" | "transfer";
   comment: string | null | undefined;
 };
 
 /**
- * Identity of a transaction for duplicate detection: same calendar day, same
- * magnitude, same category, same comment. Comments are compared case- and
+ * Identity of a transaction for duplicate detection: same calendar day,
+ * magnitude, category, account, denomination, stored direction, and comment.
+ * Optional compatibility defaults model an unassigned USD row; server callers
+ * always pass all three historical/file-location fields. Comments are compared case- and
  * whitespace-insensitively because spreadsheets re-export with cosmetic
  * differences ("Coffee  shop" vs "coffee shop").
  */
 export function dedupeKey(tx: DedupeKeyInput): string {
   const comment = (tx.comment ?? "").trim().replace(/\s+/g, " ").toLowerCase();
-  return `${tx.date}|${tx.amountCents}|${tx.categoryId ?? "none"}|${comment}`;
+  const account = tx.accountId ?? "unassigned";
+  const currency = (tx.currency ?? "USD").trim().toUpperCase();
+  const direction = tx.direction ?? "legacy";
+  return `${tx.date}|${tx.amountCents}|${tx.categoryId ?? "none"}|${account}|${currency}|${direction}|${comment}`;
 }
 
 export type ImportPlan = {

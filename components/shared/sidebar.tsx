@@ -43,6 +43,7 @@ import {
   AlertTriangle,
   Info,
   SlidersHorizontal,
+  ListTree,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useState } from "react";
@@ -69,6 +70,7 @@ const navigation = [
   { name: "Categories", href: "/budgets", icon: Wallet },
   { name: "Reports", href: "/reports", icon: BarChart3 },
   { name: "Travel", href: "/travel", icon: Globe },
+  { name: "Ledger", href: "/ledger", icon: ListTree },
   { name: "Settings", href: "/settings", icon: SettingsIcon },
 ];
 
@@ -79,6 +81,7 @@ export function Sidebar() {
   const [accounts, setAccounts] = useState<AccountWithBalance[]>([]);
   const [assets, setAssets] = useState<SidebarAssetRow[]>([]);
   const [userName, setUserName] = useState("Demo");
+  const [showLedger, setShowLedger] = useState(false);
   /** Why the panel could not be loaded; null when there is nothing to report. */
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -104,6 +107,7 @@ export function Sidebar() {
       setAccounts(accountsData);
       setAssets(assetsData);
       setUserName(settingsData.userName);
+      setShowLedger(settingsData.showLedger);
       setLoadError(null);
     } catch (error) {
       // A rejected load used to leave the panel silently reading "No assets yet",
@@ -120,6 +124,20 @@ export function Sidebar() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const refreshSettings = async () => {
+      try {
+        const settingsData = await getSettings();
+        setUserName(settingsData.userName);
+        setShowLedger(settingsData.showLedger);
+      } catch (error) {
+        console.error("Failed to refresh sidebar settings:", error);
+      }
+    };
+    window.addEventListener("localfi:settings-updated", refreshSettings);
+    return () => window.removeEventListener("localfi:settings-updated", refreshSettings);
+  }, []);
 
   const toggleGroup = (key: string) => {
     setExpandedGroups((current) => {
@@ -145,7 +163,7 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="space-y-1 px-3 py-4">
-        {navigation.map((item) => {
+        {navigation.filter((item) => item.name !== "Ledger" || showLedger).map((item) => {
           const isActive = pathname === item.href;
           return (
             <Link
@@ -218,16 +236,22 @@ export function Sidebar() {
                 href="/accounts"
                 className="mb-2 block rounded-lg px-3 py-2 transition-colors hover:bg-accent/50"
               >
-                <div
-                  className={cn(
-                    "text-xl font-semibold",
-                    view.summary.isNegative && "text-red-600 dark:text-red-400"
-                  )}
-                >
-                  {view.summary.netWorthLabel}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {view.summary.assetsLabel} held · {view.summary.liabilitiesLabel} owed
+                <div className="space-y-1">
+                  {view.summaries.map((summary) => (
+                    <div key={summary.currency}>
+                      <div
+                        className={cn(
+                          "text-xl font-semibold",
+                          summary.isNegative && "text-red-600 dark:text-red-400",
+                        )}
+                      >
+                        {summary.netWorthLabel}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {summary.assetsLabel} held · {summary.liabilitiesLabel} owed
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </Link>
 
@@ -353,15 +377,17 @@ export function Sidebar() {
               })}
 
               <div className="space-y-1.5 px-3 pt-3 text-[11px] text-muted-foreground">
-                {view.summary.hasUnassigned && (
-                  <p className="flex items-start gap-1.5">
-                    <Info className="mt-0.5 h-3 w-3 shrink-0" />
-                    <span>
-                      {view.summary.unassignedLabel} comes from transactions with no
-                      account. It counts towards net worth but towards no account.
-                    </span>
-                  </p>
-                )}
+                {view.summaries
+                  .filter((summary) => summary.hasUnassigned)
+                  .map((summary) => (
+                    <p key={summary.currency} className="flex items-start gap-1.5">
+                      <Info className="mt-0.5 h-3 w-3 shrink-0" />
+                      <span>
+                        {summary.unassignedLabel} comes from transactions with no account in the{" "}
+                        {summary.currency} bucket.
+                      </span>
+                    </p>
+                  ))}
                 {view.derivedCashCount > 0 && (
                   <p className="flex items-start gap-1.5">
                     <Info className="mt-0.5 h-3 w-3 shrink-0" />
@@ -383,13 +409,14 @@ export function Sidebar() {
                       >
                         <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                         <span>
-                          You use {view.currencies.join(", ")}. No exchange rates are applied,
-                          so the total above adds currencies together; read the groups
-                          instead.
+                          Net worth is separated into {view.currencies.join(", ")} buckets.
+                          No exchange rates are applied and no combined total exists.
                         </span>
                       </p>
                     </TooltipTrigger>
-                    <TooltipContent>No exchange rates are applied.</TooltipContent>
+                    <TooltipContent>
+                      Each displayed amount contains one currency only.
+                    </TooltipContent>
                   </Tooltip>
                 )}
               </div>

@@ -130,6 +130,14 @@ describe("periodsBetween", () => {
 });
 
 describe("spendInRange", () => {
+  it("sums signed category movements, including a correction reversal", () => {
+    const rows = [
+      { ...tx("2026-07-02", 10_000), categoryMovementCents: 10_000 },
+      { ...tx("2026-07-03", 4_000), categoryMovementCents: 4_000 },
+      { ...tx("2026-07-04", 4_000), categoryMovementCents: -4_000 },
+    ];
+    expect(spendInRange(rows, FOOD, "2026-07-01", "2026-07-31")).toBe(10_000);
+  });
   it("sums the category's transactions inside the range, inclusive of both ends", () => {
     const spent = spendInRange(
       [tx("2026-07-01", 1_000), tx("2026-07-31", 2_000), tx("2026-08-01", 4_000)],
@@ -156,6 +164,20 @@ describe("spendInRange", () => {
     expect(
       spendInRange(
         [tx("2026-07-02", 1_000), tx("2026-07-03", 5_000, FOOD, { transferAccountId: 2 })],
+        FOOD,
+        "2026-07-01",
+        "2026-07-31",
+      ),
+    ).toBe(1_000);
+  });
+
+  it("counts only stored outflows when immutable direction is present", () => {
+    expect(
+      spendInRange(
+        [
+          tx("2026-07-02", 1_000, FOOD, { direction: "outflow" }),
+          tx("2026-07-03", 5_000, FOOD, { direction: "inflow" }),
+        ],
         FOOD,
         "2026-07-01",
         "2026-07-31",

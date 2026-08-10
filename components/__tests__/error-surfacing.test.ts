@@ -83,7 +83,10 @@ describe("no dialog closes unconditionally after a write", () => {
 });
 
 describe("the Add Asset dialog cannot default to a category the server rejects", () => {
-  const source = read("components/assets/asset-dialog.tsx");
+  // The form source of truth is intentionally extracted from the dialog. Keep
+  // this regression guard pointed at the module that owns the category list
+  // and initializer, so a component split cannot silently stale the test.
+  const source = read("components/assets/asset-form-logic.ts");
 
   it("does not offer Cash at all — it is derived from the ledger", () => {
     const list = /const ASSET_TYPES = \[([^\]]*)\]/.exec(source);

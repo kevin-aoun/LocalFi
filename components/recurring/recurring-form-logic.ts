@@ -3,7 +3,7 @@
  *
  * WHY THIS FILE EXISTS: there is no jsdom/RTL harness in this repo, so every
  * decision the dialog and the list make that could be *wrong* lives here, where
- * vitest can assert it — including under the extreme timezones `npm run test:tz`
+ * vitest can assert it — including under the extreme timezones `bun run test:tz`
  * runs at. Three traps this codebase has been bitten by before are all in scope:
  *
  *   1. `toISOString()` on a calendar day shifts the day for anyone not on UTC.

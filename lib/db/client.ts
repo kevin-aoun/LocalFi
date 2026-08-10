@@ -1,15 +1,15 @@
 /**
  * SQLite (sql.js / WebAssembly) database access for the app.
  *
- * The whole database lives in memory and is flushed to a single file, so the
- * two things that matter are (1) never letting two concurrent callers each
- * load their own in-memory copy and overwrite each other's work, and (2) never
- * leaving a half-written file on disk.
+ * The whole database lives in memory and is flushed to a single file. Before
+ * opening it, this module obtains a heartbeat-backed cross-process writer lease
+ * and completes the backed-up migration journal. In-process writes are then
+ * serialized and every persisted image is replaced atomically.
  *
  * ## How to use it
  *
  *     await withDb(async (db) => {           // serialized + flushed atomically
- *       await db.insert(transactions).values(...);
+ *       await db.insert(transactions).values({ ...draft, pending: true });
  *     });
  *
  *     const rows = await readDb((db) => db.select().from(transactions)); // no flush
@@ -37,6 +37,8 @@
 import { drizzle, type SQLJsDatabase } from "drizzle-orm/sql-js";
 import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 import * as schema from "./schema";
+import { upgradeDatabase } from "./upgrade";
+import { acquireWriterLease, type WriterLease } from "./writer-lease";
 import {
   closeSync,
   copyFileSync,
@@ -51,6 +53,9 @@ import {
   writeSync,
 } from "fs";
 import path from "path";
+import { createHash } from "node:crypto";
+import { canonicalStringify } from "../ledger/canonical";
+import { canonicalDecimal } from "../ledger/decimal";
 
 export type BudgetDb = SQLJsDatabase<typeof schema>;
 export type BudgetDbCallback<T> = (db: BudgetDb, raw: Database) => T | Promise<T>;
@@ -92,34 +97,42 @@ export function resolveDbPath(): string {
 // sql.js runtime
 // ---------------------------------------------------------------------------
 
-let SQL: SqlJsStatic | null = null;
-let sqlLoading: Promise<SqlJsStatic> | null = null;
+type SqlRuntimeState = {
+  SQL: SqlJsStatic | null;
+  loading: Promise<SqlJsStatic> | null;
+};
+
+const runtimeGlobals = globalThis as typeof globalThis & {
+  __localfiSqlRuntime?: SqlRuntimeState;
+};
+const sqlRuntime = (runtimeGlobals.__localfiSqlRuntime ??= {
+  SQL: null,
+  loading: null,
+});
 
 async function initSQL(): Promise<SqlJsStatic> {
-  if (SQL) return SQL;
-  sqlLoading ??= initSqlJs({
+  if (sqlRuntime.SQL) return sqlRuntime.SQL;
+  sqlRuntime.loading ??= initSqlJs({
     locateFile: (file) => path.join(process.cwd(), "node_modules/sql.js/dist", file),
   }).then((loaded) => {
-    SQL = loaded;
-    sqlLoading = null;
+    sqlRuntime.SQL = loaded;
+    sqlRuntime.loading = null;
     return loaded;
   });
-  return sqlLoading;
+  return sqlRuntime.loading;
 }
 
 // ---------------------------------------------------------------------------
 // Global mutation lock (FIFO, one task at a time)
 // ---------------------------------------------------------------------------
 
-let tail: Promise<unknown> = Promise.resolve();
-
 /**
  * Run `task` after every previously queued task has settled. The queue never
  * rejects, so a throwing task can never wedge the lock.
  */
 function runExclusive<T>(task: () => Promise<T>): Promise<T> {
-  const result = tail.then(task, task);
-  tail = result.then(
+  const result = dbRuntime.tail.then(task, task);
+  dbRuntime.tail = result.then(
     () => undefined,
     () => undefined,
   );
@@ -134,12 +147,27 @@ type LoadedDb = {
   file: string;
   raw: Database;
   orm: BudgetDb;
+  lease: WriterLease;
   /** Stat of the file as we last read/wrote it, to spot out-of-process edits. */
   stamp: { mtimeMs: number; size: number } | null;
 };
 
-let loaded: LoadedDb | null = null;
-let loading: { file: string; promise: Promise<LoadedDb> } | null = null;
+type DbRuntimeState = {
+  tail: Promise<unknown>;
+  loaded: LoadedDb | null;
+  loading: { file: string; promise: Promise<LoadedDb> } | null;
+  tmpCounter: number;
+};
+
+const dbRuntimeGlobals = globalThis as typeof globalThis & {
+  __localfiDbRuntime?: DbRuntimeState;
+};
+const dbRuntime = (dbRuntimeGlobals.__localfiDbRuntime ??= {
+  tail: Promise.resolve(),
+  loaded: null,
+  loading: null,
+  tmpCounter: 0,
+});
 
 function stampOf(file: string) {
   if (!existsSync(file)) return null;
@@ -189,35 +217,42 @@ function readImage(file: string): Uint8Array | undefined {
 }
 
 async function loadDatabase(file: string): Promise<LoadedDb> {
-  const SqlJs = await initSQL();
-  const stamp = stampOf(file);
-  const buffer = readImage(file);
-
-  const raw = new SqlJs.Database(buffer as Uint8Array | undefined);
-
-  // A garbage/truncated body can still slip past the header check, and sql.js
-  // only surfaces that on the first query. Fail loudly instead of pretending
-  // the database is empty.
-  let tables: string[];
+  const lease = await acquireWriterLease(file);
+  let raw: Database | null = null;
   try {
+    // Preserve the client's corruption-specific diagnostics before the upgrade
+    // runner attempts to parse an existing image.
+    readImage(file);
+    lease.assertOwned();
+    await upgradeDatabase({ dbPath: file, lease });
+    lease.assertOwned();
+
+    const SqlJs = await initSQL();
+    const stamp = stampOf(file);
+    const buffer = readImage(file);
+    raw = new SqlJs.Database(buffer as Uint8Array | undefined);
+
+    // A garbage/truncated body can still slip past the header check, and sql.js
+    // only surfaces that on the first query. Fail loudly instead of pretending
+    // the database is empty.
     applySessionPragmas(raw);
     const result = raw.exec("SELECT name FROM sqlite_master WHERE type='table'");
-    tables = (result[0]?.values ?? []).map((row) => String(row[0]));
+    const tables = (result[0]?.values ?? []).map((row) => String(row[0]));
+    debug("tables:", tables.join(", ") || "(none)");
+    return { file, raw, orm: drizzle(raw, { schema }), lease, stamp };
   } catch (error) {
-    raw.close();
-    if (buffer) {
-      throw new DatabaseCorruptError(
-        file,
-        `it is not a valid SQLite database (${(error as Error).message})`,
-      );
+    try {
+      raw?.close();
+    } catch {
+      // The readiness failure remains the useful diagnostic.
+    }
+    try {
+      await lease.release();
+    } catch (releaseError) {
+      console.error("[DB] failed to release writer lease after load failure:", releaseError);
     }
     throw error;
   }
-
-  applyAutoMigrations(raw, tables);
-
-  debug("tables:", tables.join(", ") || "(none)");
-  return { file, raw, orm: drizzle(raw, { schema }), stamp };
 }
 
 /**
@@ -228,39 +263,18 @@ async function loadDatabase(file: string): Promise<LoadedDb> {
  */
 function applySessionPragmas(raw: Database) {
   raw.run("PRAGMA foreign_keys = ON");
-}
-
-/**
- * Legacy in-place migrations that used to live in getDb(). They run once per
- * load, in memory; the next flush persists them.
- */
-function applyAutoMigrations(raw: Database, tables: string[]) {
-  try {
-    if (tables.includes("transactions")) {
-      const cols = raw.exec("PRAGMA table_info(transactions)");
-      const colNames = (cols[0]?.values ?? []).map((row) => String(row[1]));
-      if (!colNames.includes("pending")) {
-        raw.exec("ALTER TABLE transactions ADD COLUMN pending integer NOT NULL DEFAULT 0");
-        debug("migrated: added transactions.pending");
-      }
-    }
-
-    if (!tables.includes("visited_countries")) {
-      raw.exec(`
-        CREATE TABLE visited_countries (
-          id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-          country_code text NOT NULL,
-          country_name text NOT NULL,
-          visited_at text DEFAULT (current_timestamp)
-        );
-        CREATE UNIQUE INDEX visited_countries_country_code_unique ON visited_countries (country_code);
-      `);
-      debug("migrated: created visited_countries");
-    }
-  } catch (error) {
-    console.error("[DB] auto-migration failed:", error);
-    throw error;
-  }
+  raw.create_function("ledger_sha256", (value: unknown) => {
+    if (typeof value !== "string") throw new Error("ledger_sha256 requires text");
+    return createHash("sha256").update(value).digest("hex");
+  });
+  raw.create_function("ledger_canonical_json", (value: unknown) => {
+    if (typeof value !== "string") throw new Error("ledger_canonical_json requires text");
+    return canonicalStringify(JSON.parse(value));
+  });
+  raw.create_function("ledger_canonical_decimal", (value: unknown) => {
+    if (typeof value !== "string") throw new Error("ledger_canonical_decimal requires text");
+    return canonicalDecimal(value);
+  });
 }
 
 /** Return the shared database, loading (or reloading) it when necessary. */
@@ -268,54 +282,59 @@ async function ensureLoaded(): Promise<LoadedDb> {
   for (;;) {
     const file = resolveDbPath();
 
-    if (loaded) {
-      if (loaded.file !== file) {
+    if (dbRuntime.loaded) {
+      if (dbRuntime.loaded.file !== file) {
         debug("database path changed, reloading");
-        invalidate();
-      } else if (changedOnDisk(loaded)) {
+        await disposeLoaded(dbRuntime.loaded);
+      } else if (changedOnDisk(dbRuntime.loaded)) {
         console.warn(`[DB] ${file} changed on disk outside this process - reloading it`);
-        invalidate();
+        await disposeLoaded(dbRuntime.loaded);
       } else {
-        return loaded;
+        try {
+          dbRuntime.loaded.lease.assertOwned();
+        } catch (error) {
+          await disposeLoaded(dbRuntime.loaded);
+          throw error;
+        }
+        return dbRuntime.loaded;
       }
     }
 
-    if (loading) {
-      if (loading.file === file) return loading.promise;
-      await loading.promise.catch(() => undefined);
+    if (dbRuntime.loading) {
+      if (dbRuntime.loading.file === file) return dbRuntime.loading.promise;
+      await dbRuntime.loading.promise.catch(() => undefined);
       continue;
     }
 
     const promise = loadDatabase(file).then(
       (entry) => {
-        loaded = entry;
-        loading = null;
+        dbRuntime.loaded = entry;
+        dbRuntime.loading = null;
         return entry;
       },
       (error) => {
-        loading = null;
+        dbRuntime.loading = null;
         throw error;
       },
     );
-    loading = { file, promise };
+    dbRuntime.loading = { file, promise };
     return promise;
   }
 }
 
-/**
- * Drop the cached handle without closing it: a deprecated getDb() caller may
- * still be holding a reference, and closing it under them would turn a
- * recoverable error into a crash.
- */
-function invalidate() {
-  loaded = null;
+async function disposeLoaded(entry: LoadedDb) {
+  if (dbRuntime.loaded === entry) dbRuntime.loaded = null;
+  try {
+    entry.raw.close();
+  } catch (error) {
+    console.error("[DB] error closing database:", error);
+  }
+  await entry.lease.release();
 }
 
 // ---------------------------------------------------------------------------
 // Atomic, durable flush
 // ---------------------------------------------------------------------------
-
-let tmpCounter = 0;
 
 /**
  * Write the in-memory image to disk atomically:
@@ -324,6 +343,7 @@ let tmpCounter = 0;
  * the new one, never a truncated one.
  */
 function flush(entry: LoadedDb) {
+  entry.lease.assertOwned();
   const file = entry.file;
   const image = Buffer.from(entry.raw.export());
   // export() re-opened the connection behind our back; restore the pragmas.
@@ -335,7 +355,10 @@ function flush(entry: LoadedDb) {
   const dir = path.dirname(file);
   mkdirSync(dir, { recursive: true });
 
-  const tmp = path.join(dir, `.${path.basename(file)}.tmp-${process.pid}-${++tmpCounter}`);
+  const tmp = path.join(
+    dir,
+    `.${path.basename(file)}.tmp-${process.pid}-${++dbRuntime.tmpCounter}`,
+  );
   try {
     const fd = openSync(tmp, "wx", 0o600);
     try {
@@ -347,13 +370,20 @@ function flush(entry: LoadedDb) {
 
     // Keep one previous generation so a bad write is recoverable.
     if (existsSync(file)) {
+      const backup = `${file}.bak`;
       try {
-        copyFileSync(file, `${file}.bak`);
+        copyFileSync(file, backup);
       } catch (error) {
-        console.error("[DB] could not refresh backup:", error);
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Could not refresh recoverable database backup at ${backup}; ` +
+            `the live database was not replaced. Remove the obstruction and retry. (${detail})`,
+          { cause: error },
+        );
       }
     }
 
+    entry.lease.assertOwned();
     renameSync(tmp, file); // atomic within the same filesystem
   } catch (error) {
     try {
@@ -396,14 +426,29 @@ function flush(entry: LoadedDb) {
 export function withDb<T>(fn: BudgetDbCallback<T>): Promise<T> {
   return runExclusive(async () => {
     const entry = await ensureLoaded();
+    let transactionOpen = false;
     try {
+      // DECISION: DEC-010 — atomic image replacement supplements, but does not
+      // replace, an actual rollback-capable SQLite transaction.
+      entry.raw.run("BEGIN IMMEDIATE");
+      transactionOpen = true;
       const result = await fn(entry.orm, entry.raw);
+      entry.raw.run("COMMIT");
+      transactionOpen = false;
       flush(entry);
       return result;
     } catch (error) {
+      if (transactionOpen) {
+        try {
+          entry.raw.run("ROLLBACK");
+        } catch {
+          // The callback may have invalidated the transaction; reloading below
+          // still guarantees no partial in-memory image can later be flushed.
+        }
+      }
       // All-or-nothing: discard the possibly half-mutated in-memory image so a
       // later save cannot persist it. The next call reloads from disk.
-      if (loaded === entry) invalidate();
+      if (dbRuntime.loaded === entry) await disposeLoaded(entry);
       throw error;
     }
   });
@@ -416,7 +461,10 @@ export function withDb<T>(fn: BudgetDbCallback<T>): Promise<T> {
 export function readDb<T>(fn: BudgetDbCallback<T>): Promise<T> {
   return runExclusive(async () => {
     const entry = await ensureLoaded();
-    return fn(entry.orm, entry.raw);
+    entry.lease.assertOwned();
+    const result = await fn(entry.orm, entry.raw);
+    entry.lease.assertOwned();
+    return result;
   });
 }
 
@@ -444,7 +492,7 @@ export async function saveDb(): Promise<void> {
     try {
       flush(entry);
     } catch (error) {
-      if (loaded === entry) invalidate();
+      if (dbRuntime.loaded === entry) await disposeLoaded(entry);
       throw error;
     }
   });
@@ -456,15 +504,11 @@ export async function saveDb(): Promise<void> {
  */
 export async function closeDb(): Promise<void> {
   await runExclusive(async () => {
-    if (loading) await loading.promise.catch(() => undefined);
-    const entry = loaded;
-    loaded = null;
+    if (dbRuntime.loading) await dbRuntime.loading.promise.catch(() => undefined);
+    const entry = dbRuntime.loaded;
+    dbRuntime.loaded = null;
     if (entry) {
-      try {
-        entry.raw.close();
-      } catch (error) {
-        console.error("[DB] error closing database:", error);
-      }
+      await disposeLoaded(entry);
     }
   });
 }

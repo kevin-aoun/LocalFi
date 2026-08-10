@@ -37,6 +37,8 @@ import { centsToDecimal, formatMoney, negateCents, sumCents, type Cents } from "
 export type NetWorthSnapshotRow = {
   /** 'YYYY-MM-DD' local calendar day. */
   date: string;
+  /** Missing only in pre-0010 in-memory fixtures, which are USD by provenance. */
+  currency?: string | null;
   totalAssetsCents: Cents;
   /** Positive magnitude of everything owed. */
   totalLiabilitiesCents: Cents;
@@ -46,6 +48,7 @@ export type NetWorthSnapshotRow = {
 
 export type NetWorthPoint = {
   dateKey: DateKey;
+  currency: string;
   /** Local-calendar label for the x-axis. */
   label: string;
   totalAssetsCents: Cents;
@@ -63,7 +66,9 @@ export type NetWorthSeriesStatus =
   /** Exactly one day recorded: a line would be a lie, so show the figure only. */
   | "single"
   /** Two or more days: a trend exists. */
-  | "ready";
+  | "ready"
+  /** Rows span denominations and therefore cannot share one y-axis. */
+  | "mixed";
 
 export type NetWorthSeries = {
   status: NetWorthSeriesStatus;
@@ -77,6 +82,8 @@ export type NetWorthSeries = {
   latest: NetWorthPoint | null;
   /** latest − first, or null when fewer than two points exist. */
   spanChangeCents: Cents | null;
+  currency: string | null;
+  currencies: string[];
 };
 
 /**
@@ -102,9 +109,34 @@ export function formatSnapshotLabel(key: string, options?: { withYear?: boolean 
  */
 export function buildNetWorthSeries(
   rows: readonly NetWorthSnapshotRow[],
+  currency?: string,
 ): NetWorthSeries {
-  const usable = rows.filter((row) => isDateKey(row.date));
-  const droppedCount = rows.length - usable.length;
+  const requested = currency === undefined ? null : normalizeCurrency(currency);
+  const inCurrency =
+    requested === null
+      ? rows
+      : rows.filter((row) => normalizeCurrency(row.currency) === requested);
+  const usable = inCurrency.filter((row) => isDateKey(row.date));
+  const droppedCount = inCurrency.length - usable.length;
+
+  const currencies = [
+    ...new Set(usable.map((row) => normalizeCurrency(row.currency))),
+  ].sort();
+  if (currencies.length > 1) {
+    return {
+      status: "mixed",
+      points: [],
+      message:
+        `History contains ${currencies.join(", ")}. Choose one currency; ` +
+        "LocalFi never plots them on one numeric axis.",
+      droppedCount,
+      first: null,
+      latest: null,
+      spanChangeCents: null,
+      currency: null,
+      currencies,
+    };
+  }
 
   const sorted = [...usable].sort((a, b) => a.date.localeCompare(b.date));
 
@@ -115,6 +147,7 @@ export function buildNetWorthSeries(
 
   const points: NetWorthPoint[] = sorted.map((row) => ({
     dateKey: row.date,
+    currency: normalizeCurrency(row.currency),
     label: formatSnapshotLabel(row.date, { withYear }),
     totalAssetsCents: row.totalAssetsCents,
     totalLiabilitiesCents: row.totalLiabilitiesCents,
@@ -149,6 +182,8 @@ export function buildNetWorthSeries(
       points.length >= 2 && first && latest
         ? sumCents([latest.netWorthCents, negateCents(first.netWorthCents)])
         : null,
+    currency: currencies[0] ?? requested ?? "USD",
+    currencies,
   };
 }
 
@@ -181,10 +216,17 @@ export function netWorthChangeVsLastMonth(
   rows: readonly NetWorthSnapshotRow[],
   currentCents: Cents,
   now: Date = new Date(),
+  currency?: string,
 ): NetWorthChange | null {
   const firstOfThisMonth = toDateKey(startOfMonth(now));
+  const requested = currency === undefined ? null : normalizeCurrency(currency);
   const earlier = rows
-    .filter((row) => isDateKey(row.date) && row.date < firstOfThisMonth)
+    .filter(
+      (row) =>
+        isDateKey(row.date) &&
+        row.date < firstOfThisMonth &&
+        (requested === null || normalizeCurrency(row.currency) === requested),
+    )
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const baseline = earlier[earlier.length - 1];

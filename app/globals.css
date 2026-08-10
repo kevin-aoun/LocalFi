@@ -103,10 +103,25 @@
     pointer-events: none;
     user-select: none;
   }
+  /* Browser text-security repeats one bullet per character and therefore
+     leaks the length of a value. Hide the input text and paint one constant
+     four-dot token instead. The same selector covers numeric inputs and the
+     explicitly tagged text inputs such as opening balances. */
   html[data-privacy-mode="true"] input[type="number"],
   html[data-privacy-mode="true"] input[type="date"],
-  html[data-privacy-mode="true"] input[type="month"] {
-    -webkit-text-security: disc;
+  html[data-privacy-mode="true"] input[type="month"],
+  html[data-privacy-mode="true"] input[data-private-input] {
+    color: transparent !important;
+    caret-color: transparent;
+    text-shadow: none;
+    background-image:
+      radial-gradient(circle at 4px 4px, hsl(var(--foreground)) 0 3px, transparent 3.5px),
+      radial-gradient(circle at 14px 4px, hsl(var(--foreground)) 0 3px, transparent 3.5px),
+      radial-gradient(circle at 24px 4px, hsl(var(--foreground)) 0 3px, transparent 3.5px),
+      radial-gradient(circle at 34px 4px, hsl(var(--foreground)) 0 3px, transparent 3.5px);
+    background-repeat: no-repeat;
+    background-position: 0.75rem center;
+    background-size: 2.25rem 0.5rem;
   }
   /* Remove shadows from all elements */
   * {

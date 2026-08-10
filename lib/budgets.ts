@@ -27,6 +27,9 @@ export type BudgetRow = {
   /** Inclusive last day the budget applies. null = open-ended. */
   effectiveTo: DateKey | null;
   rollover: boolean;
+  /** DECISION: DEC-008 — optional presentation metadata on rollover. */
+  goalName?: string | null;
+  goalAmountCents?: Cents | null;
 };
 
 /** A fixed one-month transfer between two category budgets. */
@@ -45,7 +48,11 @@ export type BudgetReallocationFlow = {
 };
 
 /** A transaction as the budget engine sees it: a calendar day plus a magnitude. */
-export type BudgetLedgerTransaction = CashLedgerTransaction & { dateKey: DateKey };
+export type BudgetLedgerTransaction = CashLedgerTransaction & {
+  dateKey: DateKey;
+  /** Signed category movement: positive consumption, negative income/reversal. */
+  categoryMovementCents?: Cents;
+};
 
 export type BudgetPeriodResult = {
   categoryId: number;
@@ -65,8 +72,65 @@ export type BudgetPeriodResult = {
   /** Surplus handed to the next period: `rollover ? max(0, remaining) : 0`. */
   carriedOutCents: Cents;
   rollover: boolean;
+  /** Nullable target metadata copied from the budget in force. */
+  goalName?: string | null;
+  goalAmountCents?: Cents | null;
   overBudget: boolean;
 };
+
+export type BudgetGoalProgress = {
+  name: string;
+  targetCents: Cents;
+  /** The monthly rule limit: contribution capacity, not a ledger entry. */
+  monthlyAllocationCents: Cents;
+  /** Existing non-negative current-period remaining rollover balance. */
+  savedCents: Cents;
+  remainingCents: Cents;
+  /** Clamped for display; may never render below 0 or above 100. */
+  progressPercent: number;
+};
+
+/**
+ * Present one savings goal using facts already derived by the budget engine.
+ * No transaction or synthetic contribution is created here or by callers.
+ * DECISION: DEC-008
+ */
+export function deriveBudgetGoalProgress(
+  row: Pick<
+    BudgetPeriodResult,
+    | "period"
+    | "limitCents"
+    | "remainingCents"
+    | "rollover"
+    | "goalName"
+    | "goalAmountCents"
+  >,
+): BudgetGoalProgress | null {
+  const goalName = row.goalName?.trim() || null;
+  const targetCents = row.goalAmountCents ?? null;
+  if (goalName === null && targetCents === null) return null;
+  if (
+    goalName === null ||
+    targetCents === null ||
+    !Number.isSafeInteger(targetCents) ||
+    targetCents <= 0 ||
+    row.period !== "monthly" ||
+    !row.rollover
+  ) {
+    throw new Error("Invalid budget goal: goals require a name, positive target, and monthly rollover");
+  }
+
+  const savedCents = Math.max(0, row.remainingCents) as Cents;
+  const remainingCents = Math.max(0, targetCents - savedCents) as Cents;
+  return {
+    name: goalName,
+    targetCents,
+    monthlyAllocationCents: row.limitCents,
+    savedCents,
+    remainingCents,
+    progressPercent: Math.min(100, Math.max(0, (savedCents / targetCents) * 100)),
+  };
+}
 
 function assertPeriod(period: BudgetPeriod) {
   if (!budgetPeriods.includes(period)) {
@@ -194,12 +258,16 @@ export function spendInRange(
       (tx) =>
         tx.categoryId === categoryId &&
         isSpendable(tx) &&
+        // DECISION: DEC-003. Persisted direction is historical truth. Missing
+        // direction preserves the pre-0009 pure-fixture behaviour.
+        (tx.direction == null || tx.direction === "outflow") &&
         tx.dateKey >= startKey &&
         tx.dateKey <= endKey,
     )
     .map((tx) => {
-      assertCents(tx.amountCents, "amountCents");
-      return tx.amountCents;
+      const amount = tx.categoryMovementCents ?? tx.amountCents;
+      assertCents(amount, "category movement");
+      return amount;
     });
   return sumCents(amounts);
 }
@@ -339,6 +407,8 @@ export function budgetPerformance(input: BudgetPerformanceInput): BudgetPeriodRe
           remainingCents,
           carriedOutCents,
           rollover: budget.rollover,
+          goalName: budget.goalName ?? null,
+          goalAmountCents: budget.goalAmountCents ?? null,
           overBudget: remainingCents < 0,
         });
       }

@@ -9,6 +9,7 @@ import {
   chmodSync,
   existsSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -20,6 +21,8 @@ import path from "node:path";
 import initSqlJs, { type Database } from "sql.js";
 import { sql } from "drizzle-orm";
 import { closeDb, getDb, readDb, resolveDbPath, saveDb, withDb } from "../client";
+import { SCHEMA_JOURNAL_TABLE } from "../upgrade";
+import { writerLeasePath } from "../writer-lease";
 
 const SQLITE_HEADER = "SQLite format 3\0";
 
@@ -172,6 +175,30 @@ describe("atomic, durable writes", () => {
     expect(await readNames(dbPath)).toEqual(["X", "Y"]);
   });
 
+  it("fails closed when the backup generation is obstructed, then retries cleanly", async () => {
+    await seedItemsDb();
+    await withDb((_db, raw) => raw.run("INSERT INTO items (name) VALUES ('X')"));
+
+    const original = readFileSync(dbPath);
+    const backup = `${dbPath}.bak`;
+    rmSync(backup, { force: true });
+    mkdirSync(backup);
+
+    await expect(
+      withDb((_db, raw) => raw.run("INSERT INTO items (name) VALUES ('doomed')")),
+    ).rejects.toThrow(/Could not refresh recoverable database backup.*Remove the obstruction/i);
+
+    expect(readFileSync(dbPath).equals(original)).toBe(true);
+    expect(await readNames(dbPath)).toEqual(["X"]);
+    expect(readdirSync(tmpDir).filter((file) => file.includes(".tmp"))).toEqual([]);
+
+    rmSync(backup, { recursive: true, force: true });
+    await withDb((_db, raw) => raw.run("INSERT INTO items (name) VALUES ('recovered')"));
+
+    expect(await readNames(backup)).toEqual(["X"]);
+    expect(await readNames(dbPath)).toEqual(["X", "recovered"]);
+  });
+
   it("leaves the existing database intact when the write cannot complete", async () => {
     await seedItemsDb(["safe"]);
     const original = readFileSync(dbPath);
@@ -306,8 +333,9 @@ describe("lock lifecycle", () => {
 });
 
 describe("readDb", () => {
-  it("reads without writing to disk", async () => {
+  it("does not rewrite an already-ready database", async () => {
     await seedItemsDb(["only"]);
+    await readDb(() => undefined); // first access performs the readiness upgrade
     const before = statSync(dbPath);
 
     const names = await readDb((_db, raw) =>
@@ -318,15 +346,28 @@ describe("readDb", () => {
     const after = statSync(dbPath);
     expect(after.mtimeMs).toBe(before.mtimeMs);
     expect(after.ino).toBe(before.ino);
-    expect(readdirSync(tmpDir)).toEqual(["budget.db"]);
   });
 
-  it("does not create a database file for a read on a missing file", async () => {
+  it("initializes and journals a missing database before the first read", async () => {
     const tables = await readDb((_db, raw) =>
-      raw.exec("SELECT name FROM sqlite_master WHERE type='table'"),
+      (raw.exec("SELECT name FROM sqlite_master WHERE type='table'")[0]?.values ?? []).map(
+        (row) => String(row[0]),
+      ),
     );
-    expect(tables).toBeDefined();
-    expect(existsSync(dbPath)).toBe(false);
+    expect(tables).toContain(SCHEMA_JOURNAL_TABLE);
+    expect(tables).toContain("transactions");
+    expect(existsSync(dbPath)).toBe(true);
+  });
+});
+
+describe("writer lease lifecycle", () => {
+  it("holds the cross-process lease until closeDb", async () => {
+    await readDb(() => undefined);
+    const lockPath = writerLeasePath(dbPath);
+    expect(existsSync(lockPath)).toBe(true);
+
+    await closeDb();
+    expect(existsSync(lockPath)).toBe(false);
   });
 });
 

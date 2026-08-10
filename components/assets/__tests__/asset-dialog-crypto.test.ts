@@ -19,10 +19,10 @@ import path from "node:path";
 
 import { cryptoPriceSymbols, PRICED_HOLDINGS } from "@/lib/prices";
 
-const source = readFileSync(
-  path.join(path.resolve(__dirname, "..", "..", ".."), "components/assets/asset-dialog.tsx"),
-  "utf-8",
-);
+const assetRoot = path.join(path.resolve(__dirname, ".."));
+const source = ["asset-dialog.tsx", "asset-form-fields.tsx", "asset-form-logic.ts"]
+  .map((file) => readFileSync(path.join(assetRoot, file), "utf-8"))
+  .join("\n");
 
 const dialogSource = readFileSync(
   path.join(path.resolve(__dirname, "..", "..", ".."), "components/ui/dialog.tsx"),
@@ -58,6 +58,14 @@ describe("Bitcoin and Ethereum are pickable live-priced holdings", () => {
     expect(source).toMatch(/createLivePricedAsset/);
     expect(source).toMatch(/updateLivePricedAsset/);
     expect(source).toMatch(/getLivePriceQuote/);
+  });
+});
+
+describe("confirmed purchases no longer depend on manual asset linking", () => {
+  it("does not offer the superseded transaction-link workflow", () => {
+    expect(source).not.toMatch(/setAssetPurchaseLinks/);
+    expect(source).not.toMatch(/linkedTransactionIds/);
+    expect(source).not.toMatch(/then link it here/i);
   });
 });
 

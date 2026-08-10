@@ -13,9 +13,12 @@
  * throwaway database via BUDGET_DB_PATH; data/budget.db is never touched.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MAX_IMPORT_ROWS } from "@/components/transactions/import-logic";
+import { verifyLedger } from "@/lib/ledger";
 import { createTempDb, execOn, seedCategory, seedTransaction, type TempDb } from "./support/temp-db";
 
-vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+const revalidatePathMock = vi.hoisted(() => vi.fn());
+vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 
 /** Counts how many times the whole import takes the database lock and flushes. */
 let withDbCalls = 0;
@@ -36,6 +39,7 @@ let temp: TempDb;
 
 beforeEach(async () => {
   withDbCalls = 0;
+  revalidatePathMock.mockReset();
   temp = await createTempDb();
   seedCategory(temp, { id: 1, name: "Groceries", type: "Expense" });
   seedCategory(temp, { id: 2, name: "Salary", type: "Income" });
@@ -56,7 +60,7 @@ const row = (over: Partial<{ date: string; categoryId: number; amount: string; c
 
 function transactionRows() {
   return temp.query(
-    "SELECT id, date, category_id, amount_cents, comment, pending FROM transactions ORDER BY id",
+    "SELECT id, date, category_id, amount_cents, direction, currency, comment, pending, current_event_id, instrument_id, quantity_delta FROM transactions ORDER BY id",
   );
 }
 
@@ -73,11 +77,13 @@ describe("importTransactions inserts the whole batch in one database write", () 
     expect(transactionRows()).toHaveLength(250);
   });
 
-  it("stores the amount as a magnitude and the date as the named calendar day", async () => {
-    await importTransactions([row({ amount: "-45.00" })]);
+  it("stores the magnitude and date as the named calendar day", async () => {
+    await importTransactions([row({ amount: "45.00" })]);
 
     const [stored] = transactionRows();
-    expect(stored.amount_cents).toBe(4500); // magnitude; Expense category subtracts
+    expect(stored.amount_cents).toBe(4500); // magnitude; Expense direction subtracts
+    expect(stored.direction).toBe("outflow");
+    expect(stored.currency).toBe("USD");
     // The stored instant is local midnight of the day the sheet named.
     const readBack = new Date(Number(stored.date) * 1000);
     expect(readBack.getFullYear()).toBe(2026);
@@ -96,14 +102,87 @@ describe("importTransactions inserts the whole batch in one database write", () 
     // 5000 income − 45 expense − 1000 investment
     expect(cash.current_value_cents).toBe(500000 - 4500 - 100000);
   });
+
+  it("snapshots each category's direction onto imported rows", async () => {
+    await importTransactions([
+      row({ categoryId: 2, comment: "salary" }),
+      row({ categoryId: 3, comment: "brokerage" }),
+    ]);
+    expect(transactionRows().map((stored) => stored.direction)).toEqual(["inflow", "outflow"]);
+  });
+
+  it("posts balanced events with replayable projections and no inferred quantities", async () => {
+    await importTransactions([
+      row({ categoryId: 2, amount: "5000.00", comment: "salary" }),
+      row({ categoryId: 3, amount: "1000.00", comment: "brokerage" }),
+    ]);
+
+    const projected = transactionRows();
+    expect(projected.every((stored) => typeof stored.current_event_id === "string")).toBe(true);
+    expect(projected.map((stored) => stored.quantity_delta)).toEqual([null, null]);
+    expect(temp.query("SELECT event_id FROM ledger_events ORDER BY sequence")).toHaveLength(2);
+    expect(temp.query("SELECT event_id FROM ledger_movements ORDER BY event_id, position")).toHaveLength(4);
+    expect(temp.query("SELECT quantity_delta FROM ledger_movements WHERE quantity_delta IS NOT NULL")).toEqual([]);
+
+    const eventRows = temp.query(
+      `SELECT t.id, t.current_event_id, e.metadata_json
+       FROM transactions t JOIN ledger_events e ON e.event_id = t.current_event_id
+       ORDER BY t.id`,
+    );
+    for (const eventRow of eventRows) {
+      const metadata = JSON.parse(String(eventRow.metadata_json));
+      expect(metadata.projectionKey).toBe(eventRow.id);
+      expect(metadata.transaction).toMatchObject({
+        id: eventRow.id,
+        pending: false,
+        instrumentId: null,
+        quantityDelta: null,
+      });
+      expect(metadata.provenance).toEqual({ source: "spreadsheet-import" });
+    }
+    expect(await verifyLedger()).toMatchObject({ ok: true });
+  });
 });
 
 describe("importTransactions is all-or-nothing", () => {
+  it("reports success when post-commit cache revalidation throws", async () => {
+    revalidatePathMock.mockImplementation(() => {
+      throw new Error("static generation store missing");
+    });
+
+    expect(await importTransactions([row({ comment: "committed" })])).toEqual({
+      success: true,
+      inserted: 1,
+      duplicates: 0,
+      repeated: 0,
+    });
+    expect(transactionRows()).toHaveLength(1);
+  });
+
+  it("rejects an over-limit batch before opening the database", async () => {
+    const result = await importTransactions(
+      Array.from({ length: MAX_IMPORT_ROWS + 1 }, (_, index) =>
+        row({ comment: `row ${index}` }),
+      ),
+    );
+
+    expect(result).toMatchObject({ error: expect.stringMatching(/too many rows/i) });
+    expect(withDbCalls).toBe(0);
+    expect(transactionRows()).toHaveLength(0);
+  });
+
   it("writes nothing when any row has an invalid amount", async () => {
     const result = await importTransactions([row(), row({ amount: "not a number" }), row()]);
 
     expect(result).toEqual({ error: 'Row 2: "not a number" is not a valid amount.' });
     expect(transactionRows()).toHaveLength(0); // the good row 1 was NOT committed
+  });
+
+  it("rejects a negative magnitude and writes none of the batch", async () => {
+    const result = await importTransactions([row(), row({ amount: "-45.00" }), row()]);
+
+    expect(result).toEqual({ error: "Row 2: amount cannot be negative. Nothing was imported." });
+    expect(transactionRows()).toHaveLength(0);
   });
 
   it("writes nothing when any row has an invalid date", async () => {
@@ -120,6 +199,26 @@ describe("importTransactions is all-or-nothing", () => {
 
     expect(result).toEqual({ error: "Category 999 does not exist. Nothing was imported." });
     expect(transactionRows()).toHaveLength(0);
+  });
+
+  it("rolls back earlier projections and events when a later event post fails", async () => {
+    execOn(temp, (db) => {
+      db.exec(`CREATE TRIGGER force_second_import_event_failure
+        BEFORE INSERT ON ledger_events
+        WHEN (SELECT COUNT(*) FROM ledger_events) = 1
+        BEGIN SELECT RAISE(ABORT, 'forced late import failure'); END`);
+    });
+
+    const result = await importTransactions([
+      row({ comment: "first would post" }),
+      row({ comment: "second fails late" }),
+      row({ comment: "third never runs" }),
+    ]);
+
+    expect(result).toEqual({ error: "Failed to import transactions. Nothing was saved." });
+    expect(transactionRows()).toEqual([]);
+    expect(temp.query("SELECT event_id FROM ledger_events")).toEqual([]);
+    expect(temp.query("SELECT event_id FROM ledger_movements")).toEqual([]);
   });
 
   it("rejects a row with no category rather than orphaning it", async () => {
@@ -181,10 +280,12 @@ describe("importTransactions de-duplicates", () => {
 
     const first = await importTransactions(batch);
     expect(first).toMatchObject({ inserted: 3 });
+    expect(temp.query("SELECT event_id FROM ledger_events")).toHaveLength(3);
 
     const second = await importTransactions(batch);
     expect(second).toEqual({ success: true, inserted: 0, duplicates: 3, repeated: 0 });
     expect(transactionRows()).toHaveLength(3);
+    expect(temp.query("SELECT event_id FROM ledger_events")).toHaveLength(3);
   });
 
   it("does not treat a different day, amount or category as a duplicate", async () => {
@@ -195,6 +296,32 @@ describe("importTransactions de-duplicates", () => {
       row({ categoryId: 3 }),
     ]);
     expect(result).toEqual({ success: true, inserted: 3, duplicates: 0, repeated: 0 });
+  });
+
+  it("does not collapse equal-looking rows with different stored currencies", async () => {
+    seedTransaction(temp, {
+      categoryId: 1,
+      amountCents: 4500,
+      dateKey: "2026-07-28",
+      comment: "Spinneys",
+    });
+    execOn(temp, (db) => db.run("UPDATE transactions SET currency = 'EUR'"));
+
+    expect(await importTransactions([row()])).toMatchObject({ inserted: 1, duplicates: 0 });
+    expect(transactionRows().map((stored) => stored.currency)).toEqual(["EUR", "USD"]);
+  });
+
+  it("does not collapse equal-looking rows with different stored directions", async () => {
+    seedTransaction(temp, {
+      categoryId: 1,
+      amountCents: 4500,
+      dateKey: "2026-07-28",
+      comment: "Spinneys",
+    });
+    execOn(temp, (db) => db.run("UPDATE transactions SET direction = 'inflow'"));
+
+    expect(await importTransactions([row()])).toMatchObject({ inserted: 1, duplicates: 0 });
+    expect(transactionRows().map((stored) => stored.direction)).toEqual(["inflow", "outflow"]);
   });
 });
 
@@ -240,6 +367,13 @@ describe("importTransactions files the batch against an account", () => {
     expect(accountIds()).toEqual([5, 5, 5]);
   });
 
+  it("snapshots the selected account currency onto every imported row", async () => {
+    seedAccount({ id: 5, name: "Euro Checking" });
+    execOn(temp, (db) => db.run("UPDATE accounts SET currency = 'EUR' WHERE id = 5"));
+    await importTransactions([row({ comment: "a" }), row({ comment: "b" })], { accountId: 5 });
+    expect(transactionRows().map((stored) => stored.currency)).toEqual(["EUR", "EUR"]);
+  });
+
   it("writes NOTHING when the account does not exist", async () => {
     const result = await importTransactions([row()], { accountId: 999 });
     expect(result).toEqual({ error: "Account 999 does not exist. Nothing was imported." });
@@ -252,20 +386,18 @@ describe("importTransactions files the batch against an account", () => {
     expect(transactionRows()).toHaveLength(0);
   });
 
-  it("still de-duplicates across accounts — the same line is the same transaction", async () => {
+  it("keeps equal-looking rows filed to different accounts distinct", async () => {
     seedAccount({ id: 5, name: "Main Checking" });
     seedAccount({ id: 6, name: "Savings" });
 
     expect(await importTransactions([row()], { accountId: 5 })).toMatchObject({ inserted: 1 });
-    // Re-importing the same statement line into a different account must not
-    // double the ledger: `dedupeKey` deliberately excludes the account.
     expect(await importTransactions([row()], { accountId: 6 })).toEqual({
       success: true,
-      inserted: 0,
-      duplicates: 1,
+      inserted: 1,
+      duplicates: 0,
       repeated: 0,
     });
-    expect(accountIds()).toEqual([5]);
+    expect(accountIds()).toEqual([5, 6]);
   });
 
   it("still takes the database lock exactly once when an account is named", async () => {

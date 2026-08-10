@@ -4,7 +4,7 @@
 
 import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronRight, Eye, EyeOff, Pencil, Trash2 } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, Eye, EyeOff, Pencil, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -99,11 +99,13 @@ function HideButton({ label, onHide }: { label: string; onHide: () => void }) {
 function HoldingActions<T extends SidebarAssetRow>({
   holding,
   onEdit,
+  onArchive,
   onDelete,
   onHide,
 }: {
   holding: AssetTableHolding<T>;
   onEdit: (asset: T) => void;
+  onArchive: (assetId: number) => void;
   onDelete: (assetId: number) => void;
   onHide: (keys: string[]) => void;
 }) {
@@ -112,6 +114,14 @@ function HoldingActions<T extends SidebarAssetRow>({
       <HideButton label={holding.name} onHide={() => onHide([holding.key])} />
       {holding.source === "asset" ? (
         <>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`Archive ${holding.name}`}
+            onClick={() => onArchive(holding.asset.id)}
+          >
+            <Archive className="h-4 w-4" />
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -146,6 +156,7 @@ function CategoryRows<T extends SidebarAssetRow>({
   onToggle,
   mixedCurrency,
   onEdit,
+  onArchive,
   onDelete,
   onHide,
 }: {
@@ -154,6 +165,7 @@ function CategoryRows<T extends SidebarAssetRow>({
   onToggle: () => void;
   mixedCurrency: boolean;
   onEdit: (asset: T) => void;
+  onArchive: (assetId: number) => void;
   onDelete: (assetId: number) => void;
   onHide: (keys: string[]) => void;
 }) {
@@ -262,6 +274,7 @@ function CategoryRows<T extends SidebarAssetRow>({
             <HoldingActions
               holding={inline}
               onEdit={onEdit}
+              onArchive={onArchive}
               onDelete={onDelete}
               onHide={onHide}
             />
@@ -290,6 +303,7 @@ function CategoryRows<T extends SidebarAssetRow>({
               <HoldingActions
                 holding={holding}
                 onEdit={onEdit}
+                onArchive={onArchive}
                 onDelete={onDelete}
                 onHide={onHide}
               />
@@ -351,7 +365,7 @@ export function AssetFilterNotice<T extends SidebarAssetRow>({
               <button
                 type="button"
                 onClick={() => onShow([holding.key])}
-                aria-label={`Show ${holding.name} (${holding.amountLabel}) again`}
+                aria-label={`Show ${holding.name} again`}
                 className="flex items-center gap-1.5 rounded-full border border-amber-600/50 bg-amber-100/60 px-2.5 py-1 text-xs transition-colors hover:bg-amber-200 dark:bg-amber-900/50 dark:hover:bg-amber-900"
               >
                 <EyeOff className="h-3 w-3" />
@@ -370,12 +384,14 @@ export function AssetFilterNotice<T extends SidebarAssetRow>({
 export function AssetTable<T extends SidebarAssetRow>({
   view,
   onEdit,
+  onArchive,
   onDelete,
   onHide,
   onShowAll,
 }: {
   view: AssetTableView<T>;
   onEdit: (asset: T) => void;
+  onArchive: (assetId: number) => void;
   onDelete: (assetId: number) => void;
   /** Hide these holding keys. View state only — never written anywhere. */
   onHide: (keys: string[]) => void;
@@ -444,6 +460,7 @@ export function AssetTable<T extends SidebarAssetRow>({
                     onToggle={() => toggle(category.key, expanded)}
                     mixedCurrency={view.mixed}
                     onEdit={onEdit}
+                    onArchive={onArchive}
                     onDelete={onDelete}
                     onHide={onHide}
                   />

@@ -19,9 +19,6 @@ const nextConfig: NextConfig = {
    * into the runner stage.
    */
   serverExternalPackages: ["sql.js"],
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   typescript: {
     ignoreBuildErrors: false,
   },

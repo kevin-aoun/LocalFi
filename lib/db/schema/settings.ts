@@ -7,6 +7,7 @@ export const settings = sqliteTable("settings", {
   userName: text("user_name").notNull().default(""),
   accentColor: text("accent_color").notNull().default("default"),
   theme: text("theme", { enum: ["light", "dark", "system"] }).notNull().default("system"),
+  showLedger: integer("show_ledger", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

@@ -147,10 +147,10 @@ function ownerAssets(): SidebarAssetRow[] {
     asset({
       id: 4,
       category: "Commodities",
-      currentValueCents: 4_861_57,
+      currentValueCents: 300_00,
       commodityType: "Gold",
       priceSymbol: "XAU",
-      quantity: 1.1376,
+      quantity: 0.5,
       unit: "oz",
     }),
   ];
@@ -183,12 +183,8 @@ describe("cash is a row in the table, not a footnote", () => {
 
   it("sits in the SAME list as Commodities and Crypto, ordered by value", () => {
     const view = buildAssetTable(ownerPortfolio());
-    expect(view.categories.map((category) => category.name)).toEqual([
-      "Commodities",
-      "Cash",
-      "Crypto",
-    ]);
-    expect(view.visibleTotalsLabel).toBe(formatMoney(4_861_57 + 4_496_18 + 99_62 + 299_72));
+    expect(view.categories.map((category) => category.name)).toEqual(["Cash", "Crypto", "Commodities"]);
+    expect(view.visibleTotalsLabel).toBe(formatMoney(300_00 + 4_496_18 + 99_62 + 299_72));
   });
 
   it("the Cash line is the ACCOUNT row, so it cannot be edited or deleted as an asset", () => {
@@ -390,7 +386,7 @@ describe("net worth is untouched by moving cash into the list", () => {
     asset({ id: 1, category: DERIVED_CASH_CATEGORY, currentValueCents: 2_000_00 - 503_82 }),
     asset({ id: 2, category: "Crypto", currentValueCents: 99_62 }),
     asset({ id: 3, category: "Crypto", currentValueCents: 299_72 }),
-    asset({ id: 4, category: "Commodities", currentValueCents: 4_861_57 }),
+    asset({ id: 4, category: "Commodities", currentValueCents: 300_00 }),
   ];
 
   const netWorth = deriveNetWorth({
@@ -496,10 +492,10 @@ describe("net worth is untouched by moving cash into the list", () => {
     const withCashListed = buildAssetTable(ownerPortfolio());
 
     // What the old table showed, unchanged...
-    expect(withoutCashListed.visibleTotalsLabel).toBe("$5,260.91");
+    expect(withoutCashListed.visibleTotalsLabel).toBe("$699.34");
     // ...plus the cash it used to relegate to a footnote, and nothing else.
-    expect(withCashListed.visibleTotalsLabel).toBe("$9,757.09");
-    expect(4_861_57 + 99_62 + 299_72 + OWNER_CASH_CENTS).toBe(9_757_09);
+    expect(withCashListed.visibleTotalsLabel).toBe("$5,195.52");
+    expect(300_00 + 99_62 + 299_72 + OWNER_CASH_CENTS).toBe(5_195_52);
   });
 });
 
@@ -517,7 +513,7 @@ describe("hiding a holding excludes it from the figures", () => {
     const after = buildAssetTable({ ...ownerPortfolio(), hidden: [btc.key] });
 
     expect(before.currencyTotals[0].totalCents - after.currencyTotals[0].totalCents).toBe(99_62);
-    expect(after.visibleTotalsLabel).toBe(formatMoney(9_757_09 - 99_62));
+    expect(after.visibleTotalsLabel).toBe(formatMoney(5_195_52 - 99_62));
   });
 
   it("reports the right count and the right excluded amount", () => {
@@ -528,7 +524,7 @@ describe("hiding a holding excludes it from the figures", () => {
     expect(view.filter.visibleCount).toBe(3);
     expect(view.filter.totalCount).toBe(4);
     expect(view.filter.hiddenTotalsLabel).toBe("$99.62");
-    expect(view.filter.unfilteredTotalsLabel).toBe("$9,757.09");
+    expect(view.filter.unfilteredTotalsLabel).toBe("$5,195.52");
     expect(view.filter.hidden.map((holding) => holding.name)).toEqual(["BTC"]);
   });
 
@@ -537,7 +533,7 @@ describe("hiding a holding excludes it from the figures", () => {
 
     expect(view.filter.notice).toBe(
       "Filtered view: 1 of 4 holdings hidden, worth $99.62. " +
-        "The total and percentages below leave it out; your full assets total is $9,757.09.",
+        "The total and percentages below leave it out; your full assets total is $5,195.52.",
     );
     expect(view.filter.badgeLabel).toBe("1 hidden · $99.62 excluded");
     // The honest figure is in the sentence itself, so the filtered total beside
@@ -550,7 +546,7 @@ describe("hiding a holding excludes it from the figures", () => {
     const view = buildAssetTable({ ...ownerPortfolio(), hidden: ["asset-2", "asset-3"] });
     expect(view.filter.notice).toBe(
       "Filtered view: 2 of 4 holdings hidden, worth $399.34. " +
-        "The total and percentages below leave them out; your full assets total is $9,757.09.",
+        "The total and percentages below leave them out; your full assets total is $5,195.52.",
     );
   });
 
@@ -582,13 +578,13 @@ describe("hiding a holding excludes it from the figures", () => {
 
   it("removes a whole category once its last visible holding is hidden", () => {
     const view = buildAssetTable({ ...ownerPortfolio(), hidden: ["asset-2", "asset-3"] });
-    expect(view.categories.map((category) => category.name)).toEqual(["Commodities", "Cash"]);
+    expect(view.categories.map((category) => category.name)).toEqual(["Cash", "Commodities"]);
   });
 
   it("hides the cash line like any other holding", () => {
     const view = buildAssetTable({ ...ownerPortfolio(), hidden: ["account-1"] });
-    expect(view.categories.map((category) => category.name)).toEqual(["Commodities", "Crypto"]);
-    expect(view.visibleTotalsLabel).toBe("$5,260.91");
+    expect(view.categories.map((category) => category.name)).toEqual(["Crypto", "Commodities"]);
+    expect(view.visibleTotalsLabel).toBe("$699.34");
     expect(view.filter.hiddenTotalsLabel).toBe("$4,496.18");
     expect(view.filter.hidden[0].name).toBe("Main");
   });
@@ -597,7 +593,7 @@ describe("hiding a holding excludes it from the figures", () => {
     const view = buildAssetTable({ ...ownerPortfolio(), hidden: ["asset-999", "account-42"] });
     expect(view.filter.active).toBe(false);
     expect(view.filter.hiddenCount).toBe(0);
-    expect(view.visibleTotalsLabel).toBe("$9,757.09");
+    expect(view.visibleTotalsLabel).toBe("$5,195.52");
   });
 
   it("a holding worth exactly $0.00 can be hidden, and says so honestly", () => {
@@ -650,10 +646,10 @@ describe("hiding everything", () => {
     expect(view.isEmpty).toBe(false);
     expect(view.filter.allHidden).toBe(true);
     expect(view.filter.hiddenCount).toBe(4);
-    expect(view.filter.unfilteredTotalsLabel).toBe("$9,757.09");
+    expect(view.filter.unfilteredTotalsLabel).toBe("$5,195.52");
     expect(view.filter.notice).toBe(
-      "Filtered view: 4 of 4 holdings hidden, worth $9,757.09. " +
-        "The total and percentages below leave them out; your full assets total is $9,757.09.",
+      "Filtered view: 4 of 4 holdings hidden, worth $5,195.52. " +
+        "The total and percentages below leave them out; your full assets total is $5,195.52.",
     );
   });
 
@@ -798,7 +794,7 @@ describe("grouping (the original bug)", () => {
     const gold = view.categories
       .flatMap((category) => category.holdings)
       .find((holding) => holding.key === "asset-4")!;
-    expect([gold.name, gold.detail]).toEqual(["Gold", "1.1376 oz"]);
+    expect([gold.name, gold.detail]).toEqual(["Gold", "0.5 oz"]);
     // A crypto holding is named by its price symbol, so the detail is the coin
     // count alone — "BTC" is not printed twice.
     const btc = view.categories
@@ -1019,7 +1015,7 @@ describe("mixed currencies are never summed", () => {
   it("a single-currency portfolio is not flagged", () => {
     const view = buildAssetTable(ownerPortfolio());
     expect(view.mixed).toBe(false);
-    expect(view.visibleTotalsLabel).toBe("$9,757.09");
+    expect(view.visibleTotalsLabel).toBe("$5,195.52");
     expect(view.categories.every((category) => category.mixed === false)).toBe(true);
   });
 });
@@ -1134,7 +1130,7 @@ describe("a category with a single holding", () => {
     expect(commodities.inlineHolding).not.toBeNull();
     expect(commodities.inlineHolding!.key).toBe("asset-4");
     expect(commodities.inlineHolding!.name).toBe("Gold");
-    expect(commodities.inlineHolding!.detail).toBe("1.1376 oz");
+    expect(commodities.inlineHolding!.detail).toBe("0.5 oz");
     expect(commodities.inlineHolding).toBe(commodities.holdings[0]);
   });
 
@@ -1252,28 +1248,28 @@ describe("the owner's portfolio, row by row", () => {
 
     expect(shape).toEqual([
       {
-        name: "Commodities",
-        total: "$4,861.57",
-        share: ["49.83%"],
-        collapsible: false,
-        holdings: [["Gold", "$4,861.57"]],
-      },
-      {
         name: "Cash",
         total: "$4,496.18",
-        share: ["46.08%"],
+        share: ["86.54%"],
         collapsible: false,
         holdings: [["Main", "$4,496.18"]],
       },
       {
         name: "Crypto",
         total: "$399.34",
-        share: ["4.09%"],
+        share: ["7.69%"],
         collapsible: true,
         holdings: [
           ["BTC", "$99.62"],
           ["ETH", "$299.72"],
         ],
+      },
+      {
+        name: "Commodities",
+        total: "$300.00",
+        share: ["5.77%"],
+        collapsible: false,
+        holdings: [["Gold", "$300.00"]],
       },
     ]);
   });
@@ -1288,6 +1284,6 @@ describe("the owner's portfolio, row by row", () => {
     const view = buildAssetTable({ ...ownerPortfolio(), hidden: ["account-1"] });
     const total = view.allocations.reduce((sum, entry) => sum + (entry.percentage ?? 0), 0);
     expect(total).toBeCloseTo(100, 10);
-    expect(view.visibleTotalsLabel).toBe("$5,260.91");
+    expect(view.visibleTotalsLabel).toBe("$699.34");
   });
 });

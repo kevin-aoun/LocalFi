@@ -1,7 +1,7 @@
 /**
  * Regression tests for the off-by-one-day bug (item 1).
  *
- * These must pass under `npm run test:tz`, which re-runs the suite at
+ * These must pass under `bun run test:tz`, which re-runs the suite at
  * TZ=Pacific/Kiritimati (UTC+14) and TZ=Pacific/Niue (UTC-11). Each test that
  * depends on the zone states what the OLD code produced there, so the bug is
  * encoded in the assertions rather than described in a comment.
@@ -10,9 +10,11 @@ import { describe, expect, it } from "vitest";
 import { monthKey, toDateKey } from "@/lib/dates";
 import {
   buildTransactionFormValues,
+  previewInvestmentQuantity,
   toTransactionDateValue,
   toTransactionFormData,
   transactionDateKey,
+  validateTransactionForm,
 } from "../transaction-form-logic";
 
 const OFFSET_MINUTES = new Date(2026, 6, 28).getTimezoneOffset();
@@ -142,5 +144,57 @@ describe("buildTransactionFormValues", () => {
         accountId,
       }).get("accountId")).toBe("");
     }
+  });
+
+  it("rejects negative magnitudes before submitting", () => {
+    const invalid = {
+      categoryId: "1",
+      amount: "-0.01",
+      comment: "x",
+      date: new Date(2026, 6, 28),
+      pending: false,
+    };
+    expect(validateTransactionForm(invalid)).toMatch(/negative/i);
+    expect(() => toTransactionFormData(invalid)).toThrow(/negative/i);
+  });
+
+  it("previews provider-priced quantity but transports an exact user override", () => {
+    expect(previewInvestmentQuantity("1000.00", "50000.00")).toBe("0.02");
+    const values = buildTransactionFormValues({
+      categoryId: "3",
+      accountId: "7",
+      amount: "1000.00",
+      comment: "BTC",
+      date: new Date(2026, 6, 28),
+      pending: false,
+      instrumentSymbol: "BTC",
+      instrumentUnit: "coins",
+      unitPrice: "49999.99",
+      quantity: "0.020000004",
+    });
+    expect(values).toMatchObject({
+      instrumentSymbol: "BTC",
+      instrumentUnit: "coins",
+      unitPrice: "49999.99",
+      quantity: "0.020000004",
+    });
+  });
+
+  it("requires complete positive purchase facts", () => {
+    const base = {
+      categoryId: "3",
+      amount: "1000.00",
+      comment: "BTC",
+      date: new Date(2026, 6, 28),
+      pending: false,
+      instrumentSymbol: "BTC",
+      instrumentUnit: "coins",
+      unitPrice: "50000.00",
+      quantity: "0.02",
+    };
+    expect(validateTransactionForm(base)).toBeNull();
+    expect(validateTransactionForm({ ...base, quantity: "" })).toMatch(/quantity/i);
+    expect(validateTransactionForm({ ...base, quantity: "-0.02" })).toMatch(/positive/i);
+    expect(validateTransactionForm({ ...base, unitPrice: "0" })).toMatch(/unit price/i);
   });
 });

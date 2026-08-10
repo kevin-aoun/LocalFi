@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
  * Unit-test harness for the pure primitives in lib/.
  *
  * NOTE: timezone-sensitive tests must be run with the TZ environment variable
- * set on the *process* (see the `test:tz` npm script). Node reads TZ once at
+ * set on the *process* (see the `test:tz` package script). Node reads TZ once at
  * process start, so stubbing it inside a test has no effect on `new Date(...)`.
  */
 export default defineConfig({
@@ -15,7 +15,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["{lib,app,components,eval,scripts}/**/__tests__/**/*.test.ts"],
+    include: ["{lib,app,components,eval,scripts}/**/__tests__/**/*.test.{ts,tsx}"],
     reporters: ["default"],
   },
 });

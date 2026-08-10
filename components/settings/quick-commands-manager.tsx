@@ -199,11 +199,13 @@ export function QuickCommandsManager({ quickCommands, onSave }: QuickCommandsMan
                           <span className="text-muted-foreground">→</span>
                           <span className="font-medium">{cmd.categoryName}</span>
                           <span className="text-muted-foreground">•</span>
-                          <span className="font-semibold">{formatMoney(cmd.amountCents)}</span>
+                          <span className="font-semibold" data-private-value>{formatMoney(cmd.amountCents)}</span>
                           {cmd.comment && (
                             <>
                               <span className="text-muted-foreground">•</span>
-                              <span className="text-muted-foreground text-xs">{cmd.comment}</span>
+                              <span className="text-muted-foreground text-xs" data-privacy-exempt>
+                                {cmd.comment}
+                              </span>
                             </>
                           )}
                         </div>
@@ -306,6 +308,7 @@ export function QuickCommandsManager({ quickCommands, onSave }: QuickCommandsMan
                         <Input
                           id={`amount-${cmd.id}`}
                           type="number"
+                          data-private-input
                           step="0.01"
                           value={centsToDecimal(cmd.amountCents)}
                           onChange={(e) =>
@@ -332,7 +335,8 @@ export function QuickCommandsManager({ quickCommands, onSave }: QuickCommandsMan
                     <div className="flex justify-between items-center pt-2">
                       <div className="flex items-center gap-2">
                         <code className="text-xs bg-muted px-2 py-1 rounded">
-                          /{cmd.command} → {cmd.categoryName} {formatMoney(cmd.amountCents)}
+                          /{cmd.command} → {cmd.categoryName}{" "}
+                          <span data-private-value>{formatMoney(cmd.amountCents)}</span>
                         </code>
                         {!categoryExists && cmd.categoryName && (
                           <div className="flex items-center gap-1 text-xs text-orange-600">

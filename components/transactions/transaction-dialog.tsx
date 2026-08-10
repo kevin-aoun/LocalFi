@@ -9,12 +9,21 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { createTransaction, updateTransaction } from "@/app/actions/transactions";
+import {
+  createTransaction,
+  previewInvestmentPurchase,
+  updateTransaction,
+} from "@/app/actions/transactions";
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertCircle, CalendarIcon, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { centsToDecimal, formatMoney, type Cents } from "@/lib/money";
-import { toTransactionFormData } from "./transaction-form-logic";
+import { PRICE_SYMBOLS, pricedHolding } from "@/lib/prices";
+import {
+  previewInvestmentQuantity,
+  toTransactionFormData,
+  validateTransactionForm,
+} from "./transaction-form-logic";
 
 type Category = {
   id: number;
@@ -32,9 +41,11 @@ type Transaction = {
   amountCents: Cents;
   comment: string | null;
   date: Date;
-  pending?: boolean;
+  pending?: boolean | null;
   /** The account the row belongs to; null for rows not yet assigned to one. */
   accountId?: number | null;
+  instrumentId?: string | null;
+  quantityDelta?: string | null;
 };
 
 /** The subset of an account row the picker needs. */
@@ -86,6 +97,8 @@ export function TransactionDialog({
   onSuccess,
 }: TransactionDialogProps) {
   const [loading, setLoading] = useState(false);
+  const [providerLoading, setProviderLoading] = useState(false);
+  const [previewSource, setPreviewSource] = useState<string | null>(null);
   /** Server-side failure to show the user; null when there is nothing wrong. */
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -102,9 +115,16 @@ export function TransactionDialog({
    * the account UNCHANGED on update.
    */
   const [accountId, setAccountId] = useState("");
+  const [investment, setInvestment] = useState({
+    instrumentSymbol: "",
+    quantity: "",
+    unitPrice: "",
+    instrumentUnit: "",
+  });
 
   useEffect(() => {
     setError(null);
+    setPreviewSource(null);
     if (transaction) {
       setFormData({
         // A row with no category (a transfer, or one whose category was
@@ -118,6 +138,18 @@ export function TransactionDialog({
       // `== null` and not `|| ""`: an account id is never 0, but the nullish
       // check is what keeps a falsy-zero bug from being introduced later.
       setAccountId(transaction.accountId == null ? "" : String(transaction.accountId));
+      const instrumentSymbol = transaction.instrumentId?.split(":").at(-1) ?? "";
+      const quantity = transaction.quantityDelta ?? "";
+      const quantityNumber = Number(quantity);
+      const inferredUnitPrice = quantityNumber > 0
+        ? centsToInputValue(Math.round(transaction.amountCents / quantityNumber) as Cents)
+        : "";
+      setInvestment({
+        instrumentSymbol,
+        quantity,
+        unitPrice: inferredUnitPrice,
+        instrumentUnit: pricedHolding(instrumentSymbol)?.defaultUnit ?? "",
+      });
     } else {
       setFormData({
         categoryId: "",
@@ -127,6 +159,7 @@ export function TransactionDialog({
       setDate(new Date());
       setIsPending(false);
       setAccountId(defaultAccountId == null ? "" : String(defaultAccountId));
+      setInvestment({ instrumentSymbol: "", quantity: "", unitPrice: "", instrumentUnit: "" });
     }
   }, [transaction, defaultAccountId, open]);
 
@@ -157,20 +190,28 @@ export function TransactionDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setError(null);
+
+    const state = {
+      categoryId: formData.categoryId,
+      amount: formData.amount,
+      comment: formData.comment,
+      date,
+      pending: isPending,
+      accountId,
+      ...investment,
+    };
+    const problem = validateTransactionForm(state);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setLoading(true);
 
     try {
       // The date is serialized by toTransactionFormData, NOT by toISOString():
       // see transaction-form-logic.ts for why that mattered.
-      const formDataObj = toTransactionFormData({
-        categoryId: formData.categoryId,
-        amount: formData.amount,
-        comment: formData.comment,
-        date,
-        pending: isPending,
-        accountId,
-      });
+      const formDataObj = toTransactionFormData(state);
 
       const result = transaction
         ? await updateTransaction(transaction.id, formDataObj)
@@ -199,6 +240,38 @@ export function TransactionDialog({
         qc.command.toLowerCase().includes(formData.comment.slice(1).toLowerCase())
       )
     : [];
+  const selectedCategory = categories.find((category) => String(category.id) === formData.categoryId);
+  const showsInvestment = selectedCategory?.type.toLowerCase() === "investment" || Boolean(
+    transaction?.instrumentId,
+  );
+  const quantityPreview = previewInvestmentQuantity(formData.amount, investment.unitPrice);
+
+  const loadProviderPreview = async () => {
+    setError(null);
+    setProviderLoading(true);
+    try {
+      const result = await previewInvestmentPurchase(
+        investment.instrumentSymbol,
+        formData.amount,
+      );
+      if ("error" in result) {
+        setError(result.error ?? "Failed to load provider preview.");
+        return;
+      }
+      setInvestment((previous) => ({
+        ...previous,
+        instrumentSymbol: result.data.symbol,
+        instrumentUnit: result.data.instrumentUnit,
+        unitPrice: centsToInputValue(result.data.unitPriceMinor as Cents),
+        quantity: result.data.quantity,
+      }));
+      setPreviewSource(result.data.sourceLabel);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load provider preview.");
+    } finally {
+      setProviderLoading(false);
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -259,6 +332,102 @@ export function TransactionDialog({
               )}
             </div>
           </div>
+
+          {showsInvestment && (
+            <div className="space-y-3 rounded-md border p-3">
+              <div>
+                <p className="text-sm font-medium">Investment purchase</p>
+                <p className="text-xs text-muted-foreground">
+                  Confirm the exact acquired quantity. Later prices never rewrite it.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="instrument-symbol">Instrument</Label>
+                  <Select
+                    value={investment.instrumentSymbol}
+                    onValueChange={(symbol) => setInvestment((previous) => ({
+                      ...previous,
+                      instrumentSymbol: symbol,
+                      instrumentUnit: pricedHolding(symbol)?.defaultUnit ?? "",
+                    }))}
+                  >
+                    <SelectTrigger id="instrument-symbol">
+                      <SelectValue placeholder="Choose instrument" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PRICE_SYMBOLS.map((symbol) => (
+                        <SelectItem key={symbol} value={symbol}>
+                          {pricedHolding(symbol)?.label ?? symbol} ({symbol})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="investment-unit-price">Unit price</Label>
+                  <Input
+                    id="investment-unit-price"
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={investment.unitPrice}
+                    onChange={(event) => setInvestment((previous) => ({
+                      ...previous,
+                      unitPrice: event.target.value,
+                    }))}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={
+                  providerLoading || investment.instrumentSymbol === "" || formData.amount === ""
+                }
+                onClick={() => void loadProviderPreview()}
+              >
+                {providerLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Get provider preview
+              </Button>
+              {previewSource && (
+                <p className="text-xs text-muted-foreground">Preview source: {previewSource}</p>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="investment-quantity">Exact quantity</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="investment-quantity"
+                    inputMode="decimal"
+                    value={investment.quantity}
+                    onChange={(event) => setInvestment((previous) => ({
+                      ...previous,
+                      quantity: event.target.value,
+                    }))}
+                    placeholder="0.00000000"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={quantityPreview === null}
+                    onClick={() => {
+                      if (quantityPreview !== null) {
+                        setInvestment((previous) => ({ ...previous, quantity: quantityPreview }));
+                      }
+                    }}
+                  >
+                    Use entered price
+                  </Button>
+                </div>
+                {quantityPreview !== null && (
+                  <p className="text-xs text-muted-foreground">
+                    Provider-price preview: {quantityPreview} {investment.instrumentUnit || "units"}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="category">Category</Label>
@@ -365,6 +534,7 @@ export function TransactionDialog({
               id="pending"
               checked={isPending}
               onCheckedChange={(checked) => setIsPending(checked === true)}
+              disabled={Boolean(transaction && !transaction.pending)}
             />
             <Label htmlFor="pending" className="text-sm font-normal cursor-pointer">
               Pending

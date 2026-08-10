@@ -9,7 +9,7 @@
  * 9. `growth` / `growthAmount` were hardcoded `0`, i.e. the "vs. last month"
  *    block was decoration.
  *
- * The grouping tests must also pass under `npm run test:tz` (UTC+14 / UTC-11):
+ * The grouping tests must also pass under `bun run test:tz` (UTC+14 / UTC-11):
  * the old `getGroupKey` used `toISOString()`.
  */
 import { describe, expect, it } from "vitest";
@@ -37,6 +37,8 @@ const tx = (
     date: Date;
     pending: boolean;
     transferAccountId: number | null;
+    direction: "inflow" | "outflow" | "transfer" | null;
+    currency: string;
   }> = {},
 ) => ({
   categoryId: 2,
@@ -47,6 +49,16 @@ const tx = (
 });
 
 describe("the chart and the headline use ONE rule", () => {
+  it("charts signed real-account legs so openings and split transfers count once", () => {
+    const movements = [
+      tx({ categoryId: null, amountCents: 100_000, direction: "inflow", date: new Date(2026, 0, 1) }),
+      tx({ categoryId: null, amountCents: 20_000, direction: "outflow", date: new Date(2026, 0, 2) }),
+      tx({ categoryId: null, amountCents: 15_000, direction: "inflow", date: new Date(2026, 0, 2) }),
+    ];
+    const candles = buildCashCandles(movements, [], "daily");
+    expect(candles[candles.length - 1].closeCents).toBe(95_000);
+  });
+
   it("summing the per-row contributions reproduces deriveCashBalanceCents", () => {
     const ledger = [
       tx({ categoryId: 1, amountCents: 500000, date: new Date(2026, 5, 1) }),
@@ -95,6 +107,47 @@ describe("the chart and the headline use ONE rule", () => {
       ["2026-06", 100000],
       ["2026-07", 60000],
     ]);
+  });
+
+  it("uses stored direction instead of editable category metadata", () => {
+    const ledger = [
+      tx({
+        categoryId: 2,
+        direction: "inflow",
+        currency: "USD",
+        amountCents: 10_000,
+        date: new Date(2026, 5, 1),
+      }),
+      tx({
+        categoryId: null,
+        direction: "outflow",
+        currency: "USD",
+        amountCents: 2_000,
+        date: new Date(2026, 5, 2),
+      }),
+    ];
+
+    const candles = buildCashCandles(ledger, CATEGORIES, "monthly", "USD");
+    expect(candles.at(-1)?.closeCents).toBe(8_000);
+  });
+
+  it("builds each selected currency without cross-denomination candles", () => {
+    const ledger = [
+      tx({ direction: "inflow", currency: "USD", amountCents: 10_000 }),
+      tx({ direction: "inflow", currency: "EUR", amountCents: 20_000 }),
+    ];
+
+    expect(buildCashCandles(ledger, CATEGORIES, "monthly", "USD").at(-1)?.closeCents).toBe(
+      10_000,
+    );
+    expect(buildCashCandles(ledger, CATEGORIES, "monthly", "EUR").at(-1)?.closeCents).toBe(
+      20_000,
+    );
+    expect(computeCashGrowth(ledger, CATEGORIES, new Date(2026, 6, 20), "EUR")).toEqual({
+      baselineCents: 0,
+      growthAmountCents: 20_000,
+      growthPercent: null,
+    });
   });
 
   it("excludes pending rows, exactly like the headline does", () => {

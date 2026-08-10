@@ -25,7 +25,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { AccountRow, NetWorthTotals } from "@/components/accounts/account-form-logic";
+import type { AccountRow } from "@/components/accounts/account-form-logic";
 import { deriveAccountBalances, deriveNetWorth } from "@/lib/cash-balance";
 import { formatMoney } from "@/lib/money";
 import {
@@ -85,7 +85,7 @@ function inputFor(seed: {
   }>;
   categories?: Array<{ id: number; type: string }>;
   assets?: SidebarAssetRow[];
-}): SidebarViewInput & { netWorth: NetWorthTotals } {
+}): SidebarViewInput {
   const accounts = seed.accounts ?? [];
   const transactions = seed.transactions ?? [];
   const categories = seed.categories ?? [];
@@ -95,6 +95,7 @@ function inputFor(seed: {
     id: a.id,
     kind: a.kind,
     openingBalanceCents: a.openingBalanceCents ?? 0,
+    currency: a.currency ?? "USD",
     archived: a.archived === true,
   }));
 
@@ -381,16 +382,35 @@ describe("currencies are never summed", () => {
   });
 
   it("flags the panel as mixed when accounts and assets disagree", () => {
-    const view = buildSidebarView(
-      inputFor({
-        accounts: [
-          { id: 1, name: "Compte", kind: "asset", type: "Checking", currency: "EUR", openingBalanceCents: 1 },
-        ],
-        assets: [asset({ category: "Crypto", currentValueCents: 1, currency: "USD" })],
-      }),
-    );
+    const input = inputFor({
+      accounts: [
+        { id: 1, name: "Compte", kind: "asset", type: "Checking", currency: "EUR", openingBalanceCents: 1 },
+      ],
+      assets: [asset({ category: "Crypto", currentValueCents: 1, currency: "USD" })],
+    });
+    const view = buildSidebarView(input);
     expect(view.mixed).toBe(true);
     expect(view.currencies).toEqual(["EUR", "USD"]);
+    expect(view.summaries.map((summary) => summary.currency)).toEqual(["EUR", "USD"]);
+
+    const audited = auditSidebarTotals(input);
+    expect(audited.currencyTotals).toEqual([
+      {
+        currency: "EUR",
+        totalAssetsCents: 1,
+        totalLiabilitiesCents: 0,
+        netWorthCents: 1,
+        standaloneAssetsCents: 0,
+      },
+      {
+        currency: "USD",
+        totalAssetsCents: 1,
+        totalLiabilitiesCents: 0,
+        netWorthCents: 1,
+        standaloneAssetsCents: 1,
+      },
+    ]);
+    expect(audited.netWorthCents).toBe(0);
   });
 
   it("labels the totals with the shared currency when there is only one", () => {

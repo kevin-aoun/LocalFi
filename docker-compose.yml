@@ -7,7 +7,7 @@ services:
     #
     # `./data` is bind-mounted, so whatever uid the container writes as becomes
     # the owner of budget.db on the host. As uid 1001 it wrote mode -rw------- and
-    # locked the host user out of their own ledger — `npm test`, the CLI and even
+    # locked the host user out of their own ledger — `bun run test`, the CLI and even
     # `sqlite3` then fail with EACCES. Override with DOCKER_UID/DOCKER_GID in .env
     # if your account is not 1000:1000.
     user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
@@ -19,11 +19,9 @@ services:
       - NODE_ENV=production
       - DATABASE_URL=file:./data/budget.db
       - NEXT_PUBLIC_APP_URL=http://localhost:1313
-      # Reach the model over the private compose network, by service name.
+      # Optional AI profile settings. The app remains usable when needle is
+      # absent; enabling --profile ai supplies the private-network sidecar.
       - NEEDLE_URL=http://needle:8765
-      # Required by POST /api/agent, which fails CLOSED (503) when unset — so an
-      # unconfigured deploy cannot be probed for valid tokens. Set it in .env.local
-      # or the shell; there is deliberately no default.
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
     volumes:
       # BIND-MOUNTED, not a named volume: this is your real ledger, and you want
@@ -31,17 +29,12 @@ services:
       # have — a named volume would start empty and silently give you a fresh,
       # seeded database instead.
       #
-      # ⚠ SINGLE WRITER. `saveDb()` rewrites the whole file and the lock in
-      # lib/db/client.ts is in-process only, so do NOT run `npm run dev`, the
-      # agent CLI, or `db:*` scripts against ./data while this container is up.
-      # Two writers means last-writer-wins on the ENTIRE ledger.
+      # ⚠ SINGLE WRITER. `saveDb()` rewrites the whole file. The app acquires
+      # a cross-process lease before opening the database, so do NOT run
+      # another LocalFi process or `db:*` script against ./data while this
+      # container is up; a second process will refuse the lease.
       - ./data:/app/data
     restart: unless-stopped
-    depends_on:
-      # Only "started", not "healthy": the app must stay useful with the model
-      # down (slash commands still work), and the sidecar takes ~90 s to load.
-      needle:
-        condition: service_started
     healthcheck:
       # 127.0.0.1, not localhost: wget resolves localhost to [::1] but the
       # server binds 0.0.0.0 (IPv4), so the IPv6 probe is always refused.
@@ -61,6 +54,7 @@ services:
   # NEEDLE_ALLOW_NON_LOOPBACK=1, which its Dockerfile sets for exactly this case.)
   # ---------------------------------------------------------------------------
   needle:
+    profiles: [ai]
     build:
       context: .
       dockerfile: agent/Dockerfile
@@ -87,8 +81,9 @@ services:
   # Net-worth snapshot scheduler.
   #
   # It is an HTTP CLIENT of the app, never a second writer: `saveDb()` rewrites
-  # the whole database and the lock in lib/db/client.ts is in-process only, so a
-  # cron that opened budget.db directly could clobber the entire ledger.
+  # the whole database and the app's cross-process lease prevents a second
+  # LocalFi database writer. A cron must call the app endpoint rather than open
+  # budget.db directly.
   #
   # It fires every SNAPSHOT_INTERVAL_HOURS (default 6) rather than once at
   # midnight, because `recordNetWorthToday()` refreshes live holdings and then
@@ -100,6 +95,7 @@ services:
   # never true. Days the machine was off stay honest gaps.
   # ---------------------------------------------------------------------------
   snapshot:
+    profiles: [scheduler]
     image: alpine:latest
     depends_on:
       app:

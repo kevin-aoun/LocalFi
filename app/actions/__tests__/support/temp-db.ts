@@ -11,12 +11,20 @@
  * duplicating DDL that would rot.
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import initSqlJs, { type Database } from "sql.js";
 import { getTableConfig, type SQLiteTable } from "drizzle-orm/sqlite-core";
 import { closeDb } from "@/lib/db/client";
 import * as schema from "@/lib/db/schema";
+import {
+  buildProjectedTransactionMovements,
+  buildTransactionProjection,
+  canonicalDecimal,
+  canonicalStringify,
+  postLedgerEventRaw,
+} from "@/lib/ledger";
 
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const MIGRATIONS_DIR = path.join(PROJECT_ROOT, "drizzle", "migrations");
@@ -166,7 +174,7 @@ export function seedCategory(
   });
 }
 
-/** Insert a transaction directly, bypassing the action under test. */
+/** Seed a draft, or atomically post a confirmed event-backed projection. */
 export function seedTransaction(
   temp: TempDb,
   values: { categoryId: number; amountCents: number; dateKey: string; comment?: string | null; pending?: boolean },
@@ -174,10 +182,55 @@ export function seedTransaction(
   const [y, m, d] = values.dateKey.split("-").map(Number);
   const seconds = Math.floor(new Date(y, m - 1, d).getTime() / 1000);
   execOn(temp, (db) => {
+    db.run("BEGIN IMMEDIATE");
+    try {
     db.run(
-      "INSERT INTO transactions (date, category_id, amount_cents, comment, pending) VALUES (?, ?, ?, ?, ?)",
+      `INSERT INTO transactions
+        (date, category_id, account_id, amount_cents, direction, currency, comment, pending)
+       VALUES (?, ?, NULL, ?, 'outflow', 'USD', ?, ?)`,
       [seconds, values.categoryId, values.amountCents, values.comment ?? null, values.pending ? 1 : 0],
     );
+    if (!values.pending) {
+      const id = Number(db.exec("SELECT last_insert_rowid()")[0].values[0][0]);
+      const timestamp = Number(db.exec(
+        `SELECT created_at FROM transactions WHERE id = ${id}`,
+      )[0].values[0][0]);
+      const snapshot = {
+        id,
+        date: seconds,
+        categoryId: values.categoryId,
+        accountId: null,
+        transferAccountId: null,
+        amountCents: values.amountCents,
+        direction: "outflow" as const,
+        currency: "USD",
+        comment: values.comment ?? null,
+        recurringId: null,
+        recurringOccurrence: null,
+        instrumentId: null,
+        quantityDelta: null,
+        transferPrincipalAmountCents: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      const event = postLedgerEventRaw(db, {
+        effectiveDate: values.dateKey,
+        description: values.comment ?? "Fixture transaction",
+        metadata: {
+          projectionKey: id,
+          transaction: buildTransactionProjection(snapshot),
+          fixture: true,
+        },
+        movements: buildProjectedTransactionMovements(db, snapshot),
+        recordedAt: timestamp,
+      });
+      db.run("UPDATE transactions SET current_event_id = ? WHERE id = ?", [event.eventId, id]);
+    }
+    db.run("COMMIT");
+    } catch (error) {
+      try { db.run("ROLLBACK"); } catch { /* keep the original fixture failure */ }
+      throw error;
+    }
   });
 }
 
@@ -199,6 +252,18 @@ export function execOn(temp: TempDb, fn: (db: import("sql.js").Database) => void
   if (!SQL) throw new Error("createTempDb() must be awaited first");
   const handle = new SQL.Database(readFileSync(temp.file));
   try {
+    handle.create_function("ledger_sha256", (value: unknown) => {
+      if (typeof value !== "string") throw new Error("ledger_sha256 requires text");
+      return createHash("sha256").update(value).digest("hex");
+    });
+    handle.create_function("ledger_canonical_json", (value: unknown) => {
+      if (typeof value !== "string") throw new Error("ledger_canonical_json requires text");
+      return canonicalStringify(JSON.parse(value));
+    });
+    handle.create_function("ledger_canonical_decimal", (value: unknown) => {
+      if (typeof value !== "string") throw new Error("ledger_canonical_decimal requires text");
+      return canonicalDecimal(value);
+    });
     fn(handle);
     writeFileSync(temp.file, Buffer.from(handle.export()));
   } finally {

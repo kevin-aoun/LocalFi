@@ -72,6 +72,10 @@ function endOfLastMonthKey(now = new Date()): string {
   return toDateKey(endOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1)));
 }
 
+function seedDatedAccount(values: Parameters<typeof seedAccount>[1], openingBalanceDate: string) {
+  seedAccount(temp, { ...values, openingBalanceDate });
+}
+
 describe("a brand-new database", () => {
   it("reports an empty history instead of drawing a flat line", async () => {
     const series = buildNetWorthSeries(await getNetWorthHistory());
@@ -138,7 +142,10 @@ describe("the chart plots what the headline prints", () => {
   });
 
   it("excludes the derived Cash asset from the standalone side (no double count)", async () => {
-    seedAccount(temp, { name: "Checking", kind: "asset", type: "Checking", openingBalanceCents: 100_000 });
+    seedDatedAccount(
+      { name: "Checking", kind: "asset", type: "Checking", openingBalanceCents: 100_000 },
+      "2000-01-01",
+    );
     // What `syncCashAsset` writes: the ledger, mirrored into the assets table.
     seedAsset(temp, { category: "Cash", currentValueCents: 100_000 });
     seedAsset(temp, { category: "Savings", currentValueCents: 25_000 });
@@ -153,7 +160,10 @@ describe("the chart plots what the headline prints", () => {
   });
 
   it("says so when the live figure has moved since the last snapshot", async () => {
-    seedAccount(temp, { name: "Checking", kind: "asset", type: "Checking", openingBalanceCents: 100_000 });
+    seedDatedAccount(
+      { name: "Checking", kind: "asset", type: "Checking", openingBalanceCents: 100_000 },
+      "2000-01-01",
+    );
     await snapshotNetWorth({ dateKey: endOfLastMonthKey() });
 
     // A new account appears after that snapshot: net worth has moved since.
@@ -171,7 +181,10 @@ describe("the chart plots what the headline prints", () => {
 
 describe("history accrues into a plottable trend", () => {
   it("becomes 'ready' with two days, oldest first, and spans the real change", async () => {
-    seedAccount(temp, { name: "Checking", kind: "asset", type: "Checking", openingBalanceCents: 100_000 });
+    seedDatedAccount(
+      { name: "Checking", kind: "asset", type: "Checking", openingBalanceCents: 100_000 },
+      "2000-01-01",
+    );
     await snapshotNetWorth({ dateKey: endOfLastMonthKey() });
     seedAccount(temp, { name: "Savings", kind: "asset", type: "Savings", openingBalanceCents: 50_000 });
     await snapshotNetWorth();
@@ -202,7 +215,10 @@ describe("history accrues into a plottable trend", () => {
   });
 
   it("computes 'vs. last month' from a real prior-month snapshot", async () => {
-    seedAccount(temp, { name: "Checking", kind: "asset", type: "Checking", openingBalanceCents: 100_000 });
+    seedDatedAccount(
+      { name: "Checking", kind: "asset", type: "Checking", openingBalanceCents: 100_000 },
+      "2000-01-01",
+    );
     await snapshotNetWorth({ dateKey: endOfLastMonthKey() });
     seedAccount(temp, { name: "Savings", kind: "asset", type: "Savings", openingBalanceCents: 50_000 });
 

@@ -103,19 +103,24 @@ describe("deleteCategory refuses to orphan transactions", () => {
     expect(await countCategoryUsage(99)).toBe(0);
   });
 
-  it("still refuses when a transaction was orphaned before the fix landed", async () => {
+  it("fails closed when a transaction was orphaned before the fix landed", async () => {
     // Simulate the shape of the live damage: a row pointing at category 0.
     seedCategory(temp, { id: 1, name: "Groceries", type: "Expense" });
     execOn(temp, (db) => {
       db.run("PRAGMA foreign_keys = OFF");
       db.run(
-        "INSERT INTO transactions (date, category_id, amount_cents, comment, pending) VALUES (0, 0, 100, 'orphan', 0)",
+        "INSERT INTO transactions (date, category_id, amount_cents, comment, pending) VALUES (0, 0, 100, 'orphan', 1)",
       );
     });
 
-    // Deleting category 1 is still allowed (nothing references it)…
-    expect(await deleteCategory(1)).toEqual({ success: true });
-    // …and the orphan is untouched: repairing it is a migration's job, not ours.
+    // DECISION: DEC-005 — database readiness refuses pre-existing FK
+    // corruption before any product query or delete can run.
+    const result = await deleteCategory(1);
+    expect(result).toMatchObject({ error: "Failed to delete category." });
+    // The failed startup leaves both the referenced category and the orphan
+    // untouched. Repairing existing corruption is a migration/recovery job,
+    // not a destructive action side effect.
+    expect(temp.query("SELECT id FROM categories")).toEqual([{ id: 1 }]);
     expect(temp.query("SELECT category_id FROM transactions")).toEqual([{ category_id: 0 }]);
   });
 });

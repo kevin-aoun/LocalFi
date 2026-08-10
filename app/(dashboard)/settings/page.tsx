@@ -11,6 +11,7 @@ import { Loader2 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { QuickCommandsManager } from "@/components/settings/quick-commands-manager";
 import { ColorPicker } from "@/components/ui/color-picker";
+import { Switch } from "@/components/ui/switch";
 import {
   ACCENT_PRESETS,
   DEFAULT_ACCENT,
@@ -25,6 +26,8 @@ export default function SettingsPage() {
   // the truthful "Default" rather than a black swatch while settings load.
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT);
   const [quickCommands, setQuickCommands] = useState<QuickCommand[]>([]);
+  const [showLedger, setShowLedger] = useState(false);
+  const [ledgerSaving, setLedgerSaving] = useState(false);
   const { theme, setTheme } = useTheme();
   const [saved, setSaved] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -40,6 +43,7 @@ export default function SettingsPage() {
     const settings = await getSettings();
     setUserName(settings.userName);
     setAccentColor(settings.accentColor);
+    setShowLedger(settings.showLedger);
     setQuickCommands(settings.quickCommands || []);
     // Don't override the current theme - it's already set by next-themes
   };
@@ -68,6 +72,7 @@ export default function SettingsPage() {
         userName,
         accentColor,
         theme: (theme as "light" | "dark" | "system") || "system",
+        showLedger,
         quickCommands,
       });
       if (!ok) return;
@@ -88,6 +93,7 @@ export default function SettingsPage() {
       userName,
       accentColor,
       theme: (theme as "light" | "dark" | "system") || "system",
+      showLedger,
       quickCommands: commands,
     });
   };
@@ -113,8 +119,39 @@ export default function SettingsPage() {
       userName,
       accentColor: color,
       theme: (theme as "light" | "dark" | "system") || "system",
+      showLedger,
       quickCommands,
     });
+  };
+
+  const handleLedgerVisibilityChange = async (next: boolean) => {
+    const previous = showLedger;
+    setShowLedger(next);
+    setLedgerSaving(true);
+    setSaved(false);
+
+    try {
+      const ok = await save({
+        userName,
+        accentColor,
+        theme: (theme as "light" | "dark" | "system") || "system",
+        showLedger: next,
+        quickCommands,
+      });
+      if (!ok) {
+        setShowLedger(previous);
+        return;
+      }
+
+      const persisted = await getSettings();
+      setShowLedger(persisted.showLedger);
+      window.dispatchEvent(new Event("localfi:settings-updated"));
+    } catch (err) {
+      setShowLedger(previous);
+      setError(err instanceof Error ? err.message : "Failed to update Ledger visibility.");
+    } finally {
+      setLedgerSaving(false);
+    }
   };
 
   /**
@@ -154,6 +191,43 @@ export default function SettingsPage() {
           </button>
         </div>
       )}
+
+      <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-card to-muted/30">
+        <CardHeader>
+          <CardTitle>Developer tools</CardTitle>
+          <CardDescription>
+            Inspect LocalFi&apos;s append-only journal without changing financial records.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-start justify-between gap-6 rounded-lg border bg-background/70 p-4">
+            <div className="space-y-1">
+              <Label htmlFor="show-ledger" className="text-base font-medium">
+                Show Ledger explorer
+              </Label>
+              <p id="show-ledger-description" className="max-w-2xl text-sm text-muted-foreground">
+                Adds Ledger to the sidebar and reveals the read-only event and hash-chain explorer.
+                This controls visibility only—the journal keeps recording confirmed financial events
+                whether this switch is on or off.
+              </p>
+              {ledgerSaving && (
+                <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  Saving preference…
+                </p>
+              )}
+            </div>
+            <Switch
+              id="show-ledger"
+              checked={showLedger}
+              onCheckedChange={handleLedgerVisibilityChange}
+              disabled={ledgerSaving}
+              aria-describedby="show-ledger-description"
+              aria-label="Show Ledger explorer"
+            />
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 md:grid-cols-2">
         {/* Profile Settings */}

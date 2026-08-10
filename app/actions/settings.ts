@@ -3,8 +3,8 @@
 import { readDb, withDb } from "@/lib/db/client";
 import { settings, quickCommands } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { assertCents, type Cents } from "@/lib/money";
+import { revalidate } from "@/lib/revalidate";
 
 export type QuickCommand = {
   id: number;
@@ -19,6 +19,7 @@ export type Settings = {
   userName: string;
   accentColor: string;
   theme: "light" | "dark" | "system";
+  showLedger: boolean;
   quickCommands: QuickCommand[];
 };
 
@@ -32,6 +33,7 @@ export async function getSettings(): Promise<Settings> {
           userName: "",
           accentColor: "default",
           theme: "system" as const,
+          showLedger: false,
         },
       commands: await db.select().from(quickCommands),
     };
@@ -41,6 +43,7 @@ export async function getSettings(): Promise<Settings> {
     userName: settingsRow.userName,
     accentColor: settingsRow.accentColor,
     theme: settingsRow.theme,
+    showLedger: settingsRow.showLedger,
     quickCommands: commands.map(cmd => ({
       id: cmd.id,
       command: cmd.command,
@@ -85,6 +88,7 @@ export async function updateSettings(newSettings: Settings) {
             userName: newSettings.userName,
             accentColor: newSettings.accentColor,
             theme: newSettings.theme,
+            showLedger: newSettings.showLedger,
             updatedAt: new Date(),
           })
           .where(eq(settings.id, existingSettings[0].id));
@@ -93,6 +97,7 @@ export async function updateSettings(newSettings: Settings) {
           userName: newSettings.userName,
           accentColor: newSettings.accentColor,
           theme: newSettings.theme,
+          showLedger: newSettings.showLedger,
         });
       }
 
@@ -111,8 +116,7 @@ export async function updateSettings(newSettings: Settings) {
       }
     });
 
-    revalidatePath("/");
-    revalidatePath("/settings");
+    revalidate("/", "/settings", "/ledger");
     return { success: true };
   } catch (error) {
     console.error("Failed to update settings:", error);

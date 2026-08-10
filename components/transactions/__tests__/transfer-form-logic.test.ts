@@ -7,7 +7,7 @@
  * account, and `createTransfer` in app/actions/transactions.ts expects exactly
  * the field names asserted below.
  *
- * Must pass under `npm run test:tz`: the date goes over the wire through the
+ * Must pass under `bun run test:tz`: the date goes over the wire through the
  * same local-midnight serialization as an ordinary transaction.
  */
 import { describe, expect, it } from "vitest";
@@ -30,6 +30,8 @@ function state(over: Partial<TransferFormState> = {}): TransferFormState {
     comment: "To savings",
     date: new Date(2026, 6, 28),
     pending: false,
+    principalAmount: "",
+    interestCategoryId: "",
     ...over,
   };
 }
@@ -63,6 +65,15 @@ describe("buildTransferFormValues", () => {
     expect(formData.get("amount")).toBe("1000.00");
     expect(formData.get("comment")).toBe("To savings");
     expect(formData.get("pending")).toBe("true");
+  });
+
+  it("adds principal and interest fields only for an explicit split", () => {
+    expect(buildTransferFormValues(state())).not.toHaveProperty("principalAmount");
+    expect(buildTransferFormValues(state({
+      amount: "110.00",
+      principalAmount: "100.00",
+      interestCategoryId: "9",
+    }))).toMatchObject({ principalAmount: "100.00", interestCategoryId: "9" });
   });
 
   it("serializes the picked day, not its UTC equivalent", () => {
@@ -111,9 +122,42 @@ describe("validateTransferForm", () => {
     expect(validateTransferForm(state({ amount: "-50" }))).toMatch(/swap/i);
   });
 
+  it("rejects accounts with different currencies", () => {
+    expect(
+      validateTransferForm(state(), [
+        { id: 10, currency: "USD" },
+        { id: 11, currency: "EUR" },
+      ]),
+    ).toMatch(/without an FX model/i);
+    expect(
+      validateTransferForm(state(), [
+        { id: 10, currency: "usd" },
+        { id: 11, currency: "USD" },
+      ]),
+    ).toBeNull();
+  });
+
   it("accepts a transfer with no comment", () => {
     expect(validateTransferForm(state({ comment: "" }))).toBeNull();
     expect(buildTransferFormValues(state({ comment: "" })).comment).toBe("");
+  });
+
+  it("validates a principal and interest split", () => {
+    expect(validateTransferForm(state({
+      amount: "110.00",
+      principalAmount: "100.00",
+      interestCategoryId: "9",
+    }))).toBeNull();
+    expect(validateTransferForm(state({
+      amount: "110.00",
+      principalAmount: "100.00",
+      interestCategoryId: "",
+    }))).toMatch(/category/i);
+    expect(validateTransferForm(state({
+      amount: "110.00",
+      principalAmount: "120.00",
+      interestCategoryId: "9",
+    }))).toMatch(/exceed/i);
   });
 });
 
@@ -149,6 +193,21 @@ describe("transferFormFromTransaction", () => {
     });
     expect(form.amount).toBe("0");
     expect(form.comment).toBe("");
+    expect(validateTransferForm(form)).toBeNull();
+  });
+
+  it("round-trips the stored principal and interest category", () => {
+    const form = transferFormFromTransaction({
+      id: 10,
+      accountId: 10,
+      transferAccountId: 11,
+      amountCents: 11_000,
+      transferPrincipalAmountCents: 10_000,
+      allocations: [{ categoryId: 9, amountCents: 1_000 }],
+      date: new Date(2026, 6, 28),
+    });
+    expect(form.principalAmount).toBe("100");
+    expect(form.interestCategoryId).toBe("9");
     expect(validateTransferForm(form)).toBeNull();
   });
 

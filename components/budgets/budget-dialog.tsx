@@ -9,6 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { createCategory, updateCategory } from "@/app/actions/categories";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { toCategoryFormData } from "./budget-form-logic";
+import {
+  CATEGORY_ICON_OPTIONS,
+  CategoryIcon,
+} from "./category-icons";
 
 type Category = {
   id: number;
@@ -24,12 +28,6 @@ type BudgetDialogProps = {
   category?: Category | null;
   onSuccess: () => void;
 };
-
-const ICON_OPTIONS = [
-  "Wallet", "Coins", "Home", "ShoppingCart", "UtensilsCrossed", "Car",
-  "Zap", "Film", "ShoppingBag", "Heart", "BookOpen", "CreditCard",
-  "Plane", "PiggyBank", "Rocket", "DollarSign", "TrendingUp", "Gift"
-];
 
 const COLOR_OPTIONS = [
   "#10b981", "#34d399", "#ef4444", "#f59e0b", "#f97316", "#8b5cf6",
@@ -155,25 +153,33 @@ export function BudgetDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="icon">Icon</Label>
-            <Select
-              value={formData.icon}
-              onValueChange={(value) =>
-                setFormData((prev) => ({ ...prev, icon: value }))
-              }
-              required
+            <Label id="icon-label">Icon</Label>
+            <div
+              role="group"
+              aria-labelledby="icon-label"
+              className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-8"
             >
-              <SelectTrigger id="icon">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ICON_OPTIONS.map((icon) => (
-                  <SelectItem key={icon} value={icon}>
-                    {icon}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              {CATEGORY_ICON_OPTIONS.map((icon) => {
+                const selected = formData.icon === icon;
+                return (
+                  <button
+                    key={icon}
+                    type="button"
+                    aria-label={icon}
+                    aria-pressed={selected}
+                    title={icon}
+                    className={`flex h-10 items-center justify-center rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      selected
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-input hover:bg-accent hover:text-accent-foreground"
+                    }`}
+                    onClick={() => setFormData((prev) => ({ ...prev, icon }))}
+                  >
+                    <CategoryIcon name={icon} className="h-5 w-5" />
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="space-y-2">

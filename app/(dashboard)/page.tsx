@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { getAssets, deleteAsset } from "@/app/actions/assets";
-import { getTransactions } from "@/app/actions/transactions";
+import { deleteAsset, getAssets, setAssetArchived } from "@/app/actions/assets";
 import { getCategories } from "@/app/actions/categories";
 import { getSettings } from "@/app/actions/settings";
 import {
   getAccountBalances,
+  getLedgerCashMovements,
   getNetWorth,
   getNetWorthHistory,
   type AccountWithBalance,
@@ -15,7 +15,7 @@ import {
 } from "@/app/actions/accounts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, EyeOff, TrendingUp, TrendingDown, Plus, Wallet } from "lucide-react";
+import { AlertTriangle, ArchiveRestore, EyeOff, TrendingUp, TrendingDown, Plus, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 // Recharts' `Tooltip` is a chart hover card, not the shadcn one, and the two
 // names collide in this file. The chart one is aliased so `Tooltip` keeps
@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
-import { deriveCashBalanceCents } from "@/lib/cash-balance";
+import { deriveCashBalancesByCurrency } from "@/lib/cash-balance";
 import { absCents, centsToDecimal, formatMoney, tryParseAmount, type Cents } from "@/lib/money";
 import {
   buildCashCandles,
@@ -74,8 +74,10 @@ export default function DashboardPage() {
   const [categories, setCategories] = useState<any[]>([]);
   const [userName, setUserName] = useState<string>("");
   const [chartPeriod, setChartPeriod] = useState<ChartPeriod>("monthly");
+  const [cashCurrency, setCashCurrency] = useState("USD");
   /** Why the last asset delete was refused; null when there is nothing to report. */
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [assetActionError, setAssetActionError] = useState<string | null>(null);
   /**
    * Net worth and per-account balances, from the SAME actions /accounts uses.
    * The old headline was `deriveCashBalanceCents(...)`, which counts the ledger
@@ -109,11 +111,7 @@ export default function DashboardPage() {
     setHiddenHoldings((current) => withHidden(current, keys, false));
   const showAllHoldings = () => setHiddenHoldings(new Set<string>());
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     const [
       assetsData,
       transactionsData,
@@ -123,8 +121,8 @@ export default function DashboardPage() {
       accountsData,
       historyData,
     ] = await Promise.all([
-      getAssets(),
-      getTransactions(),
+      getAssets({ includeArchived: true }),
+      getLedgerCashMovements(),
       getCategories(),
       getSettings(),
       getNetWorth(),
@@ -140,17 +138,21 @@ export default function DashboardPage() {
     setNetWorth(netWorthData);
     setAccountRows(accountsData);
     setHistory(historyData);
-  };
+  }, [setAssets]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   const loadAssets = async () => {
-    const data = await getAssets();
+    const data = await getAssets({ includeArchived: true });
     setAssets(data);
   };
 
   const handleDelete = async () => {
     if (!assetToDelete) return;
 
-    const result = await deleteAsset(assetToDelete);
+    const result = await deleteAsset(assetToDelete, { confirmed: true });
     // `deleteAsset` REFUSES for the derived Cash row; closing regardless is how
     // that refusal used to look like a successful delete.
     if (result && "error" in result && result.error) {
@@ -163,11 +165,25 @@ export default function DashboardPage() {
     setDeleteDialogOpen(false);
   };
 
-  // Cash balance from confirmed transactions, in exact cents. Same rules as
-  // `syncCashAsset` on the server — see lib/cash-balance.ts. This is the CASH
-  // card's own figure, NOT the page headline: it counts the ledger from zero and
-  // knows nothing about opening balances or liabilities. Net worth is above.
-  const cashBalanceCents = deriveCashBalanceCents(transactions, categories);
+  const handleAssetArchived = async (assetId: number, archived: boolean) => {
+    setAssetActionError(null);
+    const result = await setAssetArchived(assetId, archived);
+    if ("error" in result) {
+      setAssetActionError(result.error || "Failed to update the holding.");
+      return;
+    }
+    await loadData();
+  };
+
+  // DECISION: DEC-004 — each history view is one denomination. The selector is
+  // explicit even for a single bucket so the currency scope is never implied.
+  const cashBalances = deriveCashBalancesByCurrency(transactions, categories);
+  const cashCurrencies = cashBalances.map((balance) => balance.currency);
+  const selectedCashCurrency = cashCurrencies.includes(cashCurrency)
+    ? cashCurrency
+    : cashCurrencies[0] ?? "USD";
+  const cashBalanceCents =
+    cashBalances.find((balance) => balance.currency === selectedCashCurrency)?.balanceCents ?? 0;
 
   /**
    * The whole assets section — the allocation bar AND the table below it — from
@@ -204,12 +220,19 @@ export default function DashboardPage() {
   const { growthAmountCents, growthPercent, baselineCents } = computeCashGrowth(
     transactions,
     categories,
+    new Date(),
+    selectedCashCurrency,
   );
 
   // OHLC candles. The series and the headline share ONE rule, so the last
   // candle's close is exactly `cashBalanceCents`; the grouping keys come from
   // lib/dates.ts, not toISOString(). See components/dashboard/cash-series.ts.
-  const candlestickData = buildCashCandles(transactions, categories, chartPeriod).map((candle) => ({
+  const candlestickData = buildCashCandles(
+    transactions,
+    categories,
+    chartPeriod,
+    selectedCashCurrency,
+  ).map((candle) => ({
     ...candle,
     formattedPeriod: formatPeriodLabel(candle.period, chartPeriod),
     // Charting boundary: recharts needs plain numbers for the bar body.
@@ -321,13 +344,13 @@ export default function DashboardPage() {
       <div className="rounded-lg border border-border/50 bg-background px-3 py-2 text-xs shadow-xl">
         <div className="mb-1.5 font-medium">{label}</div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-muted-foreground">
-          <span>Open</span><span className="text-right font-mono text-foreground">{formatMoney(data.openCents)}</span>
-          <span>Close</span><span className="text-right font-mono text-foreground">{formatMoney(data.closeCents)}</span>
-          <span>High</span><span className="text-right font-mono text-foreground">{formatMoney(data.highCents)}</span>
-          <span>Low</span><span className="text-right font-mono text-foreground">{formatMoney(data.lowCents)}</span>
+          <span>Open</span><span className="text-right font-mono text-foreground">{formatMoney(data.openCents, selectedCashCurrency)}</span>
+          <span>Close</span><span className="text-right font-mono text-foreground">{formatMoney(data.closeCents, selectedCashCurrency)}</span>
+          <span>High</span><span className="text-right font-mono text-foreground">{formatMoney(data.highCents, selectedCashCurrency)}</span>
+          <span>Low</span><span className="text-right font-mono text-foreground">{formatMoney(data.lowCents, selectedCashCurrency)}</span>
         </div>
         <div className={cn("mt-1.5 pt-1.5 border-t font-medium", isGreen ? "text-green-500" : "text-red-500")}>
-          {changeCents >= 0 ? "+" : ""}{formatMoney(changeCents)}
+          {changeCents >= 0 ? "+" : ""}{formatMoney(changeCents, selectedCashCurrency)}
         </div>
       </div>
     );
@@ -355,7 +378,6 @@ export default function DashboardPage() {
         <NetWorthSection
           netWorth={netWorth}
           accounts={accountRows}
-          assets={assets}
           history={history}
           onRecorded={loadData}
         />
@@ -367,6 +389,18 @@ export default function DashboardPage() {
             <h2 className="text-sm font-medium text-muted-foreground">
               Cash from transactions
             </h2>
+            <Select value={selectedCashCurrency} onValueChange={setCashCurrency}>
+              <SelectTrigger className="h-8 w-[92px]" aria-label="Cash history currency">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(cashCurrencies.length > 0 ? cashCurrencies : ["USD"]).map((currency) => (
+                  <SelectItem key={currency} value={currency}>
+                    {currency}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Select value={chartPeriod} onValueChange={(v) => setChartPeriod(v as "daily" | "weekly" | "monthly")}>
               <SelectTrigger className="w-[100px] h-8">
                 <SelectValue />
@@ -382,7 +416,7 @@ export default function DashboardPage() {
 
         <div className="mb-2">
           <div className="text-3xl font-bold">
-            {formatMoney(cashBalanceCents)}
+            {formatMoney(cashBalanceCents, selectedCashCurrency)}
           </div>
           {/* Said out loud, because this figure is NOT net worth: it is the sum of
               the logged ledger only. Anyone who imported recent history alone will
@@ -405,7 +439,7 @@ export default function DashboardPage() {
                 )}
               >
                 {growthAmountCents >= 0 ? "+" : "−"}
-                {formatMoney(absCents(growthAmountCents))}
+                {formatMoney(absCents(growthAmountCents), selectedCashCurrency)}
               </span>
               {growthPercent !== null && (
                 <span
@@ -452,7 +486,7 @@ export default function DashboardPage() {
                   tickFormatter={(value) => {
                     // Chart ticks arrive as decimals; render them as money.
                     const cents = tryParseAmount(Number(value));
-                    return cents === null ? "" : formatMoney(cents);
+                    return cents === null ? "" : formatMoney(cents, selectedCashCurrency);
                   }}
                 />
                 <RechartsTooltip content={<CandlestickTooltip />} cursor={false} />
@@ -542,6 +576,12 @@ export default function DashboardPage() {
           onShowAll={showAllHoldings}
         />
 
+        {assetActionError && (
+          <div role="alert" className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {assetActionError}
+          </div>
+        )}
+
         {assetView.isEmpty ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16">
@@ -614,11 +654,40 @@ export default function DashboardPage() {
             <AssetTable
               view={assetView}
               onEdit={openEditDialog}
+              onArchive={(assetId) => void handleAssetArchived(assetId, true)}
               onDelete={openDeleteDialog}
               onHide={hideHoldings}
               onShowAll={showAllHoldings}
             />
           </>
+        )}
+
+        {assets.some((asset) => (asset as { archived?: boolean }).archived === true) && (
+          <Card className="mt-6">
+            <CardContent className="p-4">
+              <h3 className="text-sm font-medium">Archived holdings</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Hidden from current totals. Daily history is retained until permanent delete.
+              </p>
+              <div className="mt-3 space-y-2">
+                {assets
+                  .filter((asset) => (asset as { archived?: boolean }).archived === true)
+                  .map((asset) => (
+                    <div key={asset.id} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
+                      <span>{asset.notes?.trim() || `${asset.category} holding`}</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleAssetArchived(asset.id, false)}
+                      >
+                        <ArchiveRestore className="mr-2 h-4 w-4" />
+                        Restore
+                      </Button>
+                    </div>
+                  ))}
+              </div>
+            </CardContent>
+          </Card>
         )}
       </div>
 
@@ -640,7 +709,9 @@ export default function DashboardPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Asset</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this asset? This action cannot be undone.
+              Permanently delete this holding and every daily history row attached to it? This
+              action cannot be undone. Archive it from the table instead if you want to retain
+              history.
             </AlertDialogDescription>
           </AlertDialogHeader>
 

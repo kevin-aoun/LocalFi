@@ -10,7 +10,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTempDb, seedQuickCommand, type TempDb } from "./support/temp-db";
 
-vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+vi.mock("next/cache", () => ({
+  revalidatePath: () => {
+    throw new Error("Invariant: static generation store missing");
+  },
+}));
 
 const { getSettings, updateSettings } = await import("../settings");
 const { saveDb } = await import("@/lib/db/client");
@@ -32,6 +36,7 @@ const base = {
   userName: "Test User",
   accentColor: "default",
   theme: "system" as const,
+  showLedger: false,
 };
 
 describe("updateSettings is atomic", () => {
@@ -119,14 +124,48 @@ describe("updateSettings is atomic", () => {
   });
 
   it("round-trips the settings row itself", async () => {
-    await updateSettings({
+    const result = await updateSettings({
       userName: "Test User",
       accentColor: "#a855f7",
       theme: "dark",
+      showLedger: true,
       quickCommands: [],
     });
 
+    expect(result).toEqual({ success: true });
     const settings = await getSettings();
-    expect(settings).toMatchObject({ userName: "Test User", accentColor: "#a855f7", theme: "dark" });
+    expect(settings).toMatchObject({
+      userName: "Test User",
+      accentColor: "#a855f7",
+      theme: "dark",
+      showLedger: true,
+    });
+  });
+
+  it("defaults the explorer preference off when no settings row exists", async () => {
+    await expect(getSettings()).resolves.toMatchObject({ showLedger: false });
+  });
+
+  it("keeps the preference and quick commands in the same atomic update", async () => {
+    seedQuickCommand(temp, {
+      command: "coffee",
+      categoryName: "Coffee",
+      amountCents: 350,
+      comment: "Latte",
+    });
+
+    const result = await updateSettings({
+      ...base,
+      showLedger: true,
+      quickCommands: [
+        { id: 1, command: "broken", categoryName: "X", amountCents: 1.5, comment: "" },
+      ],
+    });
+
+    expect(result).toMatchObject({ error: expect.any(String) });
+    await expect(getSettings()).resolves.toMatchObject({ showLedger: false });
+    expect(storedCommands()).toEqual([
+      { command: "coffee", category_name: "Coffee", amount_cents: 350, comment: "Latte" },
+    ]);
   });
 });

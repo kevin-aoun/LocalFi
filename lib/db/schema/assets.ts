@@ -1,6 +1,7 @@
-import { sqliteTable, integer, text, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, integer, text, real, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import type { Cents } from "@/lib/money";
+import { instruments } from "./instruments";
 
 export const assetTypes = [
   "Cash",
@@ -46,6 +47,10 @@ export const assets = sqliteTable("assets", {
   /** Current value in integer cents, denominated in `currency`. Never a float. */
   currentValueCents: integer("current_value_cents").notNull().$type<Cents>(),
   currency: text("currency").notNull().default("USD"),
+  /** Stable valuation unit; migration 0012 derives it from `currency`. */
+  instrumentId: text("instrument_id").references(() => instruments.id, {
+    onDelete: "restrict",
+  }),
   notes: text("notes"),
 
   // Commodity-specific field, KEPT for compatibility: every consumer that reads
@@ -75,6 +80,8 @@ export const assets = sqliteTable("assets", {
   pricedAt: integer("priced_at", { mode: "timestamp" }),
   linkedTransactionIds: text("linked_transaction_ids"), // JSON array of transaction IDs
   useLivePrice: integer("use_live_price", { mode: "boolean" }).default(false),
+  /** Normal lifecycle: hidden from current views while all history remains. */
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
 
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
@@ -85,17 +92,30 @@ export const assets = sqliteTable("assets", {
 });
 
 /** Daily per-holding values written atomically with `net_worth_snapshots`. */
-export const assetHistory = sqliteTable("asset_history", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  assetId: integer("asset_id")
-    .notNull()
-    .references(() => assets.id, { onDelete: "cascade" }),
-  /** Historical asset value in integer cents. Never a float. */
-  valueCents: integer("value_cents").notNull().$type<Cents>(),
-  recordedAt: integer("recorded_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
+export const assetHistory = sqliteTable(
+  "asset_history",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    assetId: integer("asset_id")
+      .notNull()
+      .references(() => assets.id, { onDelete: "cascade" }),
+    /** Historical asset value in integer cents, denominated in `currency`. */
+    valueCents: integer("value_cents").notNull().$type<Cents>(),
+    currency: text("currency").notNull().default("USD"),
+    /** Explicit local calendar day used for uniqueness and idempotent upserts. */
+    recordedDay: text("recorded_day").notNull(),
+    /** Retained for chronology and compatibility; `recordedDay` owns day identity. */
+    recordedAt: integer("recorded_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => ({
+    assetDayUnique: uniqueIndex("asset_history_asset_day_unique").on(
+      table.assetId,
+      table.recordedDay,
+    ),
+  }),
+);
 
 export type Asset = typeof assets.$inferSelect;
 export type NewAsset = typeof assets.$inferInsert;

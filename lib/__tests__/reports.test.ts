@@ -5,7 +5,7 @@
  *
  * Timezone safety: every date in this file is a literal 'YYYY-MM-DD' key, and the
  * only Dates constructed are built from LOCAL components. Nothing here asserts on
- * a UTC-derived string, so `npm run test:tz` passes at UTC+14 and UTC-11.
+ * a UTC-derived string, so `bun run test:tz` passes at UTC+14 and UTC-11.
  */
 import { describe, expect, it } from "vitest";
 
@@ -46,6 +46,8 @@ function tx(values: {
   pending?: boolean;
   accountId?: number | null;
   transferAccountId?: number | null;
+  direction?: "inflow" | "outflow" | "transfer";
+  currency?: string;
 }): ReportTransaction {
   return {
     dateKey: values.dateKey,
@@ -56,6 +58,8 @@ function tx(values: {
     // which is a case under test) into account 1. Only an absent key defaults.
     accountId: "accountId" in values ? values.accountId ?? null : 1,
     transferAccountId: values.transferAccountId ?? null,
+    direction: values.direction,
+    currency: values.currency,
   };
 }
 
@@ -64,6 +68,19 @@ function tx(values: {
 // ---------------------------------------------------------------------------
 
 describe("flowInRange", () => {
+  it("derives income and consumption directly from signed category movements", () => {
+    const rows = [
+      { ...tx({ dateKey: "2026-03-01", amountCents: 100_000, categoryId: 1 }), categoryMovementCents: -100_000 },
+      { ...tx({ dateKey: "2026-03-02", amountCents: 20_000, categoryId: 2 }), categoryMovementCents: 20_000 },
+      { ...tx({ dateKey: "2026-03-03", amountCents: 5_000, categoryId: 2 }), categoryMovementCents: -5_000 },
+    ];
+    expect(flowInRange(rows, CATEGORIES, "2026-03-01", "2026-03-31")).toMatchObject({
+      incomeCents: 100_000,
+      expenseCents: 15_000,
+      netCents: 85_000,
+      countedCount: 3,
+    });
+  });
   it("splits income and expenses, both as positive magnitudes, and nets them", () => {
     const rows = [
       tx({ dateKey: "2026-03-01", amountCents: 500_000, categoryId: 1 }),
@@ -185,6 +202,21 @@ describe("flowInRange", () => {
 
     // If these two ever disagree, the reports page contradicts the dashboard.
     expect(totals.netCents).toBe(deriveCashBalanceCents(rows, CATEGORIES));
+  });
+
+  it("keeps the stored direction when category metadata changes later", () => {
+    const rows = [
+      tx({
+        dateKey: "2026-03-01",
+        amountCents: 50_000,
+        categoryId: 1,
+        direction: "inflow",
+      }),
+    ];
+    const renamedAsExpense = [{ id: 1, name: "Salary", type: "Expense" }];
+    const totals = flowInRange(rows, renamedAsExpense, "2026-03-01", "2026-03-31");
+    expect(totals.incomeCents).toBe(50_000);
+    expect(totals.expenseCents).toBe(0);
   });
 
   it("throws on a malformed range rather than silently reporting zero", () => {
@@ -610,6 +642,21 @@ describe("currencyScope", () => {
     ];
     expect(filterByCurrency(rows, accounts, "USD", { includeUnassigned: true })).toHaveLength(2);
     expect(filterByCurrency(rows, accounts, "LBP", { includeUnassigned: false })).toHaveLength(1);
+  });
+
+  it("uses stored transaction currency after the account currency changes", () => {
+    const rows = [
+      tx({
+        dateKey: "2026-03-01",
+        amountCents: 100,
+        categoryId: 2,
+        accountId: 1,
+        currency: "EUR",
+      }),
+    ];
+    expect(currencyScope(rows, accounts).currencies).toEqual(["EUR"]);
+    expect(filterByCurrency(rows, accounts, "EUR")).toEqual(rows);
+    expect(filterByCurrency(rows, accounts, "USD")).toEqual([]);
   });
 });
 

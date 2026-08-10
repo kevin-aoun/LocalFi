@@ -2,7 +2,7 @@
  * One-shot application of migration 0003 (accounts, transfers, budgets,
  * recurring templates, net-worth history) to an existing budget database.
  *
- *   npx tsx lib/db/migrate-to-accounts.ts [--db <path>] [--dry-run]
+ *   bun x tsx lib/db/migrate-to-accounts.ts [--db <path>] [--dry-run]
  *
  * Safety properties, in order of importance — the same shape as
  * lib/db/migrate-to-cents.ts, because that shape is what makes it safe to point a

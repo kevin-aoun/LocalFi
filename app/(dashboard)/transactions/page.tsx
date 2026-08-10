@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,14 +21,13 @@ import {
   ArrowUp,
   ArrowDown,
   Clock,
-  Check,
   Search,
   X,
 } from "lucide-react";
 import { TransactionDialog } from "@/components/transactions/transaction-dialog";
 import { TransferDialog } from "@/components/transactions/transfer-dialog";
 import { ImportDialog } from "@/components/transactions/import-dialog";
-import { getTransactions, deleteTransaction, confirmTransaction } from "@/app/actions/transactions";
+import { getTransactions, deleteTransaction } from "@/app/actions/transactions";
 import { getAccounts, getDefaultAccountId } from "@/app/actions/accounts";
 import { getCategories } from "@/app/actions/categories";
 import { getSettings } from "@/app/actions/settings";
@@ -64,6 +63,7 @@ import {
   summarizeLedger,
 } from "@/components/transactions/ledger-summary-logic";
 import { describeTransfer } from "@/components/transactions/transfer-form-logic";
+import { ConfirmPendingTransaction } from "@/components/transactions/confirm-pending-transaction";
 
 const ITEMS_PER_PAGE = 10;
 
@@ -80,6 +80,11 @@ type LedgerTransaction = {
   amountCents: Cents;
   comment: string | null;
   pending?: boolean | null;
+  currentEventId?: string | null;
+  instrumentId?: string | null;
+  quantityDelta?: string | null;
+  transferPrincipalAmountCents?: Cents | null;
+  allocations?: Array<{ categoryId: number; amountCents: Cents }>;
 };
 
 type AccountRow = {
@@ -144,11 +149,7 @@ export default function TransactionsPage() {
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<LedgerTransaction | null>(null);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     const [txData, catData, settings, accountData, defaultId] = await Promise.all([
       getTransactions(),
       getCategories(),
@@ -165,7 +166,7 @@ export default function TransactionsPage() {
 
     // Map quick commands from settings to use category IDs
     const commandsWithIds = (settings.quickCommands || []).map((qc) => {
-      const category = catData.find((c: any) =>
+      const category = catData.find((c) =>
         c.name.toLowerCase() === qc.categoryName.toLowerCase()
       );
       return {
@@ -177,7 +178,11 @@ export default function TransactionsPage() {
     }).filter((qc) => qc.categoryId !== 0);
 
     setQuickCommands(commandsWithIds);
-  };
+  }, [setCategories, setQuickCommands, setTransactions]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   const rows = transactions as LedgerTransaction[];
 
@@ -755,7 +760,7 @@ export default function TransactionsPage() {
                       <td className="px-6 py-3">
                         <div className="flex items-center gap-2">
                           <Clock className="h-3.5 w-3.5 text-yellow-600 shrink-0" />
-                          <span className="font-medium">
+                          <span className="font-medium" data-privacy-exempt>
                             {transaction.comment || (isTransfer(transaction) ? "Transfer" : "—")}
                           </span>
                         </div>
@@ -767,43 +772,14 @@ export default function TransactionsPage() {
                       </td>
                       <td className="px-6 py-3">
                         <div className="flex items-center justify-end gap-1">
-                          <Popover>
-                            {/* Two `asChild` layers deep: Tooltip and Popover
-                                both compose onto the SAME button rather than
-                                each rendering one, so there is a single control
-                                and a single tab stop. */}
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <PopoverTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    aria-label="Confirm transaction"
-                                  >
-                                    <Check className="h-4 w-4 text-green-600" />
-                                  </Button>
-                                </PopoverTrigger>
-                              </TooltipTrigger>
-                              <TooltipContent>Confirm transaction</TooltipContent>
-                            </Tooltip>
-                            <PopoverContent className="w-auto p-0" align="end">
-                              <Calendar
-                                mode="single"
-                                selected={new Date()}
-                                onSelect={async (date) => {
-                                  if (!date) return;
-                                  const result = await confirmTransaction(transaction.id, date);
-                                  if (result && "error" in result && result.error) {
-                                    setActionError(result.error);
-                                    return;
-                                  }
-                                  setActionError(null);
-                                  await loadData();
-                                }}
-                                initialFocus
-                              />
-                            </PopoverContent>
-                          </Popover>
+                          <ConfirmPendingTransaction
+                            transactionId={transaction.id}
+                            onError={setActionError}
+                            onConfirmed={async () => {
+                              setActionError(null);
+                              await loadData();
+                            }}
+                          />
                           <Button variant="ghost" size="sm" onClick={() => openEdit(transaction)}>
                             <Pencil className="h-4 w-4" />
                           </Button>
@@ -920,13 +896,15 @@ export default function TransactionsPage() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="font-medium">
-                            {transaction.comment ||
+                            <span data-privacy-exempt>
+                              {transaction.comment ||
                               (isTransfer(transaction)
                                 ? describeTransfer(
                                     accountName(transaction.accountId),
                                     accountName(transaction.transferAccountId),
                                   )
                                 : "—")}
+                            </span>
                           </div>
                         </td>
                         <td className="px-6 py-4">{renderTypeCell(transaction)}</td>
@@ -1003,6 +981,7 @@ export default function TransactionsPage() {
         }}
         transfer={selectedTransfer}
         accounts={pickerAccounts}
+        expenseCategories={categories}
         defaultAccountId={defaultAccountId}
         onSuccess={loadData}
       />

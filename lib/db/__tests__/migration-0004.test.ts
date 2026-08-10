@@ -78,17 +78,17 @@ function columnInfo(db: Database, table: string) {
 const LIVE_CATEGORIES: Array<[number, string, string, number | null]> = [
   [1, "Food", "Expense", 5000],
   [2, "Salary", "Income", null],
-  [3, "Personal Development", "Expense", 20000],
-  [4, "Startups", "Expense", 10000],
+  [3, "Learning", "Expense", 20000],
+  [4, "Business", "Expense", 10000],
   [5, "Shopping", "Expense", 10000],
   [6, "Transport", "Expense", 3000],
   [7, "Subscriptions", "Expense", 12000],
   [8, "Travel", "Expense", null],
   [9, "Entertainment", "Expense", 2000],
   [10, "Commodities", "Investment", null],
-  [11, "Freelance Consulting", "Income", null],
-  [12, "Allowance", "Income", null],
-  [13, "Gifts", "Expense", 5000],
+  [11, "Contract Work", "Income", null],
+  [12, "Reimbursement", "Income", null],
+  [13, "Presents", "Expense", 5000],
   [14, "Crypto", "Investment", null],
 ];
 

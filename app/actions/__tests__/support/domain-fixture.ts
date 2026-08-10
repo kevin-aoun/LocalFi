@@ -16,10 +16,27 @@
  * overlap.
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import initSqlJs, { type Database } from "sql.js";
 import { closeDb } from "@/lib/db/client";
+import { toDateKey } from "@/lib/dates";
+import { SCHEMA_JOURNAL_TABLE } from "@/lib/db/upgrade";
+import { deriveCashAssetProjection } from "@/lib/db/sync-cash";
+import {
+  buildTransactionMovements,
+  canonicalDecimal,
+  canonicalStringify,
+  postLedgerEventRaw,
+  registerLedgerAccount,
+} from "@/lib/ledger";
+import {
+  createManualInstrument,
+  postAssetOpeningPosition,
+  projectPositionHolding,
+  recordInstrumentObservation,
+} from "@/lib/investments";
 
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const MIGRATIONS_DIR = path.join(PROJECT_ROOT, "drizzle", "migrations");
@@ -59,6 +76,31 @@ export async function createDomainDb(): Promise<DomainDb> {
       if (statement.trim()) db.exec(statement);
     }
   }
+  // SQLite date('now') is UTC, while product opening dates are local DateKeys.
+  // Pin the shared migrated fixture to the same local day in UTC extremes.
+  db.run("UPDATE accounts SET opening_balance_date = ?", [toDateKey(new Date())]);
+  db.run(
+    `CREATE TABLE ${SCHEMA_JOURNAL_TABLE} (
+      idx integer PRIMARY KEY NOT NULL,
+      tag text NOT NULL UNIQUE,
+      checksum text NOT NULL,
+      origin text NOT NULL CHECK(origin IN ('adopted', 'applied')),
+      applied_at integer DEFAULT (unixepoch()) NOT NULL
+    )`,
+  );
+  for (const entry of journal.entries) {
+    const sql = readFileSync(path.join(MIGRATIONS_DIR, `${entry.tag}.sql`), "utf-8");
+    db.run(
+      `INSERT INTO ${SCHEMA_JOURNAL_TABLE} (idx, tag, checksum, origin)
+       VALUES (?, ?, ?, 'applied')`,
+      [entry.idx, entry.tag, createHash("sha256").update(sql).digest("hex")],
+    );
+  }
+  db.run(
+    `INSERT INTO assets (category, current_value_cents, currency, notes)
+     SELECT 'Cash', 0, 'USD', 'Auto-calculated from USD transactions'
+      WHERE NOT EXISTS (SELECT 1 FROM assets WHERE category = 'Cash')`,
+  );
 
   writeFileSync(file, Buffer.from(db.export()));
   db.close();
@@ -107,6 +149,18 @@ export function execOn(temp: DomainDb, fn: (db: Database) => void) {
   const handle = new SQL.Database(readFileSync(temp.file));
   try {
     handle.run("PRAGMA foreign_keys = ON");
+    handle.create_function("ledger_sha256", (value: unknown) => {
+      if (typeof value !== "string") throw new Error("ledger_sha256 requires text");
+      return createHash("sha256").update(value).digest("hex");
+    });
+    handle.create_function("ledger_canonical_json", (value: unknown) => {
+      if (typeof value !== "string") throw new Error("ledger_canonical_json requires text");
+      return canonicalStringify(JSON.parse(value));
+    });
+    handle.create_function("ledger_canonical_decimal", (value: unknown) => {
+      if (typeof value !== "string") throw new Error("ledger_canonical_decimal requires text");
+      return canonicalDecimal(value);
+    });
     fn(handle);
     writeFileSync(temp.file, Buffer.from(handle.export()));
   } finally {
@@ -118,6 +172,52 @@ export function execOn(temp: DomainDb, fn: (db: Database) => void) {
 export function secondsFor(dateKey: string): number {
   const [y, m, d] = dateKey.split("-").map(Number);
   return Math.floor(new Date(y, m - 1, d).getTime() / 1000);
+}
+
+function syncFixtureCash(db: Database): void {
+  const transactionResult = db.exec(
+    `SELECT category_id, amount_cents, direction, currency, pending,
+            account_id, transfer_account_id
+       FROM transactions`,
+  )[0];
+  const ledgerTransactions = (transactionResult?.values ?? []).map((row) => ({
+    categoryId: row[0] == null ? null : Number(row[0]),
+    amountCents: Number(row[1]),
+    direction: row[2] == null ? null : String(row[2]) as "inflow" | "outflow" | "transfer",
+    currency: row[3] == null ? null : String(row[3]),
+    pending: Number(row[4]) === 1,
+    accountId: row[5] == null ? null : Number(row[5]),
+    transferAccountId: row[6] == null ? null : Number(row[6]),
+  }));
+  const categoryResult = db.exec("SELECT id, type FROM categories")[0];
+  const ledgerCategories = (categoryResult?.values ?? []).map((row) => ({
+    id: Number(row[0]),
+    type: String(row[1]),
+  }));
+  const firstCash = db.exec(
+    "SELECT id, currency FROM assets WHERE category = 'Cash' ORDER BY id LIMIT 1",
+  )[0]?.values[0];
+  const projection = deriveCashAssetProjection(
+    ledgerTransactions,
+    ledgerCategories,
+    firstCash?.[1],
+  );
+  if (firstCash) {
+    db.run(
+      "UPDATE assets SET current_value_cents = ?, currency = ? WHERE id = ?",
+      [projection.currentValueCents, projection.currency, firstCash[0]],
+    );
+  } else {
+    db.run(
+      `INSERT INTO assets (category, current_value_cents, currency, notes)
+       VALUES ('Cash', ?, ?, ?)`,
+      [
+        projection.currentValueCents,
+        projection.currency,
+        `Auto-calculated from ${projection.currency} transactions`,
+      ],
+    );
+  }
 }
 
 export function seedCategory(
@@ -140,21 +240,61 @@ export function seedAccount(
     kind: "asset" | "liability";
     type: string;
     openingBalanceCents?: number;
+    openingBalanceDate?: string;
+    currency?: string;
     archived?: boolean;
   },
 ) {
   execOn(temp, (db) => {
+    const openingBalanceDate = values.openingBalanceDate ?? toDateKey(new Date());
     db.run(
-      "INSERT INTO accounts (id, name, kind, type, opening_balance_cents, archived) VALUES (?, ?, ?, ?, ?, ?)",
+      `INSERT INTO accounts
+        (id, name, kind, type, opening_balance_cents, opening_balance_date, currency, archived)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         values.id ?? null,
         values.name,
         values.kind,
         values.type,
         values.openingBalanceCents ?? 0,
+        openingBalanceDate,
+        values.currency ?? "USD",
         values.archived ? 1 : 0,
       ],
     );
+    const id = values.id ?? Number(db.exec("SELECT last_insert_rowid()")[0].values[0][0]);
+    const opening = values.openingBalanceCents ?? 0;
+    if (opening === 0) return;
+    const accountTarget = registerLedgerAccount(db, {
+      targetType: "real_account",
+      targetRef: id,
+      currency: values.currency ?? "USD",
+    });
+    const counterTarget = registerLedgerAccount(db, {
+      targetType: "system",
+      targetRef: "opening-balance",
+      currency: values.currency ?? "USD",
+    });
+    const signed = values.kind === "liability" ? -opening : opening;
+    const openingDate = String(
+      db.exec(`SELECT opening_balance_date FROM accounts WHERE id = ${id}`)[0].values[0][0],
+    );
+    postLedgerEventRaw(db, {
+      effectiveDate: openingDate,
+      description: `Opening balance for ${values.name}`,
+      metadata: {
+        fact: "account-opening",
+        accountId: id,
+        openingBalanceCents: opening,
+        expectedKind: values.kind,
+        currency: values.currency ?? "USD",
+        fixture: true,
+      },
+      movements: [
+        { ledgerAccountId: accountTarget, amountMinor: signed, currency: values.currency ?? "USD" },
+        { ledgerAccountId: counterTarget, amountMinor: -signed, currency: values.currency ?? "USD" },
+      ],
+    });
   });
 }
 
@@ -185,6 +325,99 @@ export function seedTransaction(
         values.pending ? 1 : 0,
       ],
     );
+    if (values.pending) return;
+    const id = values.id ?? Number(db.exec("SELECT last_insert_rowid()")[0].values[0][0]);
+    const result = db.exec(
+      `SELECT date, category_id, account_id, transfer_account_id, amount_cents, direction,
+              currency, comment, recurring_id, recurring_occurrence, instrument_id,
+              quantity_delta, transfer_principal_amount_cents, created_at, updated_at
+         FROM transactions WHERE id = ${id}`,
+    )[0].values[0];
+    const [
+      date,
+      categoryId,
+      accountId,
+      transferAccountId,
+      amountCents,
+      direction,
+      currency,
+      comment,
+      recurringId,
+      recurringOccurrence,
+      instrumentId,
+      quantityDelta,
+      transferPrincipalAmountCents,
+      createdAt,
+      updatedAt,
+    ] = result;
+    const currencyCode = String(currency);
+    const sourceTarget = registerLedgerAccount(db, accountId === null
+      ? { targetType: "system", targetRef: "legacy-unassigned-account", currency: currencyCode }
+      : { targetType: "real_account", targetRef: Number(accountId), currency: currencyCode });
+    let movements;
+    if (String(direction) === "transfer") {
+      if (transferAccountId === null) throw new Error("Fixture transfer requires a destination account");
+      const destinationTarget = registerLedgerAccount(db, {
+        targetType: "real_account",
+        targetRef: Number(transferAccountId),
+        currency: currencyCode,
+      });
+      movements = buildTransactionMovements({
+        direction: "transfer",
+        amountMinor: Number(amountCents),
+        currency: currencyCode,
+        accountTargetId: sourceTarget,
+        transferTargetId: destinationTarget,
+      });
+    } else {
+      if (categoryId === null) throw new Error("Fixture transaction requires a category");
+      const categoryTarget = registerLedgerAccount(db, {
+        targetType: "category",
+        targetRef: Number(categoryId),
+        currency: currencyCode,
+      });
+      movements = buildTransactionMovements({
+        direction: String(direction) as "inflow" | "outflow",
+        amountMinor: Number(amountCents),
+        currency: currencyCode,
+        accountTargetId: sourceTarget,
+        categoryTargetId: categoryTarget,
+      });
+    }
+    const event = postLedgerEventRaw(db, {
+      effectiveDate: values.dateKey,
+      description: comment === null ? "" : String(comment),
+      metadata: {
+        projectionKey: id,
+        fixture: true,
+        transaction: {
+          id,
+          date: Number(date),
+          categoryId: categoryId === null ? null : Number(categoryId),
+          accountId: accountId === null ? null : Number(accountId),
+          transferAccountId: transferAccountId === null ? null : Number(transferAccountId),
+          amountCents: Number(amountCents),
+          direction: String(direction),
+          currency: currencyCode,
+          comment: comment === null ? null : String(comment),
+          pending: false,
+          recurringId: recurringId === null ? null : Number(recurringId),
+          recurringOccurrence: recurringOccurrence === null ? null : String(recurringOccurrence),
+          instrumentId: instrumentId === null ? null : String(instrumentId),
+          quantityDelta: quantityDelta === null ? null : String(quantityDelta),
+          transferPrincipalAmountCents: transferPrincipalAmountCents === null
+            ? null
+            : Number(transferPrincipalAmountCents),
+          allocations: [],
+          createdAt: Number(createdAt),
+          updatedAt: Number(updatedAt),
+        },
+      },
+      movements,
+      recordedAt: Number(updatedAt),
+    });
+    db.run("UPDATE transactions SET current_event_id = ? WHERE id = ?", [event.eventId, id]);
+    syncFixtureCash(db);
   });
 }
 
@@ -198,6 +431,36 @@ export function seedAsset(
       values.currentValueCents,
       values.notes ?? null,
     ]);
+    if (values.category === "Cash") return;
+    const assetId = Number(db.exec("SELECT last_insert_rowid()")[0].values[0][0]);
+    const instrument = createManualInstrument(db, {
+      label: values.notes ?? values.category,
+      category: values.category,
+      currency: "USD",
+      createdAt: 0,
+    });
+    db.run("UPDATE assets SET instrument_id = ? WHERE id = ?", [instrument.id, assetId]);
+    recordInstrumentObservation(db, {
+      instrumentId: instrument.id,
+      observationKind: "valuation",
+      observedDay: "1970-01-01",
+      observedAt: 0,
+      amountMinor: values.currentValueCents,
+      currency: "USD",
+      source: "fixture",
+    });
+    postAssetOpeningPosition(db, {
+      assetId,
+      instrumentId: instrument.id,
+      currency: "USD",
+      quantity: "1",
+      bookAmountMinor: values.currentValueCents,
+      effectiveDate: "1970-01-01",
+      description: "Fixture opening position",
+      recordedAt: 0,
+      source: "manual-holding",
+    });
+    projectPositionHolding(db, instrument.id, "USD");
   });
 }
 

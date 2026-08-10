@@ -26,7 +26,14 @@ vi.mock("../commodities", () => ({
     priceCents(type, quantity, unit),
 }));
 
-const { createAsset, getAssets, updateAsset } = await import("../assets");
+const {
+  createAsset,
+  deleteAsset,
+  getAssets,
+  setAssetArchived,
+  updateAsset,
+} = await import("../assets");
+const { snapshotNetWorth } = await import("../accounts");
 
 let temp: TempDb;
 
@@ -87,7 +94,49 @@ describe("a failed live-price fetch never persists a $0 asset", () => {
     priceCents.mockResolvedValue(123_456);
     expect(await createAsset(assetForm({ quantity: "2.5" }))).toMatchObject({ success: true });
     expect(storedValues()).toEqual([
-      { category: "Commodities", current_value_cents: 123_456, quantity: 2.5, use_live_price: 1 },
+      // The compatibility projection values the exact position from the stored
+      // integer-cent unit-price observation (49,382 × 2.5, rounded once).
+      { category: "Commodities", current_value_cents: 123_455, quantity: 2.5, use_live_price: 1 },
+    ]);
+  });
+
+  it("forces USD when the live provider result is submitted as EUR", async () => {
+    priceCents.mockResolvedValue(123_456);
+    const result = await createAsset(assetForm({ quantity: "2.5", currency: "EUR" }));
+    expect(result).toMatchObject({ success: true, data: { currency: "USD" } });
+  });
+});
+
+describe("holding retention lifecycle", () => {
+  it("archives and restores without erasing daily history; confirmed delete cascades it", async () => {
+    const created = await createAsset(
+      assetForm({ category: "Savings", useLivePrice: "false", currentValue: "100" }),
+    );
+    if ("error" in created) throw new Error(created.error);
+    expect(await snapshotNetWorth()).toMatchObject({ success: true });
+    expect(temp.query("SELECT COUNT(*) AS count FROM asset_history")).toEqual([{ count: 1 }]);
+
+    expect(await setAssetArchived(created.data.id, true)).toMatchObject({ success: true });
+    expect(await getAssets()).toEqual([]);
+    expect(await getAssets({ includeArchived: true })).toHaveLength(1);
+    expect(temp.query("SELECT COUNT(*) AS count FROM asset_history")).toEqual([{ count: 1 }]);
+
+    expect(await setAssetArchived(created.data.id, false)).toMatchObject({ success: true });
+    expect(await getAssets()).toHaveLength(1);
+
+    const survivor = await createAsset(
+      assetForm({ category: "Other", useLivePrice: "false", currentValue: "25" }),
+    );
+    if ("error" in survivor) throw new Error(survivor.error);
+    expect(await snapshotNetWorth()).toMatchObject({ success: true });
+    expect(temp.query("SELECT COUNT(*) AS count FROM asset_history")).toEqual([{ count: 2 }]);
+
+    expect(await deleteAsset(created.data.id)).toMatchObject({
+      error: expect.stringMatching(/explicit confirmation/i),
+    });
+    expect(await deleteAsset(created.data.id, { confirmed: true })).toMatchObject({ success: true });
+    expect(temp.query("SELECT asset_id FROM asset_history")).toEqual([
+      { asset_id: survivor.data.id },
     ]);
   });
 });
@@ -169,7 +218,6 @@ describe("the derived Cash asset stays derived", () => {
   });
 
   it("refuses to edit or delete the derived one", async () => {
-    const { deleteAsset } = await import("../assets");
     // Insert a Cash row the way syncCashAsset does, bypassing the guard.
     const { execOn } = await import("./support/temp-db");
     execOn(temp, (db) => {

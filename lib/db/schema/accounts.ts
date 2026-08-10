@@ -1,6 +1,7 @@
 import { sqliteTable, integer, text, uniqueIndex, index, check } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import type { Cents } from "@/lib/money";
+import type { DateKey } from "@/lib/dates";
 
 /**
  * ONE table for both halves of the balance sheet, discriminated by `kind`.
@@ -53,10 +54,16 @@ export const accounts = sqliteTable(
      * liability, how much is OWED (a card with $500 outstanding stores 50000).
      * The single sign flip lives in lib/cash-balance.ts.
      *
-     * This is what stops a user who imported only recent history from sitting
-     * permanently negative.
+     * It is always non-negative; overdrafts are represented by ledger activity,
+     * not by a signed opening magnitude. This is what stops a user who imported
+     * only recent history from sitting permanently negative.
      */
     openingBalanceCents: integer("opening_balance_cents").notNull().default(0).$type<Cents>(),
+    /** Calendar day on which the opening balance starts contributing to history. */
+    openingBalanceDate: text("opening_balance_date")
+      .notNull()
+      .default(sql`(date('now', 'localtime'))`)
+      .$type<DateKey>(),
     currency: text("currency").notNull().default("USD"),
     /** Closed accounts stay visible to history; they are hidden from pickers. */
     archived: integer("archived", { mode: "boolean" }).notNull().default(false),
@@ -71,6 +78,18 @@ export const accounts = sqliteTable(
     nameUnique: uniqueIndex("accounts_name_unique").on(table.name),
     kindIdx: index("accounts_kind_idx").on(table.kind),
     kindValid: check("accounts_kind_valid", sql`${table.kind} IN ('asset', 'liability')`),
+    openingBalanceMagnitude: check(
+      "accounts_opening_balance_magnitude",
+      sql`typeof(${table.openingBalanceCents}) = 'integer' AND ${table.openingBalanceCents} >= 0`,
+    ),
+    openingBalanceDateValid: check(
+      "accounts_opening_balance_date_valid",
+      sql`${table.openingBalanceDate} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND date(${table.openingBalanceDate}, '+0 days') = ${table.openingBalanceDate}`,
+    ),
+    currencyValid: check(
+      "accounts_currency_valid",
+      sql`${table.currency} GLOB '[A-Z][A-Z][A-Z]'`,
+    ),
   }),
 );
 

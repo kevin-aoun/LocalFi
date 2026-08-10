@@ -406,6 +406,7 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
         userName: row.userName,
         accentColor: row.accentColor,
         theme: row.theme,
+        showLedger: row.showLedger,
         createdAt: instant(row.createdAt),
         updatedAt: instant(row.updatedAt),
       })),

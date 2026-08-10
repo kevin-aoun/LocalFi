@@ -37,11 +37,10 @@ import { AccountDialog } from "@/components/accounts/account-dialog";
 import { AccountGroup } from "@/components/accounts/account-group";
 import { OrphanRepairCard } from "@/components/accounts/orphan-repair-card";
 import {
-  currencyOf,
   groupAccountsByKind,
-  presentNetWorth,
   type AccountRow,
 } from "@/components/accounts/account-form-logic";
+import { formatCurrencyTotals } from "@/components/assets/currency-totals";
 import { fromDateKey, isDateKey } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -49,6 +48,7 @@ import { cn } from "@/lib/utils";
 type SnapshotSummary = {
   /** 'YYYY-MM-DD' local calendar day. */
   date: string;
+  currency: string;
   netWorthCents: number;
 };
 
@@ -63,6 +63,37 @@ type AccountsClientProps = {
 /** A DateKey rendered in the user's locale, never through UTC. */
 function formatDateKey(key: string): string {
   return isDateKey(key) ? fromDateKey(key).toLocaleDateString() : key;
+}
+
+type BucketMoneyField =
+  | "totalAssetsCents"
+  | "totalLiabilitiesCents"
+  | "netWorthCents"
+  | "standaloneAssetsCents";
+
+function bucketLabel(netWorth: NetWorthView, field: BucketMoneyField): string {
+  return formatCurrencyTotals(
+    netWorth.currencyTotals.map((total) => ({
+      currency: total.currency,
+      totalCents: total[field],
+      count: 1,
+    })),
+  );
+}
+
+function BucketValues({ netWorth, field }: { netWorth: NetWorthView; field: BucketMoneyField }) {
+  return (
+    <div className="mt-1 space-y-0.5 text-2xl font-bold">
+      {netWorth.currencyTotals.map((total) => (
+        <div
+          key={total.currency}
+          className={cn(field === "netWorthCents" && total[field] < 0 && "text-red-600 dark:text-red-400")}
+        >
+          {formatMoney(total[field], total.currency)}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function AccountsClient({
@@ -85,10 +116,8 @@ export default function AccountsClient({
   const [snapshotting, setSnapshotting] = useState(false);
 
   const grouped = groupAccountsByKind(accounts, { includeArchived: showArchived });
-  // No FX source in this app: totals are only labelled with a currency when every
-  // account agrees on one. Otherwise the mixed-currency caveat is shown.
-  const { currency, mixed, currencies } = currencyOf(accounts);
-  const summary = presentNetWorth(netWorth, currency);
+  const mixed = netWorth.aggregateCurrency === null;
+  const currencies = netWorth.currencyTotals.map((total) => total.currency);
   const assignable = accounts.filter((account) => !account.archived);
 
   const refresh = () => router.refresh();
@@ -140,7 +169,7 @@ export default function AccountsClient({
         return;
       }
       setSnapshotNote(
-        `Recorded ${formatMoney(result.data.netWorthCents, currency)} for ` +
+        `Recorded ${formatMoney(result.data.netWorthCents, result.data.currency)} for ` +
           `${formatDateKey(result.data.date)}. ${result.data.priceSummary}`,
       );
       refresh();
@@ -193,16 +222,16 @@ export default function AccountsClient({
         <Card>
           <CardContent className="p-6">
             <div className="text-sm text-muted-foreground">Total assets</div>
-            <div className="mt-1 text-2xl font-bold">{summary.assetsLabel}</div>
+            <BucketValues netWorth={netWorth} field="totalAssetsCents" />
             <div className="mt-1 text-xs text-muted-foreground">
-              Accounts you hold, plus standalone assets ({summary.standaloneAssetsLabel})
+              Accounts you hold, plus standalone assets ({bucketLabel(netWorth, "standaloneAssetsCents")})
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-6">
             <div className="text-sm text-muted-foreground">Total liabilities</div>
-            <div className="mt-1 text-2xl font-bold">{summary.liabilitiesLabel}</div>
+            <BucketValues netWorth={netWorth} field="totalLiabilitiesCents" />
             <div className="mt-1 text-xs text-muted-foreground">
               What you owe, shown as a positive amount
             </div>
@@ -211,14 +240,7 @@ export default function AccountsClient({
         <Card>
           <CardContent className="p-6">
             <div className="text-sm text-muted-foreground">Net worth</div>
-            <div
-              className={cn(
-                "mt-1 text-2xl font-bold",
-                summary.isNegative && "text-red-600 dark:text-red-400",
-              )}
-            >
-              {summary.netWorthLabel}
-            </div>
+            <BucketValues netWorth={netWorth} field="netWorthCents" />
             <div className="mt-1 text-xs text-muted-foreground">Assets minus liabilities</div>
           </CardContent>
         </Card>
@@ -229,7 +251,7 @@ export default function AccountsClient({
           <Camera className="mt-0.5 h-3 w-3 shrink-0" />
           <span>
             {latestSnapshot
-              ? `Net-worth history: last recorded ${formatDateKey(latestSnapshot.date)} at ${formatMoney(latestSnapshot.netWorthCents, currency)}.`
+              ? `Net-worth history: last recorded ${formatDateKey(latestSnapshot.date)} at ${formatMoney(latestSnapshot.netWorthCents, latestSnapshot.currency)}.`
               : "Net-worth history is empty. Record today to start it."}{" "}
             Recording twice on the same day updates that day rather than adding a duplicate.
           </span>
@@ -237,12 +259,19 @@ export default function AccountsClient({
         {snapshotNote && (
           <p className="font-medium text-green-700 dark:text-green-400">{snapshotNote}</p>
         )}
-        {summary.hasUnassigned && (
+        {netWorth.currencyTotals.some((total) => total.unassignedCents !== 0) && (
           <p className="flex items-start gap-2">
             <Info className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
-              {summary.unassignedLabel} of the total comes from transactions with no account. It
-              counts towards net worth but towards no account&apos;s balance.
+              {formatCurrencyTotals(
+                netWorth.currencyTotals
+                  .filter((total) => total.unassignedCents !== 0)
+                  .map((total) => ({
+                    currency: total.currency,
+                    totalCents: total.unassignedCents,
+                    count: 1,
+                  })),
+              )} comes from transactions with no account and is kept in its own currency bucket.
             </span>
           </p>
         )}
@@ -258,14 +287,13 @@ export default function AccountsClient({
               >
                 <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                 <span>
-                  Your accounts use {currencies.join(", ")}. No exchange rates are applied, so the
-                  totals above add different currencies together; read them per account instead.
+                  Net worth is shown as separate {currencies.join(", ")} buckets. No exchange
+                  rates are applied, and no combined amount exists.
                 </span>
               </p>
             </TooltipTrigger>
             <TooltipContent className="max-w-xs">
-              No exchange rates are applied. Amounts in different currencies are added together
-              only because there is no FX source in this app.
+              No exchange rates are applied. Each displayed amount contains one currency only.
             </TooltipContent>
           </Tooltip>
         )}

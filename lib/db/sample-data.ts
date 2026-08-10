@@ -1,89 +1,142 @@
-import { getDb, saveDb } from "./client";
-import { assets, transactions, categories } from "./schema";
+import { asc } from "drizzle-orm";
+
+import { fromDateKey, type DateKey } from "@/lib/dates";
+import {
+  createManualInstrument,
+  observationDay,
+  postAssetOpeningPosition,
+  projectPositionHolding,
+  recordInstrumentObservation,
+} from "@/lib/investments";
+import {
+  buildTransactionMovements,
+  buildTransactionProjection,
+  postLedgerEventRaw,
+  registerLedgerAccount,
+} from "@/lib/ledger";
 import { parseAmount } from "@/lib/money";
+import { withDb } from "./client";
+import { accounts, assets, categories, transactions } from "./schema";
+import { syncCashAssetWithin } from "./sync-cash";
 
-async function addSampleData() {
-  console.log("Adding sample data...");
-  const db = await getDb();
+const sampleAssets = [
+  { category: "Investments", value: "50000.00", notes: "Stock Portfolio" },
+  { category: "Crypto", value: "8500.00", notes: "Bitcoin" },
+  { category: "Properties", value: "350000.00", notes: "Primary Residence" },
+  { category: "Vehicles", value: "22500.00", notes: "Car" },
+  { category: "Commodities", value: "3500.00", notes: "Gold Coins" },
+] as const;
 
-  // Get categories
-  const allCategories = await db.select().from(categories).all();
-  console.log(`Found ${allCategories.length} categories`);
+const sampleTransactions = [
+  { date: "2026-01-28", category: "Salary", amount: "5000.00", comment: "Monthly salary" },
+  { date: "2026-01-27", category: "Groceries", amount: "120.50", comment: "Weekly groceries" },
+  { date: "2026-01-26", category: "Dining", amount: "45.00", comment: "Dinner with friends" },
+  { date: "2026-01-25", category: "Transport", amount: "60.00", comment: "Gas and parking" },
+  { date: "2026-01-24", category: "Entertainment", amount: "25.00", comment: "Movie tickets" },
+  { date: "2026-01-20", category: "Groceries", amount: "85.30", comment: "Grocery shopping" },
+] as const;
 
-  if (allCategories.length === 0) {
-    console.log("No categories found. Please run npm run db:seed first.");
-    return;
-  }
+async function addSampleData(): Promise<void> {
+  const result = await withDb(async (db, raw) => {
+    const categoryRows = await db.select().from(categories).orderBy(asc(categories.id));
+    const [account] = await db.select().from(accounts).orderBy(asc(accounts.id)).limit(1);
+    if (categoryRows.length === 0 || !account) {
+      throw new Error("Run bun run db:seed before adding sample data");
+    }
+    const categoryByName = new Map(categoryRows.map((category) => [category.name, category]));
+    const now = Math.floor(Date.now() / 1000);
+    const today = observationDay(now);
 
-  // Add sample assets
-  // Amounts are written as dollar strings and converted once via parseAmount,
-  // so the sample data cannot introduce a float into a money column.
-  const sampleAssets = [
-    { category: "Investments" as const, currentValueCents: parseAmount("50000.00"), currency: "USD", notes: "Stock Portfolio" },
-    { category: "Crypto" as const, currentValueCents: parseAmount("8500.00"), currency: "USD", notes: "Bitcoin" },
-    { category: "Properties" as const, currentValueCents: parseAmount("350000.00"), currency: "USD", notes: "Primary Residence" },
-    { category: "Vehicles" as const, currentValueCents: parseAmount("22500.00"), currency: "USD", notes: "Car" },
-    { category: "Commodities" as const, currentValueCents: parseAmount("3500.00"), currency: "USD", notes: "Gold Coins" },
-  ];
+    for (const sample of sampleAssets) {
+      const value = parseAmount(sample.value);
+      const instrument = createManualInstrument(raw, {
+        label: sample.notes,
+        category: sample.category,
+        currency: "USD",
+        createdAt: now,
+      });
+      recordInstrumentObservation(raw, {
+        instrumentId: instrument.id,
+        observationKind: "valuation",
+        observedDay: today,
+        observedAt: now,
+        amountMinor: value,
+        currency: "USD",
+        source: "sample-data",
+      });
+      const [asset] = await db.insert(assets).values({
+        category: sample.category,
+        currentValueCents: value,
+        currency: "USD",
+        instrumentId: instrument.id,
+        notes: sample.notes,
+      }).returning();
+      postAssetOpeningPosition(raw, {
+        assetId: asset.id,
+        instrumentId: instrument.id,
+        currency: "USD",
+        quantity: "1",
+        bookAmountMinor: value,
+        effectiveDate: today,
+        description: `Sample opening position for ${sample.notes}`,
+        recordedAt: now,
+        source: "manual-holding",
+      });
+      projectPositionHolding(raw, instrument.id, "USD");
+    }
 
-  for (const asset of sampleAssets) {
-    await db.insert(assets).values(asset);
-  }
-  console.log(`Added ${sampleAssets.length} sample assets`);
-
-  // Add sample transactions
-  const salaryCategory = allCategories.find(c => c.name === "Salary");
-  const groceriesCategory = allCategories.find(c => c.name === "Groceries");
-  const diningCategory = allCategories.find(c => c.name === "Dining");
-  const transportCategory = allCategories.find(c => c.name === "Transport");
-  const entertainmentCategory = allCategories.find(c => c.name === "Entertainment");
-
-  const sampleTransactions = [
-    {
-      date: new Date("2026-01-28"),
-      categoryId: salaryCategory?.id || 1,
-      amountCents: parseAmount("5000.00"),
-      comment: "Monthly salary",
-    },
-    {
-      date: new Date("2026-01-27"),
-      categoryId: groceriesCategory?.id || 2,
-      amountCents: parseAmount("120.50"),
-      comment: "Weekly groceries",
-    },
-    {
-      date: new Date("2026-01-26"),
-      categoryId: diningCategory?.id || 3,
-      amountCents: parseAmount("45.00"),
-      comment: "Dinner with friends",
-    },
-    {
-      date: new Date("2026-01-25"),
-      categoryId: transportCategory?.id || 4,
-      amountCents: parseAmount("60.00"),
-      comment: "Gas and parking",
-    },
-    {
-      date: new Date("2026-01-24"),
-      categoryId: entertainmentCategory?.id || 5,
-      amountCents: parseAmount("25.00"),
-      comment: "Movie tickets",
-    },
-    {
-      date: new Date("2026-01-20"),
-      categoryId: groceriesCategory?.id || 2,
-      amountCents: parseAmount("85.30"),
-      comment: "Grocery shopping",
-    },
-  ];
-
-  for (const transaction of sampleTransactions) {
-    await db.insert(transactions).values(transaction);
-  }
-  console.log(`Added ${sampleTransactions.length} sample transactions`);
-
-  await saveDb();
-  console.log("Sample data added successfully!");
+    for (const sample of sampleTransactions) {
+      const category = categoryByName.get(sample.category);
+      if (!category) throw new Error(`Sample category ${sample.category} does not exist`);
+      const direction = category.type === "Income" ? "inflow" as const : "outflow" as const;
+      const dateKey = sample.date as DateKey;
+      const date = fromDateKey(dateKey);
+      const [row] = await db.insert(transactions).values({
+        date,
+        categoryId: category.id,
+        accountId: account.id,
+        amountCents: parseAmount(sample.amount),
+        direction,
+        currency: account.currency,
+        comment: sample.comment,
+        pending: false,
+      }).returning();
+      const accountTargetId = registerLedgerAccount(raw, {
+        targetType: "real_account",
+        targetRef: account.id,
+        currency: account.currency,
+      });
+      const categoryTargetId = registerLedgerAccount(raw, {
+        targetType: "category",
+        targetRef: category.id,
+        currency: account.currency,
+      });
+      const event = postLedgerEventRaw(raw, {
+        effectiveDate: dateKey,
+        description: sample.comment,
+        metadata: {
+          projectionKey: row.id,
+          transaction: buildTransactionProjection(row),
+          provenance: { source: "sample-data" },
+        },
+        movements: buildTransactionMovements({
+          direction,
+          amountMinor: row.amountCents,
+          currency: account.currency,
+          accountTargetId,
+          categoryTargetId,
+        }),
+        recordedAt: row.updatedAt,
+      });
+      raw.run("UPDATE transactions SET current_event_id = ? WHERE id = ?", [event.eventId, row.id]);
+    }
+    await syncCashAssetWithin(db);
+    return { assets: sampleAssets.length, transactions: sampleTransactions.length };
+  });
+  console.log(`Added ${result.assets} sample assets and ${result.transactions} journaled transactions`);
 }
 
-addSampleData().catch(console.error);
+addSampleData().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

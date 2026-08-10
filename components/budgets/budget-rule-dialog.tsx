@@ -17,8 +17,8 @@
  *
  * All money crosses to the server as a DECIMAL STRING (the house transport
  * convention) and is parsed with `parseAmount` there; a limit of "0" is a real
- * ceiling and is always sent. Dates are 'YYYY-MM-DD' strings straight from
- * `<input type="date">` — no Date object, so no UTC shift.
+ * ceiling and is always sent. Calendar controls exchange DateKeys directly.
+ * DECISION: DEC-008, DEC-009.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -27,6 +27,7 @@ import { AlertCircle, Loader2 } from "lucide-react";
 import { createBudget, updateBudget } from "@/app/actions/budgets";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   Dialog,
   DialogContent,
@@ -44,19 +45,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { budgetPeriods, type BudgetPeriod } from "@/lib/budgets";
-import { todayKey } from "@/lib/dates";
+import { todayKey, type DateKey } from "@/lib/dates";
 
 import {
   budgetFormStateFrom,
-  budgetableCategories,
-  periodLabel,
-  periodUnitLabel,
   toBudgetFormData,
   validateBudgetForm,
   withPeriod,
   type BudgetRuleFormState,
-  type CategoryOption,
   type EditableBudget,
+} from "./budget-form-logic";
+import {
+  budgetableCategories,
+  periodLabel,
+  periodUnitLabel,
+  type CategoryOption,
 } from "./budget-view-logic";
 
 type BudgetRuleDialogProps = {
@@ -229,27 +232,42 @@ export function BudgetRuleDialog({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="budget-from">In force from</Label>
-              <Input
+              <DatePicker
                 id="budget-from"
-                type="date"
                 value={formData.effectiveFrom}
-                onChange={(event) =>
-                  setFormData((prev) => ({ ...prev, effectiveFrom: event.target.value }))
+                onChange={(value) =>
+                  value && setFormData((prev) => ({ ...prev, effectiveFrom: value }))
                 }
-                required
+                aria-label="Budget start date"
+                className="w-full"
               />
             </div>
             <div className="space-y-2">
               <Label htmlFor="budget-to">Until (optional)</Label>
-              <Input
+              <DatePicker
                 id="budget-to"
-                type="date"
-                value={formData.effectiveTo}
-                onChange={(event) =>
-                  setFormData((prev) => ({ ...prev, effectiveTo: event.target.value }))
+                value={formData.effectiveTo === "" ? null : (formData.effectiveTo as DateKey)}
+                onChange={(value) =>
+                  value && setFormData((prev) => ({ ...prev, effectiveTo: value }))
                 }
+                aria-label="Budget end date"
+                placeholder="No end date"
+                className="w-full"
               />
-              <p className="text-xs text-muted-foreground">Leave blank to keep it in force.</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">Leave blank to keep it in force.</p>
+                {formData.effectiveTo !== "" && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setFormData((prev) => ({ ...prev, effectiveTo: "" }))}
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -272,6 +290,39 @@ export function BudgetRuleDialog({
                   clean at its own limit.
                 </p>
               </div>
+            </div>
+
+            <div className="grid gap-3 border-t pt-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="budget-goal-name">Savings goal (optional)</Label>
+                <Input
+                  id="budget-goal-name"
+                  value={formData.goalName}
+                  onChange={(event) =>
+                    setFormData((prev) => ({ ...prev, goalName: event.target.value }))
+                  }
+                  placeholder="Emergency fund"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="budget-goal-amount">Target amount</Label>
+                <Input
+                  id="budget-goal-amount"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  value={formData.goalAmount}
+                  onChange={(event) =>
+                    setFormData((prev) => ({ ...prev, goalAmount: event.target.value }))
+                  }
+                  placeholder="0.00"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground sm:col-span-2">
+                A goal is available on monthly rollover budgets. Progress uses the
+                amount already left in this budget; it does not create contributions
+                or transactions. Clear both fields to remove the goal.
+              </p>
             </div>
 
             {!budget && (

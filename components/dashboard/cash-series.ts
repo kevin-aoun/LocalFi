@@ -22,6 +22,8 @@
 import {
   deriveCashBalanceCents,
   isTransfer,
+  normalizeLedgerCurrency,
+  transactionCashDirection,
   type CashLedgerCategory,
   type CashLedgerTransaction,
 } from "@/lib/cash-balance";
@@ -39,31 +41,41 @@ export type SeriesTransaction = CashLedgerTransaction & {
  * Signed contribution of ONE transaction to the cash balance, in exact cents.
  *
  * This is the per-row form of the rule in lib/cash-balance.ts and it must stay
- * in lockstep with it: Income adds, Expense and Investment subtract, a
- * transaction whose category is missing (or a transfer between the user's own
- * accounts) contributes nothing. Pending and transfer rows are filtered by the
- * caller (`countsTowardsCash`), exactly as `deriveCashBalanceCents` does
- * internally.
+ * in lockstep with it. Persisted direction is the historical fact; category
+ * type is consulted only for pre-0009 in-memory fixtures. Pending and transfer
+ * rows are filtered by the caller (`countsTowardsCash`).
  */
 export function cashContributionCents(
   tx: CashLedgerTransaction,
   categories: readonly CashLedgerCategory[],
 ): Cents {
   if (isTransfer(tx)) return 0;
-  if (tx.categoryId == null) return 0;
-  const category = categories.find((c) => c.id === tx.categoryId);
-  if (category?.type === "Income") return tx.amountCents;
-  if (category?.type === "Expense" || category?.type === "Investment") {
-    return negateCents(tx.amountCents);
+  const categoryType =
+    tx.categoryId == null ? undefined : categories.find((c) => c.id === tx.categoryId)?.type;
+  switch (transactionCashDirection(tx, categoryType)) {
+    case "inflow":
+      return tx.amountCents;
+    case "outflow":
+      return negateCents(tx.amountCents);
+    default:
+      return 0;
   }
-  return 0;
 }
 
 /** Only rows that count towards cash — same predicate as `deriveCashBalanceCents`. */
 export function countsTowardsCash<T extends CashLedgerTransaction>(
   transactions: readonly T[],
+  currency?: string,
 ): T[] {
-  return transactions.filter((tx) => !tx.pending && !isTransfer(tx));
+  const selectedCurrency =
+    currency === undefined ? undefined : normalizeLedgerCurrency(currency);
+  return transactions.filter(
+    (tx) =>
+      !tx.pending &&
+      !isTransfer(tx) &&
+      (selectedCurrency === undefined ||
+        normalizeLedgerCurrency(tx.currency, "USD") === selectedCurrency),
+  );
 }
 
 function asDate(value: Date | string | number): Date {
@@ -102,8 +114,9 @@ export function buildCashCandles(
   transactions: readonly SeriesTransaction[],
   categories: readonly CashLedgerCategory[],
   period: ChartPeriod,
+  currency?: string,
 ): Candle[] {
-  const sorted = countsTowardsCash(transactions)
+  const sorted = countsTowardsCash(transactions, currency)
     .slice()
     .sort((a, b) => asDate(a.date).getTime() - asDate(b.date).getTime());
 
@@ -161,12 +174,14 @@ export function computeCashGrowth(
   transactions: readonly SeriesTransaction[],
   categories: readonly CashLedgerCategory[],
   now: Date = new Date(),
+  currency?: string,
 ): CashGrowth {
   const firstOfThisMonth = startOfMonth(now).getTime();
   const priorMonths = transactions.filter((tx) => asDate(tx.date).getTime() < firstOfThisMonth);
 
-  const currentCents = deriveCashBalanceCents(transactions, categories);
-  const baselineCents = deriveCashBalanceCents(priorMonths, categories);
+  const options = currency === undefined ? undefined : { currency };
+  const currentCents = deriveCashBalanceCents(transactions, categories, options);
+  const baselineCents = deriveCashBalanceCents(priorMonths, categories, options);
   const growthAmountCents = sumCents([currentCents, negateCents(baselineCents)]);
 
   return {

@@ -10,13 +10,13 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resolveInitDbPath } from "../init";
 
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..", "..");
 const INIT_SCRIPT = path.join("lib", "db", "init.ts");
-const TSX = path.join(PROJECT_ROOT, "node_modules", "tsx", "dist", "cli.mjs");
 
 const dirs: string[] = [];
 
@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 function runInit(dbPath: string, args: string[] = []) {
-  return execFileSync(process.execPath, [TSX, INIT_SCRIPT, ...args], {
+  return execFileSync(process.execPath, ["--import", "tsx", INIT_SCRIPT, ...args], {
     cwd: PROJECT_ROOT,
     env: { ...process.env, BUDGET_DB_PATH: dbPath },
     encoding: "utf-8",
@@ -42,22 +42,25 @@ function runInit(dbPath: string, args: string[] = []) {
 describe("lib/db/init.ts", () => {
   it("creates the database at BUDGET_DB_PATH, not at data/budget.db", () => {
     const dbPath = path.join(tempDir(), "nested", "target.db");
-    const output = runInit(dbPath);
+    runInit(dbPath);
 
     expect(existsSync(dbPath)).toBe(true);
     expect(statSync(dbPath).size).toBeGreaterThan(0);
-    expect(output).toContain(dbPath);
   }, 60_000);
 
   it("applies the whole journal, including 0003", () => {
     const dbPath = path.join(tempDir(), "target.db");
-    const output = runInit(dbPath);
-
-    expect(output).toContain("0000_acoustic_natasha_romanoff");
-    expect(output).toContain("0002_money_to_cents");
-    expect(output).toContain("0003_accounts_and_budget_periods");
-    for (const table of ["accounts", "budgets", "recurring_transactions", "net_worth_snapshots"]) {
-      expect(output).toContain(table);
+    runInit(dbPath);
+    const image = readFileSync(dbPath);
+    for (const table of [
+      "accounts",
+      "budgets",
+      "recurring_transactions",
+      "net_worth_snapshots",
+      "ledger_events",
+      "instrument_positions",
+    ]) {
+      expect(image.includes(Buffer.from(table))).toBe(true);
     }
   }, 60_000);
 
@@ -80,19 +83,13 @@ describe("lib/db/init.ts", () => {
   it("still defaults to data/budget.db when the variable is unset", () => {
     // Only the resolver is checked here — actually running it would target the
     // user's real database.
-    const output = execFileSync(
-      process.execPath,
-      [
-        TSX,
-        "-e",
-        'import { resolveInitDbPath } from "./lib/db/init"; console.log(resolveInitDbPath());',
-      ],
-      {
-        cwd: PROJECT_ROOT,
-        env: { ...process.env, BUDGET_DB_PATH: "" },
-        encoding: "utf-8",
-      },
-    );
-    expect(output.trim()).toBe(path.join(PROJECT_ROOT, "data", "budget.db"));
+    const previous = process.env.BUDGET_DB_PATH;
+    process.env.BUDGET_DB_PATH = "";
+    try {
+      expect(resolveInitDbPath()).toBe(path.join(PROJECT_ROOT, "data", "budget.db"));
+    } finally {
+      if (previous === undefined) delete process.env.BUDGET_DB_PATH;
+      else process.env.BUDGET_DB_PATH = previous;
+    }
   }, 60_000);
 });

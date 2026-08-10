@@ -5,7 +5,7 @@
  * list decide — form -> FormData mapping, validation, frequency wording, the
  * "what will post" preview and the generation report copy — lives in
  * `recurring-form-logic.ts` where it can be asserted directly, including under
- * the extreme timezones `npm run test:tz` runs at.
+ * the extreme timezones `bun run test:tz` runs at.
  */
 import { describe, expect, it } from "vitest";
 

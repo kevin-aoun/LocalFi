@@ -25,9 +25,10 @@
  * the advanced cursors are persisted, or nothing is.
  */
 import { and, asc, eq } from "drizzle-orm";
+import type { Database } from "sql.js";
 import { revalidate } from "@/lib/revalidate";
 
-import { readDb, withDb } from "@/lib/db/client";
+import { readDb, withDb, type BudgetDb } from "@/lib/db/client";
 import {
   accounts,
   categories,
@@ -35,16 +36,25 @@ import {
   recurrenceFrequencies,
   transactions,
   type RecurringTransaction,
+  type Transaction,
 } from "@/lib/db/schema";
 import { syncCashAssetWithin } from "@/lib/db/sync-cash";
-import { fromDateKey, isDateKey, todayKey, type DateKey } from "@/lib/dates";
+import { fromDateKey, isDateKey, toDateKey, todayKey, type DateKey } from "@/lib/dates";
 import {
   nextOccurrenceAfter,
   occurrencesThrough,
   type Frequency,
   type RecurrenceRule,
 } from "@/lib/recurrence";
-import { parseAmount } from "@/lib/money";
+import { parseAmount, type Cents } from "@/lib/money";
+import { categoryCashDirection, normalizeLedgerCurrency } from "@/lib/cash-balance";
+import type { TransactionDirection } from "@/lib/db/schema";
+import {
+  buildProjectedTransactionMovements,
+  buildTransactionProjection,
+  correctLedgerEventInput,
+  postLedgerEventRaw,
+} from "@/lib/ledger";
 
 export type ActionResult<T> = { success: true; data: T } | { error: string };
 
@@ -102,6 +112,81 @@ function requireDateKey(value: string | null, label: string): DateKey {
 function optionalDateKey(value: string | null, label: string): DateKey | null {
   if (value === null) return null;
   return requireDateKey(value, label);
+}
+
+function requireMagnitude(cents: Cents): Cents {
+  if (cents < 0) throw new Error("A recurring amount cannot be negative");
+  return cents;
+}
+
+function recurringMovements(raw: Database, row: Transaction) {
+  return buildProjectedTransactionMovements(raw, row);
+}
+
+/** DECISION: DEC-011 — templates stay mutable; only confirmed occurrences post events. */
+function postRecurringProjection(raw: Database, row: Transaction, templateName: string): void {
+  const movements = recurringMovements(raw, row);
+  const event = postLedgerEventRaw(raw, {
+    effectiveDate: row.recurringOccurrence!,
+    description: row.comment ?? templateName,
+    metadata: {
+      projectionKey: row.id,
+      transaction: buildTransactionProjection(row),
+      provenance: {
+        source: "recurring-occurrence",
+        templateId: row.recurringId!,
+        occurrence: row.recurringOccurrence!,
+      },
+    },
+    movements,
+    recordedAt: row.updatedAt,
+  });
+  raw.run("UPDATE transactions SET current_event_id = ? WHERE id = ?", [event.eventId, row.id]);
+}
+
+function detachRecurringProjection(raw: Database, row: Transaction, templateName: string): void {
+  if (!row.currentEventId) throw new Error("A confirmed recurring occurrence has no ledger event");
+  const movements = recurringMovements(raw, row);
+  const input = correctLedgerEventInput(row.currentEventId, movements, movements, {
+    effectiveDate: toDateKey(row.date),
+    description: row.comment ?? templateName,
+    metadata: {
+      projectionKey: row.id,
+      transaction: buildTransactionProjection(row, [], { recurringId: null }),
+      provenance: {
+        source: "recurring-template-detach",
+        templateId: row.recurringId!,
+        occurrence: row.recurringOccurrence!,
+      },
+    },
+    recordedAt: new Date(),
+  });
+  const event = postLedgerEventRaw(raw, input);
+  raw.run(
+    "UPDATE transactions SET recurring_id = NULL, current_event_id = ? WHERE id = ?",
+    [event.eventId, row.id],
+  );
+}
+
+async function assertTemplateTransferCurrency(
+  db: BudgetDb,
+  accountId: number | null,
+  transferAccountId: number | null,
+): Promise<void> {
+  if (transferAccountId === null) return;
+  if (accountId === null) throw new Error("A transfer needs a source account");
+  const rows = await db.select().from(accounts);
+  const source = rows.find((account) => account.id === accountId);
+  const destination = rows.find((account) => account.id === transferAccountId);
+  if (!source) throw new Error(`No account with id ${accountId}`);
+  if (!destination) throw new Error(`No account with id ${transferAccountId}`);
+  const sourceCurrency = normalizeLedgerCurrency(source.currency);
+  const destinationCurrency = normalizeLedgerCurrency(destination.currency);
+  if (sourceCurrency !== destinationCurrency) {
+    throw new Error(
+      `Cannot transfer between ${sourceCurrency} and ${destinationCurrency} accounts without an FX model.`,
+    );
+  }
 }
 
 /** The recurrence rule of a stored template. */
@@ -202,7 +287,7 @@ export async function createRecurringTransaction(
       return { error: "The end date cannot be before the start date" };
     }
 
-    const amountCents = parseAmount(str(formData, "amount") ?? "");
+    const amountCents = requireMagnitude(parseAmount(str(formData, "amount") ?? ""));
     const accountId = num(formData, "accountId");
     const transferAccountId = num(formData, "transferAccountId");
     const categoryId = num(formData, "categoryId");
@@ -218,6 +303,7 @@ export async function createRecurringTransaction(
     const nextDue = nextOccurrenceAfter(rule, null);
 
     const template = await withDb(async (db) => {
+      await assertTemplateTransferCurrency(db, accountId, transferAccountId);
       const [row] = await db
         .insert(recurringTransactions)
         .values({
@@ -293,6 +379,7 @@ export async function updateRecurringTransaction(
       if (transferAccountId !== null && categoryId !== null) {
         throw new Error("A transfer has no category");
       }
+      await assertTemplateTransferCurrency(db, accountId, transferAccountId);
 
       const amountRaw = str(formData, "amount");
       const rule: RecurrenceRule = { frequency, interval, startDate, endDate };
@@ -304,7 +391,7 @@ export async function updateRecurringTransaction(
           accountId,
           transferAccountId,
           categoryId,
-          amountCents: amountRaw === null ? existing.amountCents : parseAmount(amountRaw),
+          amountCents: amountRaw === null ? existing.amountCents : requireMagnitude(parseAmount(amountRaw)),
           comment: formData.has("comment") ? str(formData, "comment") : existing.comment,
           frequency,
           interval,
@@ -360,9 +447,19 @@ export async function setRecurringArchived(
  */
 export async function deleteRecurringTransaction(id: number): Promise<ActionResult<{ id: number }>> {
   try {
-    await withDb((db) =>
-      db.delete(recurringTransactions).where(eq(recurringTransactions.id, id)),
-    );
+    await withDb(async (db, raw) => {
+      const [template] = await db
+        .select()
+        .from(recurringTransactions)
+        .where(eq(recurringTransactions.id, id));
+      if (!template) throw new Error(`No recurring transaction with id ${id}`);
+      const materialized = await db
+        .select()
+        .from(transactions)
+        .where(eq(transactions.recurringId, id));
+      for (const row of materialized) detachRecurringProjection(raw, row, template.name);
+      await db.delete(recurringTransactions).where(eq(recurringTransactions.id, id));
+    });
     revalidate("/transactions", "/recurring", "/");
     return { success: true, data: { id } };
   } catch (error) {
@@ -389,12 +486,16 @@ export async function generateDueTransactions(options?: {
     const throughKey = options?.throughKey ?? todayKey();
     if (!isDateKey(throughKey)) throw new Error(`Invalid throughKey: ${String(throughKey)}`);
 
-    const report = await withDb(async (db) => {
+    const report = await withDb(async (db, raw) => {
       const templates = await db
         .select()
         .from(recurringTransactions)
         .where(eq(recurringTransactions.archived, false))
         .orderBy(asc(recurringTransactions.id));
+      const accountRows = await db.select().from(accounts);
+      const categoryRows = await db.select().from(categories);
+      const accountById = new Map(accountRows.map((account) => [account.id, account]));
+      const categoryById = new Map(categoryRows.map((category) => [category.id, category]));
 
       const result: GenerationReport = { throughKey, posted: 0, skipped: 0, templates: [] };
 
@@ -409,7 +510,39 @@ export async function generateDueTransactions(options?: {
         };
 
         let due: DateKey[];
+        let direction: TransactionDirection;
+        let currency: string;
         try {
+          if (template.amountCents < 0) throw new Error("Recurring amount cannot be negative");
+          if (template.transferAccountId !== null) {
+            if (template.accountId === null) throw new Error("Transfer template has no source account");
+            const source = accountById.get(template.accountId);
+            const destination = accountById.get(template.transferAccountId);
+            if (!source || !destination) throw new Error("Transfer template references a missing account");
+            currency = normalizeLedgerCurrency(source.currency);
+            const destinationCurrency = normalizeLedgerCurrency(destination.currency);
+            if (currency !== destinationCurrency) {
+              throw new Error(
+                `Cannot transfer between ${currency} and ${destinationCurrency} accounts without an FX model.`,
+              );
+            }
+            direction = "transfer";
+          } else {
+            const category =
+              template.categoryId === null ? undefined : categoryById.get(template.categoryId);
+            const resolved = categoryCashDirection(category?.type);
+            if (resolved !== "inflow" && resolved !== "outflow") {
+              throw new Error("Non-transfer template references no directional category");
+            }
+            direction = resolved;
+            if (template.accountId === null) {
+              currency = "USD";
+            } else {
+              const account = accountById.get(template.accountId);
+              if (!account) throw new Error(`Template references missing account ${template.accountId}`);
+              currency = normalizeLedgerCurrency(account.currency);
+            }
+          }
           due = occurrencesThrough(ruleOf(template), throughKey, {
             afterKey: template.lastGenerated,
           });
@@ -437,7 +570,7 @@ export async function generateDueTransactions(options?: {
             continue;
           }
 
-          await db.insert(transactions).values({
+          const [projected] = await db.insert(transactions).values({
             // Local midnight of the occurrence day: the row belongs to the day it
             // is due, so it lands in the right budget period.
             date: fromDateKey(occurrence),
@@ -445,11 +578,14 @@ export async function generateDueTransactions(options?: {
             accountId: template.accountId,
             transferAccountId: template.transferAccountId,
             amountCents: template.amountCents,
+            direction,
+            currency,
             comment: template.comment,
             pending: false,
             recurringId: template.id,
             recurringOccurrence: occurrence,
-          });
+          }).returning();
+          postRecurringProjection(raw, projected, template.name);
           entry.posted.push(occurrence);
           result.posted++;
         }

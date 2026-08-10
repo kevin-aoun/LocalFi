@@ -15,6 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTempDb, execOn, type TempDb } from "./support/temp-db";
 import { GRAMS_PER_TROY_OUNCE } from "@/lib/prices";
+import { postAssetOpeningPosition } from "@/lib/investments";
 
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
@@ -73,9 +74,6 @@ function holdingForm(over: Record<string, string> = {}) {
   if (over.unit !== undefined) fd.append("unit", over.unit);
   fd.append("currency", over.currency ?? "USD");
   if (over.notes !== undefined) fd.append("notes", over.notes);
-  if (over.linkedTransactionIds !== undefined) {
-    fd.append("linkedTransactionIds", over.linkedTransactionIds);
-  }
   return fd;
 }
 
@@ -105,6 +103,14 @@ describe("the legacy metals value wrapper", () => {
 });
 
 describe("createLivePricedAsset", () => {
+  it("forces USD even when a caller tries to relabel the provider quote", async () => {
+    const result = await createLivePricedAsset(
+      holdingForm({ quantity: "1", currency: "EUR" }),
+    );
+    expect(result).toMatchObject({ success: true, data: { currency: "USD" } });
+    expect(storedAssets()[0].currency).toBe("USD");
+  });
+
   it("stores a fractional bitcoin holding with its symbol, quantity and value", async () => {
     const result = await createLivePricedAsset(
       holdingForm({ quantity: "0.0345", notes: "cold wallet" }),
@@ -232,6 +238,74 @@ describe("updateLivePricedAsset", () => {
 });
 
 describe("recordNetWorthToday", () => {
+  it("refreshes two independently imported BTC positions in one batched request", async () => {
+    execOn(temp, (raw) => {
+      for (const [assetId, quantity, value] of [
+        [41, "0.01", 118_432],
+        [42, "0.02", 236_864],
+      ] as const) {
+        const instrumentId = `instrument:legacy-asset:${assetId}`;
+        raw.run(
+          `INSERT INTO instruments
+            (id, kind, label, symbol, unit, category, price_source, price_currency, created_at)
+           VALUES (?, 'security', 'Bitcoin', 'BTC', 'coins', 'Crypto',
+                   'legacy-live-price', 'USD', 1767398400)`,
+          [instrumentId],
+        );
+        raw.run(
+          `INSERT INTO assets
+            (id, category, current_value_cents, currency, instrument_id, notes, quantity,
+             unit, price_symbol, use_live_price, created_at, updated_at)
+           VALUES (?, 'Crypto', ?, 'USD', ?, ?, ?, 'coins', 'BTC', 1,
+                   1767398400, 1767398400)`,
+          [assetId, value, instrumentId, `Imported wallet ${assetId}`, Number(quantity)],
+        );
+        postAssetOpeningPosition(raw, {
+          assetId,
+          instrumentId,
+          currency: "USD",
+          quantity,
+          bookAmountMinor: value,
+          effectiveDate: "2026-01-03",
+          recordedAt: 1767398400 + assetId,
+          description: "Imported BTC opening",
+          source: "manual-live-holding",
+        });
+      }
+    });
+    const journalBefore = JSON.stringify({
+      events: temp.query("SELECT * FROM ledger_events ORDER BY sequence"),
+      movements: temp.query("SELECT * FROM ledger_movements ORDER BY event_id, position"),
+    });
+    fetchMock.mockClear();
+    serve({ coingecko: { bitcoin: { usd: 100_000 } } });
+
+    expect(await recordNetWorthToday()).toMatchObject({
+      success: true,
+      data: { prices: { refreshed: 2, failed: [] } },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(temp.query(
+      "SELECT id, current_value_cents, quantity, instrument_id FROM assets ORDER BY id",
+    )).toEqual([
+      { id: 41, current_value_cents: 100_000, quantity: 0.01,
+        instrument_id: "instrument:legacy-asset:41" },
+      { id: 42, current_value_cents: 200_000, quantity: 0.02,
+        instrument_id: "instrument:legacy-asset:42" },
+    ]);
+    expect(temp.query(
+      `SELECT instrument_id, amount_minor FROM instrument_observations
+        WHERE observation_kind = 'price' ORDER BY instrument_id`,
+    )).toEqual([
+      { instrument_id: "instrument:legacy-asset:41", amount_minor: 10_000_000 },
+      { instrument_id: "instrument:legacy-asset:42", amount_minor: 10_000_000 },
+    ]);
+    expect(JSON.stringify({
+      events: temp.query("SELECT * FROM ledger_events ORDER BY sequence"),
+      movements: temp.query("SELECT * FROM ledger_movements ORDER BY event_id, position"),
+    })).toBe(journalBefore);
+  });
+
   it("refreshes every live-priced commodity and crypto holding in one request", async () => {
     await createLivePricedAsset(
       holdingForm({ priceSymbol: "XAU", quantity: "1", unit: "oz", notes: "Gold" }),
@@ -286,6 +360,14 @@ describe("recordNetWorthToday", () => {
       holdingForm({ priceSymbol: "BTC", quantity: "1", notes: "Bitcoin" }),
     );
     fetchMock.mockClear();
+    const openingEvents = temp.query("SELECT COUNT(*) AS count FROM ledger_events");
+    const openingJournal = JSON.stringify({
+      events: temp.query("SELECT * FROM ledger_events ORDER BY sequence"),
+      movements: temp.query("SELECT * FROM ledger_movements ORDER BY event_id, position"),
+    });
+    const openingPosition = temp.query(
+      "SELECT quantity, book_amount_minor, current_event_id FROM instrument_positions",
+    );
 
     for (let run = 1; run <= 6; run += 1) {
       serve({ coingecko: { bitcoin: { usd: 100_000 + run } } });
@@ -293,6 +375,14 @@ describe("recordNetWorthToday", () => {
     }
 
     expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(temp.query("SELECT COUNT(*) AS count FROM ledger_events")).toEqual(openingEvents);
+    expect(JSON.stringify({
+      events: temp.query("SELECT * FROM ledger_events ORDER BY sequence"),
+      movements: temp.query("SELECT * FROM ledger_movements ORDER BY event_id, position"),
+    })).toBe(openingJournal);
+    expect(temp.query(
+      "SELECT quantity, book_amount_minor, current_event_id FROM instrument_positions",
+    )).toEqual(openingPosition);
     expect(temp.query("SELECT COUNT(*) AS count FROM net_worth_snapshots")).toEqual([
       { count: 1 },
     ]);
@@ -301,6 +391,12 @@ describe("recordNetWorthToday", () => {
     ]);
     expect(temp.query("SELECT asset_id, value_cents FROM asset_history")).toEqual([
       { asset_id: 1, value_cents: 10_000_600 },
+    ]);
+    expect(temp.query(
+      `SELECT observation_kind, amount_minor, currency
+         FROM instrument_observations`,
+    )).toEqual([
+      { observation_kind: "price", amount_minor: 10_000_600, currency: "USD" },
     ]);
   });
 

@@ -47,7 +47,13 @@ export type ReconstructionPreview = {
   toKey: DateKey;
   dayCount: number;
   /** Enough to draw a chart without shipping every holding breakdown. */
-  series: Array<{ dateKey: DateKey; netWorthCents: number; totalAssetsCents: number; totalLiabilitiesCents: number }>;
+  series: Array<{
+    dateKey: DateKey;
+    currency: string;
+    netWorthCents: number;
+    totalAssetsCents: number;
+    totalLiabilitiesCents: number;
+  }>;
   warnings: ReconstructionPlan["warnings"];
   continuity: ReconstructionPlan["continuity"];
   holdings: ReconstructionPlan["holdings"];
@@ -64,6 +70,7 @@ function preview(plan: ReconstructionPlan): ReconstructionPreview {
     dayCount: plan.days.length,
     series: plan.days.map((day) => ({
       dateKey: day.dateKey,
+      currency: day.currency,
       netWorthCents: day.netWorthCents,
       totalAssetsCents: day.totalAssetsCents,
       totalLiabilitiesCents: day.totalLiabilitiesCents,

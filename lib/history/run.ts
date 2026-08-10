@@ -1,10 +1,10 @@
 /**
- * The runnable half of historical reconstruction: read the database, fetch each
- * price series ONCE, compute the series, and — only if explicitly asked — write it.
+ * The runnable half of historical reconstruction: replay immutable account and
+ * position movements against timestamped observations, then — only if explicitly
+ * asked — write the result.
  *
- * ORDER OF OPERATIONS IS THE SAFETY PROPERTY. Everything that can fail (the
- * network, a missing price for a day a holding was held, a bad range) happens in
- * `planNetWorthReconstruction`, which touches nothing. `applyNetWorthReconstruction`
+ * ORDER OF OPERATIONS IS THE SAFETY PROPERTY. Everything that can fail happens
+ * in `planNetWorthReconstruction`, which touches nothing. `applyNetWorthReconstruction`
  * takes a finished plan and writes it inside ONE `withDb` call, so a failure
  * cannot leave the table half-backfilled: either every row lands or none does.
  *
@@ -23,34 +23,114 @@ import { and, asc, eq, gte, lte } from "drizzle-orm";
 
 import { readDb, withDb } from "@/lib/db/client";
 import {
-  accounts as accountsTable,
   assetHistory,
-  assets as assetsTable,
-  categories as categoriesTable,
   netWorthSnapshots,
-  transactions as transactionsTable,
 } from "@/lib/db/schema";
 import { fromDateKey, isDateKey, todayKey, type DateKey } from "@/lib/dates";
-import { type Cents } from "@/lib/money";
+import { sumCents, type Cents } from "@/lib/money";
 import { isPriceSymbol, type PriceFetchLike, type PriceSymbol } from "@/lib/prices";
-import { toReportTransactions } from "@/lib/reports";
+import {
+  readAccountBalances,
+  readCurrentMovements,
+  readPositionValuations,
+  readUnassignedAccountMovements,
+} from "@/lib/ledger";
+import type { Database } from "sql.js";
 
 import {
-  MAX_HISTORY_DAYS,
-  fetchPriceSeries,
-  describeHistoryError,
-  HISTORICAL_PRICE_SOURCES,
   type HistoryError,
-  type PriceSeries,
 } from "./prices";
 import {
-  reconstructNetWorthSeries,
+  eachDay,
   type HistoryAsset,
   type HoldingPlan,
   type PurchaseContinuity,
   type ReconstructedDay,
   type ReconstructionWarning,
 } from "./reconstruct";
+
+function firstLedgerKey(raw: Database): DateKey | null {
+  return readCurrentMovements(raw).map((movement) => movement.dateKey).sort()[0] ?? null;
+}
+
+/** CONTRACT-012/013 historical replay: journal signs + exact quantities + observations. */
+function reconstructJournalDays(raw: Database, fromKey: DateKey, toKey: DateKey): ReconstructedDay[] | PlanError {
+  const days: ReconstructedDay[] = [];
+  const currentMovements = readCurrentMovements(raw);
+  for (const dateKey of eachDay(fromKey, toKey)) {
+    const buckets = new Map<string, { assets: Cents[]; liabilities: Cents[]; accounts: Cents[]; holdings: Cents[] }>();
+    const bucket = (currency: string) => {
+      const found = buckets.get(currency);
+      if (found) return found;
+      const created = { assets: [] as Cents[], liabilities: [] as Cents[], accounts: [] as Cents[], holdings: [] as Cents[] };
+      buckets.set(currency, created);
+      return created;
+    };
+    for (const balance of readAccountBalances(raw, { asOfKey: dateKey, currentMovements })) {
+      const target = bucket(balance.currency);
+      target.accounts.push(balance.balanceCents as Cents);
+      if (balance.balanceCents < 0) target.liabilities.push(-balance.balanceCents as Cents);
+      else target.assets.push(balance.balanceCents as Cents);
+    }
+    const unassigned = new Map<string, Cents[]>();
+    for (const movement of readUnassignedAccountMovements(raw, { toKey: dateKey, currentMovements })) {
+      const parts = unassigned.get(movement.currency) ?? [];
+      parts.push(movement.amountCents as Cents);
+      unassigned.set(movement.currency, parts);
+    }
+    for (const [currency, movements] of unassigned) {
+      const balance = sumCents(movements);
+      const target = bucket(currency);
+      target.accounts.push(balance);
+      if (balance < 0) target.liabilities.push(-balance as Cents);
+      else target.assets.push(balance);
+    }
+    const valuations = readPositionValuations(raw, dateKey, currentMovements)
+      .filter((position) => !position.archived);
+    for (const valuation of valuations) {
+      const target = bucket(valuation.currency);
+      target.holdings.push(valuation.valueMinor as Cents);
+      if (valuation.valueMinor < 0) target.liabilities.push(-valuation.valueMinor as Cents);
+      else target.assets.push(valuation.valueMinor as Cents);
+    }
+    if (buckets.size === 0) bucket("USD");
+    if (buckets.size > 1) {
+      return {
+        code: "mixed_currencies",
+        message: `Cannot reconstruct one aggregate net-worth series for mixed currencies (${[...buckets.keys()].sort().join(", ")}). LocalFi has no historical FX model, so nothing was written.`,
+      };
+    }
+    const [currency, parts] = [...buckets.entries()][0];
+    const totalAssetsCents = sumCents(parts.assets);
+    const totalLiabilitiesCents = sumCents(parts.liabilities);
+    const holdings = valuations
+      .filter((valuation) => valuation.assetId !== null)
+      .map((valuation) => ({
+        assetId: valuation.assetId!,
+        label: valuation.label,
+        symbol: null,
+        currency: valuation.currency,
+        held: true,
+        valueCents: valuation.valueMinor as Cents,
+        priceUsd: null,
+        priceAsOfKey: valuation.observedDay,
+        priceCarriedForward: valuation.observedDay !== dateKey,
+        basis: valuation.observationKind === "price" ? "priced" as const : "carried-stored-value" as const,
+      }));
+    days.push({
+      dateKey,
+      currency,
+      totalAssetsCents,
+      totalLiabilitiesCents,
+      netWorthCents: (totalAssetsCents - totalLiabilitiesCents) as Cents,
+      accountsCents: sumCents(parts.accounts),
+      holdingsCents: sumCents(parts.holdings),
+      holdings,
+      sourceNote: "Exact ledger position replay; valuations use the latest timestamped observation at or before this day.",
+    });
+  }
+  return days;
+}
 
 export type ExistingSnapshot = {
   dateKey: DateKey;
@@ -84,7 +164,15 @@ export type ReconstructionPlan = {
 
 export type PlanError =
   | { code: "price_fetch_failed"; message: string; errors: HistoryError[] }
-  | { code: "bad_range" | "no_price_for_day" | "no_history_source" | "empty"; message: string };
+  | {
+      code:
+        | "bad_range"
+        | "no_price_for_day"
+        | "no_history_source"
+        | "mixed_currencies"
+        | "empty";
+      message: string;
+    };
 
 export type PlanResult = { ok: true; plan: ReconstructionPlan } | { ok: false; error: PlanError };
 
@@ -102,13 +190,13 @@ export type PlanOptions = {
   toKey?: DateKey;
   /** The caller's today. Defaults to the local calendar day. */
   today?: DateKey;
-  /** Price window to request, capped at the keyless tier's 365. */
+  /** Legacy caller compatibility; journal-native reconstruction does not fetch. */
   days?: number;
-  /** Injected in tests; there is no live network in the test suite. */
+  /** Legacy caller compatibility; ignored because observations are persisted facts. */
   fetchImpl?: PriceFetchLike;
-  /** Carry a holding's stored value when its price cannot be known. Off by default. */
+  /** Legacy caller compatibility; mutable stored values are never carried. */
   carryUnpriced?: boolean;
-  /** Report a provider throttle while the price layer waits and retries. */
+  /** Legacy caller compatibility; journal reconstruction has no provider throttle. */
   onPriceRateLimitRetry?: (symbol: PriceSymbol, delayMs: number) => void;
 };
 
@@ -127,8 +215,8 @@ export function neededSymbols(assets: readonly HistoryAsset[]): PriceSymbol[] {
 }
 
 /**
- * Everything except the write. Reads the database, fetches each series once, and
- * returns the day-by-day reconstruction — or an error, having written nothing.
+ * Everything except the write. Returns exact day-by-day journal reconstruction
+ * or an error, having written nothing.
  */
 export async function planNetWorthReconstruction(options: PlanOptions = {}): Promise<PlanResult> {
   const today = options.today ?? todayKey();
@@ -136,19 +224,7 @@ export async function planNetWorthReconstruction(options: PlanOptions = {}): Pro
     return { ok: false, error: { code: "bad_range", message: `Invalid today: ${String(today)}` } };
   }
 
-  const loaded = await readDb(async (db) => {
-    const accounts = await db.select().from(accountsTable);
-    const txRows = await db.select().from(transactionsTable).orderBy(asc(transactionsTable.date));
-    const categories = await db.select().from(categoriesTable);
-    const assets = await db.select().from(assetsTable);
-    return { accounts, txRows, categories, assets };
-  });
-
-  const transactions = toReportTransactions(loaded.txRows);
-  const ledgerFirstKey =
-    transactions.length === 0
-      ? null
-      : transactions.reduce<DateKey>((min, tx) => (tx.dateKey < min ? tx.dateKey : min), transactions[0].dateKey);
+  const ledgerFirstKey = await readDb((_db, raw) => firstLedgerKey(raw));
 
   const fromKey = options.fromKey ?? ledgerFirstKey ?? today;
   // Never past today: reconstruction computes what WAS, and tomorrow has no was.
@@ -168,62 +244,8 @@ export async function planNetWorthReconstruction(options: PlanOptions = {}): Pro
     };
   }
 
-  const assets: HistoryAsset[] = loaded.assets.map((row) => ({
-    id: row.id,
-    category: row.category,
-    currentValueCents: row.currentValueCents,
-    quantity: row.quantity,
-    unit: row.unit,
-    priceSymbol: row.priceSymbol,
-    notes: row.notes,
-    linkedTransactionIds: row.linkedTransactionIds,
-    createdAt: row.createdAt,
-  }));
-
-  const carryUnpriced = options.carryUnpriced === true;
-  const symbols = neededSymbols(assets).filter(
-    // With --carry-unpriced, a symbol nobody can serve history for is not an
-    // error; it falls through to the carried stored value and is disclosed there.
-    (symbol) => !carryUnpriced || HISTORICAL_PRICE_SOURCES[symbol] !== null,
-  );
-
-  const seriesBySymbol = new Map<PriceSymbol, PriceSeries>();
-  if (symbols.length > 0) {
-    const days = Math.min(options.days ?? MAX_HISTORY_DAYS, MAX_HISTORY_DAYS);
-    const fetched = await fetchPriceSeries(symbols, {
-      fetchImpl: options.fetchImpl,
-      days,
-      // Three requests in a burst exceed CoinGecko's public/keyless allowance.
-      spacingMs: options.fetchImpl ? 0 : 15_000,
-      onRateLimitRetry: options.onPriceRateLimitRetry,
-    });
-    if (!fetched.ok) {
-      return {
-        ok: false,
-        error: {
-          code: "price_fetch_failed",
-          message:
-            `Could not load price history, so NOTHING was written: ` +
-            fetched.errors.map(describeHistoryError).join(" "),
-          errors: fetched.errors,
-        },
-      };
-    }
-    for (const [symbol, series] of fetched.series) seriesBySymbol.set(symbol, series);
-  }
-
-  const result = reconstructNetWorthSeries({
-    accounts: loaded.accounts,
-    transactions,
-    categories: loaded.categories,
-    assets,
-    seriesBySymbol,
-    fromKey,
-    toKey,
-    carryUnpriced,
-  });
-
-  if (!result.ok) return { ok: false, error: result.error };
+  const exact = await readDb((_db, raw) => reconstructJournalDays(raw, fromKey, toKey));
+  if (!Array.isArray(exact)) return { ok: false, error: exact };
 
   const existing = await readDb(async (db) => {
     const rows = await db
@@ -245,18 +267,11 @@ export async function planNetWorthReconstruction(options: PlanOptions = {}): Pro
       toKey,
       today,
       ledgerFirstKey,
-      days: result.days,
-      holdings: result.holdings,
-      continuity: result.continuity,
-      warnings: result.warnings,
-      series: [...seriesBySymbol.values()].map((series) => ({
-        symbol: series.symbol,
-        coinGeckoId: series.source.coinGeckoId,
-        proxy: series.source.proxy,
-        firstKey: series.firstKey,
-        lastKey: series.lastKey,
-        points: series.points.length,
-      })),
+      days: exact,
+      holdings: [],
+      continuity: [],
+      warnings: [],
+      series: [],
       existing,
     },
   };
@@ -291,22 +306,25 @@ export async function applyNetWorthReconstruction(plan: ReconstructionPlan): Pro
         continue;
       }
 
-      // Keep the per-holding child ledger aligned with this reconstructed
-      // net-worth day. The normalized local-midnight timestamp gives a stable,
-      // idempotent day key without changing the legacy table's schema.
+      // Keep the per-holding child ledger aligned with this reconstructed day.
+      // `recordedDay` is the database uniqueness key; the timestamp is retained
+      // only for chronology and compatibility.
       const recordedAt = fromDateKey(day.dateKey);
-      await db.delete(assetHistory).where(eq(assetHistory.recordedAt, recordedAt));
+      await db.delete(assetHistory).where(eq(assetHistory.recordedDay, day.dateKey));
       const holdingRows = day.holdings
         .filter((holding) => holding.held)
         .map((holding) => ({
           assetId: holding.assetId,
           valueCents: holding.valueCents,
+          currency: holding.currency,
+          recordedDay: day.dateKey,
           recordedAt,
         }));
       if (holdingRows.length > 0) await db.insert(assetHistory).values(holdingRows);
 
       const values = {
         date: day.dateKey,
+        currency: day.currency,
         totalAssetsCents: day.totalAssetsCents,
         totalLiabilitiesCents: day.totalLiabilitiesCents,
         netWorthCents: day.netWorthCents,
@@ -324,6 +342,7 @@ export async function applyNetWorthReconstruction(plan: ReconstructionPlan): Pro
         existing.totalAssetsCents === values.totalAssetsCents &&
         existing.totalLiabilitiesCents === values.totalLiabilitiesCents &&
         existing.netWorthCents === values.netWorthCents &&
+        existing.currency === values.currency &&
         existing.sourceNote === values.sourceNote;
 
       if (same) {

@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -271,26 +271,22 @@ export default function ReportsClient({
                 <Label htmlFor="range-from" className="text-xs text-muted-foreground">
                   From
                 </Label>
-                {/* type="date" yields 'YYYY-MM-DD' directly: a calendar day, with no
-                    Date object and therefore no timezone to shift it. */}
-                <Input
+                <DatePicker
                   id="range-from"
-                  type="date"
-                  className="w-[160px]"
                   value={customFrom}
-                  onChange={(e) => setCustomFrom(e.target.value)}
+                  onChange={(value) => setCustomFrom(value ?? "")}
+                  aria-label="Range start date"
                 />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="range-to" className="text-xs text-muted-foreground">
                   To
                 </Label>
-                <Input
+                <DatePicker
                   id="range-to"
-                  type="date"
-                  className="w-[160px]"
                   value={customTo}
-                  onChange={(e) => setCustomTo(e.target.value)}
+                  onChange={(value) => setCustomTo(value ?? "")}
+                  aria-label="Range end date"
                 />
               </div>
             </>

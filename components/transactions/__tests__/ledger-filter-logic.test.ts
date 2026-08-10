@@ -7,7 +7,7 @@
  * The filtering also lived inline in the page component, where none of it could
  * be tested.
  *
- * These tests must pass under `npm run test:tz` (UTC+14 and UTC-11): a filter
+ * These tests must pass under `bun run test:tz` (UTC+14 and UTC-11): a filter
  * that drops the 1st of the month east of UTC is the same class of bug as the
  * one transaction-form-logic.ts exists to prevent.
  */

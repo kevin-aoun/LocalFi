@@ -1,10 +1,7 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { PRIVACY_BOOT_SCRIPT } from "@/lib/privacy";
-
-const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "LocalFi",
@@ -21,7 +18,7 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: PRIVACY_BOOT_SCRIPT }} />
       </head>
-      <body className={inter.className}>
+      <body className="font-sans">
         <Providers>{children}</Providers>
       </body>
     </html>
