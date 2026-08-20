@@ -1,9 +1,4 @@
-/**
- * Safely apply migration 0006 to an existing sql.js database.
- *
- *   node node_modules/tsx/dist/cli.mjs lib/db/migrate-to-budget-reallocations.ts --dry-run
- *   node node_modules/tsx/dist/cli.mjs lib/db/migrate-to-budget-reallocations.ts [--db <path>]
- */
+
 import {
   copyFileSync,
   existsSync,

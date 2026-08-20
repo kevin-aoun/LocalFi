@@ -1,10 +1,5 @@
 "use server";
 
-/**
- * Quote and persist symbol-priced holdings. Price lookup finishes before the DB
- * write; an unavailable or malformed quote leaves the stored value untouched.
- */
-
 import { eq } from "drizzle-orm";
 
 import { readDb, withDb } from "@/lib/db/client";
@@ -39,36 +34,14 @@ import {
   type PricedHoldingSpec,
 } from "@/lib/prices";
 
-/** A batch of already-fetched prices, so N holdings cost ONE request. */
 type PriceBatch = {
   quotes: ReadonlyMap<PriceSymbol, PriceQuote>;
   errors: ReadonlyMap<string, PriceError>;
 };
 
-// ---------------------------------------------------------------------------
-// Quotes
-// ---------------------------------------------------------------------------
-
-/**
- * Live price for any symbol the app knows — all of them from CoinGecko.
- *
- * Returns a typed result, never a bare number and never a silent 0, so the caller
- * can tell the user exactly what went wrong: offline, rate-limited (429, its own
- * code, because "wait a minute" is not "check your connection"), or a symbol with
- * no price source at all. It never throws: being offline is an expected state for
- * an offline-first app, not an exception.
- *
- * A successful quote carries its own provenance — `quote.proxy` and
- * `quote.sourceLabel` — so a view cannot render the number without having the
- * disclosure in hand. Gold and silver are proxy prices.
- */
 export async function getLivePriceQuote(symbol: string): Promise<PriceResult> {
   return fetchPriceQuote(symbol);
 }
-
-// ---------------------------------------------------------------------------
-// Writing a live-priced holding
-// ---------------------------------------------------------------------------
 
 type HoldingFields = {
   spec: PricedHoldingSpec;
@@ -85,7 +58,6 @@ function fieldText(formData: FormData, key: string): string | null {
   return typeof raw === "string" ? raw : null;
 }
 
-/** Validate before network or database work; zero is a present quantity. */
 function readHoldingFields(formData: FormData): HoldingFields | { error: string } {
   const rawSymbol = fieldText(formData, "priceSymbol");
   const spec = pricedHolding(rawSymbol);
@@ -97,7 +69,7 @@ function readHoldingFields(formData: FormData): HoldingFields | { error: string 
     };
   }
 
-  // Unpriceable holdings retain their stored observation rather than becoming zero.
+
   if (spec.coinGeckoId === null) {
     return {
       error: describePriceError({
@@ -121,12 +93,12 @@ function readHoldingFields(formData: FormData): HoldingFields | { error: string 
     return { error: "A quantity cannot be negative." };
   }
 
-  // The price registry remains the authority for incompatible units.
+
   const rawUnit = (fieldText(formData, "unit") ?? "").trim().toLowerCase();
   const unit = (spec.units as readonly string[]).includes(rawUnit) ? rawUnit : spec.defaultUnit;
 
-  // DECISION: DEC-004 — every provider result in lib/prices is quoted in USD.
-  // Never accept a caller-supplied denomination for that number.
+
+
   const currency = "USD";
   const notes = fieldText(formData, "notes");
 
@@ -139,7 +111,7 @@ function readHoldingFields(formData: FormData): HoldingFields | { error: string 
   };
 }
 
-/** Fetch before taking the database lock; failures produce no writes. */
+
 async function priceHolding(fields: HoldingFields, batch?: PriceBatch) {
   const valued = batch
     ? holdingValueFromQuotes(
@@ -179,7 +151,7 @@ function recordQuoteObservation(
   return { amountMinor, observedAt };
 }
 
-/** Create a live-priced holding (BTC, ETH, or any metal), valued at the live price. */
+
 export async function createLivePricedAsset(
   formData: FormData,
 ): Promise<ActionResult<typeof assets.$inferSelect>> {
@@ -191,8 +163,8 @@ export async function createLivePricedAsset(
     if ("error" in priced) return priced;
 
     const asset = await withDb(async (db, raw) => {
-      // DECISION: DEC-013 — new holdings discover the symbol's canonical exact ID.
-      // Imported per-asset identities remain separate and are handled by updates.
+
+
       const instrument = ensurePricedInstrument(raw, fields.spec.symbol);
       recordQuoteObservation(raw, instrument.id, priced.quote);
       const exactPosition = getExactPosition(raw, instrument.id, fields.currency);
@@ -205,15 +177,15 @@ export async function createLivePricedAsset(
       const [row] = await db
         .insert(assets)
         .values({
-          // The category comes from the registry, not the form: a BTC holding
-          // filed under "Commodities" would be a lie that the next refresh would
-          // have to guess its way out of.
+
+
+
           category: fields.spec.assetCategory,
           currentValueCents: priced.valueCents,
           currency: fields.currency,
           instrumentId: instrument.id,
           notes: fields.notes,
-          // Kept in sync for every consumer that still reads "Gold"; null for crypto.
+
           commodityType: fields.spec.commodityType,
           priceSymbol: fields.spec.symbol,
           quantity: fields.quantity,
@@ -249,13 +221,7 @@ export async function createLivePricedAsset(
   }
 }
 
-/**
- * Re-price an existing holding (and/or change its quantity or symbol).
- *
- * If the price cannot be fetched, NOTHING is written: the stored value and the
- * `priced_at` stamp stay exactly as they were, so the UI can keep showing the
- * last known value and say that it is stale.
- */
+
 export async function updateLivePricedAsset(
   id: number,
   formData: FormData,
@@ -263,7 +229,7 @@ export async function updateLivePricedAsset(
   return updateLivePricedAssetWith(id, formData);
 }
 
-/** Internal batch-aware implementation; quote maps are not server-action inputs. */
+
 async function updateLivePricedAssetWith(
   id: number,
   formData: FormData,
@@ -299,9 +265,9 @@ async function updateLivePricedAssetWith(
         throw new Error("A posted holding cannot change instrument or currency; create a new holding instead");
       }
       const exactPosition = getExactPosition(raw, instrument.id, fields.currency);
-      // A scheduled refresh records a market observation only. Quantity and
-      // opening book value are historical facts and must not be rewritten just
-      // because a new quote arrived.
+
+
+
       if (batch && exactPosition) {
         const projection = projectPositionHolding(raw, instrument.id, fields.currency);
         const [projected] = await db.select().from(assets).where(eq(assets.id, projection.assetId));
@@ -359,15 +325,15 @@ async function updateLivePricedAssetWith(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Refresh every live-priced holding
-// ---------------------------------------------------------------------------
 
-/** Batch one quote request, then record observations sequentially without changing positions. */
+
+
+
+
 export async function refreshLivePricedAssets(): Promise<{
   refreshed: number;
   skipped: number;
-  /** Holdings whose symbol has no price source at all. Stored values KEPT. */
+
   unpriceable: Array<{ id: number; label: string; symbol: string; reason: string }>;
   failed: Array<{ id: number; label: string; error: string }>;
 }> {
@@ -386,21 +352,21 @@ export async function refreshLivePricedAssets(): Promise<{
   const labelOf = (asset: (typeof live)[number]) =>
     asset.notes?.trim() || asset.priceSymbol || asset.category;
 
-  /** Which rows can be repriced at all — decided before any network call. */
+
   const candidates = live.filter((asset) => {
     const symbol = (asset.priceSymbol ?? "").trim();
 
-    // A holding with no symbol or no quantity cannot be priced. That is not a
-    // failure — it is a hand-valued holding, and its stored value stands.
-    // `quantity` of exactly 0 IS priceable; only null/undefined is "absent".
+
+
+
     if (symbol === "" || asset.quantity === null || asset.quantity === undefined) {
       skipped += 1;
       return false;
     }
 
-    // A real holding of a metal nothing can price. Never an error, never zeroed,
-    // never silent: it is reported every run so the owner knows the figure is
-    // whatever they last entered by hand.
+
+
+
     const spec = pricedHolding(symbol);
     if (spec !== null && spec.coinGeckoId === null) {
       unpriceable.push({
@@ -416,7 +382,7 @@ export async function refreshLivePricedAssets(): Promise<{
 
   if (candidates.length === 0) return { refreshed, skipped, unpriceable, failed };
 
-  // THE ONLY OUTBOUND REQUEST THIS FUNCTION MAKES, for every symbol at once.
+
   const batch = await fetchPriceQuotes([
     ...new Set(candidates.map((asset) => (asset.priceSymbol ?? "").trim())),
   ]);

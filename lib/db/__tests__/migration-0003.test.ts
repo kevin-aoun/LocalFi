@@ -1,13 +1,4 @@
-/**
- * Migration 0003 — accounts, transfers, budgets, recurring templates, net-worth
- * history — exercised two ways:
- *
- *   1. replayed from empty (what lib/db/init.ts does for a fresh install);
- *   2. applied to a database SHAPED LIKE THE LIVE ONE, including the two
- *      transactions that point at a category which no longer exists.
- *
- * Runs entirely in memory / in temp dirs. data/budget.db is never opened.
- */
+
 import { beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";

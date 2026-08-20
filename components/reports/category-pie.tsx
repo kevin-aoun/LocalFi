@@ -1,18 +1,5 @@
 "use client";
 
-/**
- * The category breakdown as a pie.
- *
- * A pie is the right shape here and the wrong shape almost everywhere else: this
- * is one direction's spending split into parts of a single whole, which is the
- * only thing a pie encodes well. It is deliberately NOT offered for the cash-flow
- * chart, where money in and money out are two quantities that must never be added.
- *
- * Every wedge is drawn — no "Other" bucket. Grouping the tail into one grey slice
- * makes a prettier chart by deleting the long tail of small, forgettable spending,
- * which is usually the thing worth seeing. The legend beside the pie carries the
- * exact figures, so a two-pixel wedge is still readable as a number.
- */
 import { AlertTriangle } from "lucide-react";
 import { Cell, Pie, PieChart, Tooltip } from "recharts";
 
@@ -99,8 +86,7 @@ export function CategoryPie({ model, currency }: { model: CategoryPieModel; curr
           </PieChart>
         </ChartContainer>
 
-        {/* The legend is the readable half: a wedge too small to see is still a
-            line here with its exact amount. */}
+        {}
         <ul className="space-y-1.5 text-sm">
           {slices.map((slice) => (
             <li key={slice.key} className="flex items-center gap-2">
@@ -128,7 +114,7 @@ export function CategoryPie({ model, currency }: { model: CategoryPieModel; curr
         </ul>
       </div>
 
-      {/* State the denominator. A percentage with an unstated whole is not a fact. */}
+      {}
       <p className="text-xs text-muted-foreground">
         Shares are of the {formatMoney(totalCents, currency)} drawn here, across{" "}
         {slices.length} {slices.length === 1 ? "category" : "categories"}.

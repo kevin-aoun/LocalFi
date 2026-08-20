@@ -1,12 +1,4 @@
-/**
- * The script that applies 0003 to a real database.
- *
- * Its job is not to migrate — 0003 does that — but to REFUSE to leave a damaged
- * file behind. So the interesting tests are the ones where verification bites:
- * every failure must restore the byte-for-byte backup.
- *
- * Every case runs on a fresh copy in a temp dir. data/budget.db is never touched.
- */
+
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -41,7 +33,6 @@ function execScript(db: Database, sql: string) {
   }
 }
 
-/** Replay migrations 0000..0002 — the pre-0003 schema. */
 function pre0003(): Database {
   const db = new SQL.Database();
   const journal = JSON.parse(

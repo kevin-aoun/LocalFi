@@ -36,16 +36,16 @@ import {
 type Asset = {
   id: number;
   category: string;
-  /** Current value in integer cents, denominated in `currency`. */
+
   currentValueCents: Cents;
   currency: string;
   notes?: string | null;
   commodityType?: string | null;
   quantity?: number | null;
   unit?: string | null;
-  /** Which feed prices this holding: "XAU" (SwissQuote) or "BTC" (CoinGecko). */
+
   priceSymbol?: string | null;
-  /** When the stored value last came from a live quote — used to say "stale". */
+
   pricedAt?: Date | number | string | null;
   useLivePrice?: boolean;
 };
@@ -57,7 +57,6 @@ type AssetDialogProps = {
   onSuccess: () => void;
 };
 
-/** Text for the moment a stored value was last priced, or null if it never was. */
 function pricedAtLabel(pricedAt: Asset["pricedAt"]): string | null {
   if (pricedAt === null || pricedAt === undefined) return null;
   const date = pricedAt instanceof Date ? pricedAt : new Date(pricedAt);
@@ -72,22 +71,18 @@ export function AssetDialog({
   onSuccess,
 }: AssetDialogProps) {
   const [loading, setLoading] = useState(false);
-  /** Server-side failure to show the user; null when there is nothing wrong. */
+
   const [error, setError] = useState<string | null>(null);
-  /** The live quote, or null while it is being fetched / after it failed. */
+
   const [quote, setQuote] = useState<PriceQuote | null>(null);
-  /** Why the last live-price fetch failed, so the UI can say what went wrong. */
+
   const [priceError, setPriceError] = useState<string | null>(null);
   const [formData, setFormData] = useState<AssetFormData>(emptyAssetForm);
 
   const { isCommodity, isCrypto, liveSymbol, usesLivePricing, liveUnit, liveQuantityText } = livePricingFor(formData);
-  const liveQuantityGiven = liveQuantityText.trim() !== ""; // "0" is a quantity
+  const liveQuantityGiven = liveQuantityText.trim() !== "";
 
-  /**
-   * The computed value, using the SAME function the server uses, so the number
-   * previewed here and the number stored cannot disagree: quantity x price,
-   * rounded to the cent exactly once.
-   */
+
   const computedValue =
     quote !== null && usesLivePricing && liveQuantityGiven
       ? holdingValueCents(quote, Number(liveQuantityText.trim()), liveUnit)
@@ -95,9 +90,9 @@ export function AssetDialog({
 
   const storedPricedAt = pricedAtLabel(asset?.pricedAt);
 
-  // Fetch the live quote when the holding or the toggle changes. A failure is
-  // recorded and SHOWN: the server will refuse to save rather than store $0, but
-  // there is no reason to make the user find that out the hard way.
+
+
+
   useEffect(() => {
     if (!open || !usesLivePricing || liveSymbol === null) {
       setQuote(null);
@@ -113,7 +108,7 @@ export function AssetDialog({
         setQuote(result.quote);
         setPriceError(null);
       } else {
-        // Never fall back to a price of 0 — that is how a holding vanishes.
+
         setQuote(null);
         setPriceError(describePriceError(result.error));
       }
@@ -126,16 +121,16 @@ export function AssetDialog({
   useEffect(() => {
     setError(null);
     if (asset) {
-      // An explicit null check, not `asset.quantity || 0`: a stored quantity of 0
-      // is a quantity, and a null one is not "0 oz".
+
+
       setFormData(formFromAsset(asset, centsToDecimal));
     } else {
       setFormData(emptyAssetForm());
     }
   }, [asset, open]);
 
-  // A weight of 0 is a weight. `oz > 0 ? … : ""` blanked the paired field, which
-  // is the same "0 is not a value" mistake that broke live pricing server-side.
+
+
   const handleOzChange = (value: string) => {
     const oz = Number(value.trim());
     setFormData((prev) => ({
@@ -167,18 +162,18 @@ export function AssetDialog({
         | Awaited<ReturnType<typeof createLivePricedAsset>>;
 
       if (usesLivePricing && liveSymbol !== null) {
-        // A live-priced holding — metal or coin — goes through the priced-holding
-        // action, which records WHICH feed prices it and refuses to save anything
-        // at all if the fetch fails.
+
+
+
         const livePriceForm = new FormData();
         livePriceForm.append("priceSymbol", liveSymbol);
-        // Send the quantity whenever the field is non-empty: "0" is a quantity,
-        // not an absent value, and the server distinguishes the two explicitly.
+
+
         if (liveQuantityGiven) {
           livePriceForm.append("quantity", liveQuantityText.trim());
         }
         livePriceForm.append("unit", liveUnit);
-        // DECISION: DEC-004 — provider quotes are USD; never relabel them.
+
         livePriceForm.append("currency", "USD");
         if (formData.notes) {
           livePriceForm.append("notes", formData.notes);
@@ -195,10 +190,10 @@ export function AssetDialog({
           formDataObj.append("notes", formData.notes);
         }
 
-        // Add commodity-specific fields if category is Commodities
+
         if (isCommodity) {
           formDataObj.append("commodityType", formData.commodityType);
-          // Always use oz as the stored unit.
+
           if (formData.quantityOz.trim() !== "") {
             formDataObj.append("quantity", formData.quantityOz.trim());
           }
@@ -211,9 +206,9 @@ export function AssetDialog({
           : await createAsset(formDataObj);
       }
 
-      // The action reports failure by RETURNING { error }, not by throwing. This
-      // dialog used to close as if the write had succeeded — which is how a
-      // live-priced holding could appear to save while nothing was stored.
+
+
+
       if (result && "error" in result && result.error) {
         setError(result.error);
         return;
@@ -229,15 +224,14 @@ export function AssetDialog({
     }
   };
 
-  /** The live-price panel: current price, computed value, and every failure. */
+
   const livePricePanel = (
     <>
       {usesLivePricing && quote !== null && (
         <div className="flex flex-wrap items-center gap-2 rounded-md bg-green-50 dark:bg-green-950 px-3 py-2">
           <TrendingUp className="h-3 w-3 text-green-600" />
           <span className="text-sm font-semibold text-green-700 dark:text-green-400" data-private-value>
-            {/* A price of 0 is impossible here: lib/prices.ts rejects a
-                non-positive price as a malformed response. */}
+            {}
             {formatMoney(tryParseAmount(quote.pricePerUnitUsd) ?? 0, "USD")} per {quote.priceUnit}
           </span>
           <span className="text-xs text-muted-foreground">
@@ -271,8 +265,7 @@ export function AssetDialog({
           <div className="text-xs text-muted-foreground">Total Value</div>
           {computedValue.ok ? (
             <div className="text-lg font-bold text-primary" data-private-value>
-              {/* quantity x price is fractional; rounded to the cent once, in
-                  lib/prices.ts, by the same code the server action uses. */}
+              {}
               {formatMoney(computedValue.valueCents, formData.currency)}
             </div>
           ) : (

@@ -1,12 +1,4 @@
-/**
- * Recurrence math is the part of a recurring-transaction engine that silently
- * corrupts ledgers: an off-by-one in the month-end rule double-posts rent, and a
- * cursor that advances from the LAST POSTED date instead of the ANCHOR walks the
- * 31st backwards to the 28th and never returns.
- *
- * These tests pin the sequence itself. Idempotent materialisation into the
- * database is tested separately (app/actions/__tests__/recurring.test.ts).
- */
+
 import { describe, expect, it } from "vitest";
 import {
   occurrenceAt,
@@ -44,12 +36,11 @@ describe("occurrenceAt", () => {
   });
 
   it("clamps the 31st into short months WITHOUT losing the anchor day", () => {
-    // The bug this pins: naive "add one month to the previous occurrence" gives
-    // Jan 31 -> Feb 28 -> Mar 28 -> Apr 28 and the rent day drifts forever.
+
     const rule = monthly("2026-01-31");
     expect(occurrenceAt(rule, 0)).toBe("2026-01-31");
-    expect(occurrenceAt(rule, 1)).toBe("2026-02-28"); // 2026 is not a leap year
-    expect(occurrenceAt(rule, 2)).toBe("2026-03-31"); // back to the 31st
+    expect(occurrenceAt(rule, 1)).toBe("2026-02-28");
+    expect(occurrenceAt(rule, 2)).toBe("2026-03-31");
     expect(occurrenceAt(rule, 3)).toBe("2026-04-30");
     expect(occurrenceAt(rule, 4)).toBe("2026-05-31");
   });
@@ -70,7 +61,7 @@ describe("occurrenceAt", () => {
     const rule: RecurrenceRule = { frequency: "yearly", interval: 1, startDate: "2024-02-29" };
     expect(occurrenceAt(rule, 1)).toBe("2025-02-28");
     expect(occurrenceAt(rule, 2)).toBe("2026-02-28");
-    expect(occurrenceAt(rule, 4)).toBe("2028-02-29"); // anchor day recovered
+    expect(occurrenceAt(rule, 4)).toBe("2028-02-29");
   });
 
   it("crosses year boundaries", () => {
@@ -129,7 +120,7 @@ describe("occurrencesThrough", () => {
   });
 
   it("skips everything up to and including `afterKey` (the catch-up cursor)", () => {
-    // Six months of missed rent, cursor says February was the last one posted.
+
     const caught = occurrencesThrough(monthly("2026-01-01"), "2026-07-28", { afterKey: "2026-02-01" });
     expect(caught).toEqual(["2026-03-01", "2026-04-01", "2026-05-01", "2026-06-01", "2026-07-01"]);
   });
@@ -151,7 +142,7 @@ describe("occurrencesThrough", () => {
       { frequency: "daily", interval: 1, startDate: "2026-01-01" },
       "2026-03-01",
     );
-    expect(caught).toHaveLength(60); // 31 + 28 + 1
+    expect(caught).toHaveLength(60);
     expect(caught[59]).toBe("2026-03-01");
   });
 

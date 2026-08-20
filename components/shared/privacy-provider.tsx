@@ -46,7 +46,7 @@ function maskTextNode(node: Text) {
 
   const original = originalText.get(node);
   if (original !== undefined && current !== maskPrivacyDigits(original)) {
-    // React replaced a formerly numeric text node with an ordinary label.
+
     originalText.delete(node);
   }
 }
@@ -60,8 +60,7 @@ function maskAccessibleAttributes(element: Element) {
 
     const originals = originalAttributes.get(element);
     const original = originals?.get(attribute);
-    // Ignore the provider's own masked write. React updates that replace the
-    // label still arrive as a different value and are captured below.
+
     if (original !== undefined && current === maskPrivacyAttribute(original)) continue;
 
     if (/\d/.test(current)) {
@@ -143,8 +142,7 @@ function applyPrivacyMode(enabled: boolean) {
   try {
     window.localStorage.setItem(PRIVACY_STORAGE_KEY, enabled ? "true" : "false");
   } catch (error) {
-    // Storage can be unavailable in hardened/private browser contexts. The
-    // in-memory toggle still works for this page, so report rather than fail it.
+
     console.warn("Could not persist privacy mode:", error);
   }
 }
@@ -153,8 +151,7 @@ export function PrivacyProvider({ children }: { children: React.ReactNode }) {
   const [enabled, setState] = React.useState(false);
 
   React.useLayoutEffect(() => {
-    // The inline boot script applies this before first paint, preventing a flash
-    // of private data. Adopt that value once React mounts.
+
     const active = document.documentElement.dataset.privacyMode === "true";
     setState(active);
     if (active) startPrivacyMask();

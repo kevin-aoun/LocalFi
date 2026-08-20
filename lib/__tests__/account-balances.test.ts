@@ -1,16 +1,4 @@
-/**
- * Per-account balances, transfers and net worth.
- *
- * The three properties that must never break:
- *   1. A transfer between two of your own accounts is NET-NEUTRAL to net worth.
- *   2. A liability account SUBTRACTS from net worth, and an expense charged to it
- *      increases the debt rather than shrinking a cash pile.
- *   3. The opening balance is part of the balance, so a user who imports only
- *      last month's transactions is not permanently negative.
- *
- * lib/__tests__/cash-balance.test.ts still pins the legacy whole-ledger figure;
- * this file pins the account-aware rules that were added around it.
- */
+
 import { describe, expect, it } from "vitest";
 import {
   deriveAccountBalances,
@@ -28,7 +16,7 @@ const CATEGORIES = [
 
 const checking: LedgerAccount = { id: 10, kind: "asset", openingBalanceCents: 0 };
 const savings: LedgerAccount = { id: 11, kind: "asset", openingBalanceCents: 0 };
-/** A credit card owing $500 at inception. Liability openings are MAGNITUDES. */
+
 const card: LedgerAccount = { id: 20, kind: "liability", openingBalanceCents: 50_000 };
 
 function balanceOf(balances: ReturnType<typeof deriveAccountBalances>, accountId: number | null) {

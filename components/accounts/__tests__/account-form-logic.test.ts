@@ -1,11 +1,4 @@
-/**
- * Unit tests for the pure logic behind the Accounts & Liabilities UI.
- *
- * There is no jsdom in this repo, so the component itself is not rendered. Every
- * decision that could be wrong about MONEY, about the ASSET/LIABILITY SIGN, or
- * about "the user left this blank" vs "the user typed 0" lives in
- * account-form-logic.ts and is asserted here.
- */
+
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -32,10 +25,6 @@ import {
   type AccountFormState,
 } from "../account-form-logic";
 
-// ---------------------------------------------------------------------------
-// The lists the form offers must be the lists the server accepts
-// ---------------------------------------------------------------------------
-
 describe("the form's vocabulary matches the schema's", () => {
   it("offers exactly the account types the server validates against", () => {
     expect([...ACCOUNT_TYPES]).toEqual([...accountTypes]);
@@ -55,16 +44,10 @@ describe("the form's vocabulary matches the schema's", () => {
   });
 
   it("starts a blank form with an ABSENT opening balance, not a zero", () => {
-    // "" means "not stated"; the server then defaults to 0 on create and leaves
-    // the stored value alone on update. A pre-filled "0" would silently rewrite
-    // an existing opening balance to zero on every edit.
+
     expect(emptyAccountFormState().openingBalance).toBe("");
   });
 });
-
-// ---------------------------------------------------------------------------
-// kind / type agreement — how a mortgage ends up inflating net worth
-// ---------------------------------------------------------------------------
 
 describe("impliedKind", () => {
   it("puts debt on the liability side", () => {
@@ -90,10 +73,6 @@ describe("impliedKind", () => {
     expect(kindIsEditable("Checking")).toBe(false);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Validation: the money and error paths
-// ---------------------------------------------------------------------------
 
 const base: AccountFormState = {
   name: "Everyday Checking",

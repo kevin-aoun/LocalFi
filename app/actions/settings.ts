@@ -10,7 +10,7 @@ export type QuickCommand = {
   id: number;
   command: string;
   categoryName: string;
-  /** Pre-filled amount in integer cents. */
+
   amountCents: Cents;
   comment: string;
 };
@@ -54,26 +54,9 @@ export async function getSettings(): Promise<Settings> {
   };
 }
 
-/**
- * Persist settings and the FULL quick-command list.
- *
- * WHY THIS IS ONE `withDb` CALL: this used to run `getDb()`, then
- * `delete(quickCommands)`, then one `insert` per command, and only THEN
- * `saveDb()`. There was no transaction, so a failure part-way through the loop
- * — a float amount reaching `assertCents`, a constraint, anything — left the
- * in-memory database with the deletion applied and only some of the re-inserts,
- * and any LATER `saveDb()` from another action would flush that wreckage. The
- * user's quick commands could be permanently lost by saving settings once.
- *
- * Now: every row is validated BEFORE anything is deleted, and the whole
- * delete-and-recreate happens inside a single `withDb`, which flushes atomically
- * on success and throws away the in-memory image on failure. Either every
- * command is saved or none are.
- */
 export async function updateSettings(newSettings: Settings) {
   try {
-    // Validate everything up front: an invalid amount must never be a reason to
-    // have already deleted the previous list.
+
     for (const cmd of newSettings.quickCommands) {
       assertCents(cmd.amountCents, `quick command "${cmd.command}" amount`);
     }
@@ -104,7 +87,7 @@ export async function updateSettings(newSettings: Settings) {
       await db.delete(quickCommands);
 
       if (newSettings.quickCommands.length > 0) {
-        // One multi-row insert, inside the same transaction as the delete.
+
         await db.insert(quickCommands).values(
           newSettings.quickCommands.map((cmd) => ({
             command: cmd.command,

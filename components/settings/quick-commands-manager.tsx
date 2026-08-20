@@ -39,7 +39,7 @@ export function QuickCommandsManager({ quickCommands, onSave }: QuickCommandsMan
   const [newCategories, setNewCategories] = useState<string[]>([]);
   const [focusedCommandId, setFocusedCommandId] = useState<number | null>(null);
   const [editingCommandId, setEditingCommandId] = useState<number | null>(null);
-  /** Failure from a category create; null when there is nothing to report. */
+
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -93,14 +93,14 @@ export function QuickCommandsManager({ quickCommands, onSave }: QuickCommandsMan
   };
 
   const handleSave = async () => {
-    // Find categories that don't exist
+
     const missingCategories = commands
       .filter(cmd => cmd.categoryName)
       .filter(cmd => !categories.some(c =>
         c.name.toLowerCase() === cmd.categoryName.toLowerCase()
       ))
       .map(cmd => cmd.categoryName)
-      .filter((value, index, self) => self.indexOf(value) === index); // unique
+      .filter((value, index, self) => self.indexOf(value) === index);
 
     if (missingCategories.length > 0) {
       setNewCategories(missingCategories);
@@ -114,27 +114,23 @@ export function QuickCommandsManager({ quickCommands, onSave }: QuickCommandsMan
   const handleConfirmSave = async () => {
     setError(null);
 
-    // Create missing categories
     for (const categoryName of newCategories) {
       const formData = new FormData();
       formData.append("name", categoryName);
-      formData.append("type", "Expense"); // Default to Expense
+      formData.append("type", "Expense");
       formData.append("icon", "DollarSign");
       formData.append("color", "#10b981");
 
       const result = await createCategory(formData);
-      // A rejected category (e.g. a name clash) used to be discarded silently,
-      // leaving a quick command pointing at a category that does not exist.
+
       if (result && "error" in result && result.error) {
         setError(`Could not create category "${categoryName}": ${result.error}`);
         return;
       }
     }
 
-    // Reload categories
     await loadCategories();
 
-    // Save commands
     onSave(commands);
     setHasChanges(false);
     setShowConfirmDialog(false);
@@ -184,7 +180,6 @@ export function QuickCommandsManager({ quickCommands, onSave }: QuickCommandsMan
                 const showSuggestions = focusedCommandId === cmd.id && cmd.categoryName.length > 0;
                 const isEditing = editingCommandId === cmd.id || !cmd.command || !cmd.categoryName;
 
-                // Compact display mode
                 if (!isEditing) {
                   return (
                     <div
@@ -230,7 +225,6 @@ export function QuickCommandsManager({ quickCommands, onSave }: QuickCommandsMan
                   );
                 }
 
-                // Full edit mode
                 return (
                   <div
                     key={cmd.id}
@@ -312,7 +306,7 @@ export function QuickCommandsManager({ quickCommands, onSave }: QuickCommandsMan
                           step="0.01"
                           value={centsToDecimal(cmd.amountCents)}
                           onChange={(e) =>
-                            // Unparseable/empty falls back to 0, as it did before.
+
                             updateCommand(cmd.id, "amountCents", tryParseAmount(e.target.value) ?? 0)
                           }
                           placeholder="0.00"

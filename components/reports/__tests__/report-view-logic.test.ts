@@ -1,7 +1,4 @@
-/**
- * Reports UI logic. Every date here is a literal 'YYYY-MM-DD' key and every Date
- * is built from LOCAL components, so this passes at UTC+14 and UTC-11.
- */
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -40,7 +37,7 @@ describe("rangeForPreset", () => {
       startKey: "2025-12-01",
       endKey: "2025-12-31",
     });
-    // The 31st has no counterpart in February; shifting must not roll into March.
+
     expect(rangeForPreset("last-month", "2026-03-31")).toEqual({
       startKey: "2026-02-01",
       endKey: "2026-02-28",
@@ -142,7 +139,7 @@ describe("comparisonRange", () => {
   });
 
   it("previous period shifts an ARBITRARY range back by its own length", () => {
-    // 2026-03-10..2026-03-19 is 10 days; the baseline is the 10 days before it.
+
     expect(
       comparisonRange(
         "previous-period",

@@ -1,28 +1,4 @@
-/**
- * Tests for the sidebar's net-worth panel.
- *
- * What these exist to prevent:
- *
- *  1. **Two sources of truth.** The sidebar used to group the raw `assets` rows,
- *     which include the auto-derived `Cash` asset that `deriveNetWorth`
- *     deliberately excludes — so the chrome on every page printed a figure the
- *     home page had left out, and listed no accounts at all. The property tested
- *     here is that the rows the panel draws add up to exactly the figures
- *     `getNetWorth()` supplied: same input, both paths, identical output.
- *
- *  2. **A liability rendered as a negative asset.** Every liability figure is the
- *     amount OWED, as a positive magnitude. "-$600.00" must never appear.
- *
- *  3. **A cross-currency sum.** There is no FX source in this app. A group
- *     spanning USD and LBP renders both subtotals and is flagged; it must never
- *     collapse into one "$" figure.
- *
- *  4. **Falsy zero.** A holding worth exactly 0, a quantity of exactly 0, and a
- *     group with no rows are all real states, not absent ones.
- *
- * The component itself is not tested here — there is no jsdom in this repo, which
- * is exactly why every decision lives in ../sidebar-assets.ts.
- */
+
 import { describe, expect, it } from "vitest";
 
 import type { AccountRow } from "@/components/accounts/account-form-logic";
@@ -38,10 +14,6 @@ import {
   type SidebarAssetRow,
   type SidebarViewInput,
 } from "../sidebar-assets";
-
-// ---------------------------------------------------------------------------
-// Builders — a faithful in-process replica of the two actions the sidebar calls.
-// ---------------------------------------------------------------------------
 
 type SeedAccount = {
   id: number;
@@ -69,11 +41,6 @@ function asset(values: Partial<SidebarAssetRow> & { category: string }): Sidebar
   };
 }
 
-/**
- * Build the exact pair of inputs the sidebar receives — `getAccountBalances()`
- * and `getNetWorth()` — from one seed, so a disagreement between them can only
- * come from this module and not from the fixture.
- */
 function inputFor(seed: {
   accounts?: SeedAccount[];
   transactions?: Array<{
@@ -99,7 +66,6 @@ function inputFor(seed: {
     archived: a.archived === true,
   }));
 
-  // What getAccountBalances() returns: one row per account, in id order.
   const balances = deriveAccountBalances(ledgerAccounts, transactions, categories);
   const byId = new Map(
     balances.filter((b) => b.accountId !== null).map((b) => [b.accountId as number, b]),
@@ -120,7 +86,6 @@ function inputFor(seed: {
     };
   });
 
-  // What getNetWorth() returns, from the same rows.
   const netWorth = deriveNetWorth({
     accounts: ledgerAccounts,
     transactions,

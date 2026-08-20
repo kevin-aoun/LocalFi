@@ -1,12 +1,4 @@
-/**
- * Regression tests for item 12: cross-currency summing.
- *
- * The sidebar group totals, the dashboard net-worth headline and the allocation
- * percentages all added rows of DIFFERENT currencies as if they were the same
- * unit, then printed the result with a `$`. There is no FX source in this app, so
- * the fix is not conversion — it is honesty: subtotal per currency, and compute
- * shares WITHIN a currency.
- */
+
 import { describe, expect, it } from "vitest";
 import {
   allocationRows,
@@ -36,7 +28,7 @@ describe("totals are never summed across currencies", () => {
   it("refuses to collapse USD + EUR into one number", () => {
     const assets = [asset("Savings", 120000, "USD"), asset("Savings", 30000, "EUR")];
     expect(isMixedCurrency(assets)).toBe(true);
-    // THE BUG: this used to print "$1,500.00".
+
     expect(formatAssetTotals(assets)).toBe("$1,200.00 + €300.00");
   });
 
@@ -59,7 +51,7 @@ describe("totals are never summed across currencies", () => {
     expect(normalizeCurrency("")).toBe("USD");
     expect(normalizeCurrency(null)).toBe("USD");
     expect(normalizeCurrency("lbp")).toBe("LBP");
-    // A blank currency and "USD" are therefore the SAME bucket, not two.
+
     expect(totalsByCurrency([asset("A", 100, ""), asset("B", 100, "USD")])).toHaveLength(1);
   });
 

@@ -16,10 +16,6 @@ type ConfirmPendingTransactionProps = {
   onError: (message: string) => void;
 };
 
-/**
- * The pending confirmation owns the date choice and its popover lifecycle.
- * DECISION: DEC-009 — keep the UI day as a DateKey and convert at the action boundary.
- */
 export function ConfirmPendingTransaction({
   transactionId,
   onConfirmed,

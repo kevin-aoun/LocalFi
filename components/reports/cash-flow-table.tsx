@@ -1,10 +1,5 @@
 "use client";
 
-/**
- * The cash-flow statement itself: one row per period, income in, money out, net,
- * savings rate — plus a totals row that is the sum of the periods shown, not a
- * separately-derived figure that could disagree with them.
- */
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatMoney, negateCents, sumCents } from "@/lib/money";
 import { formatSavingsRate, savingsRate, type CashFlowRow, type ReportPeriod } from "@/lib/reports";
@@ -22,9 +17,6 @@ export function CashFlowTable({ rows, period, currency }: CashFlowTableProps) {
     return <p className="py-8 text-center text-sm text-muted-foreground">No periods in this range.</p>;
   }
 
-  // Exact integer sums of the rows on screen, so the footer cannot disagree with
-  // the body — and the savings rate is recomputed from those sums rather than
-  // averaged, because an average of ratios is not a ratio.
   const incomeCents = sumCents(rows.map((r) => r.incomeCents));
   const expenseCents = sumCents(rows.map((r) => r.expenseCents));
   const netCents = sumCents([incomeCents, negateCents(expenseCents)]);

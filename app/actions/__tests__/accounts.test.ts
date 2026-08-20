@@ -1,13 +1,4 @@
-/**
- * Accounts, liabilities, transfers, net worth and net-worth history.
- *
- * The properties this file exists to defend:
- *   - a liability reduces net worth (before this, "net worth" was gross assets);
- *   - an opening balance means an incomplete import is not permanently negative;
- *   - a transfer is net-neutral and is NOT an expense (it used to be booked as an
- *     "Investment" expense, i.e. as a net-worth loss);
- *   - a snapshot taken twice on one day updates rather than duplicating.
- */
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {

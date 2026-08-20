@@ -2,7 +2,6 @@ import { fromDateKey, isDateKey, toDateKey, type DateKey } from "@/lib/dates";
 import type { Cents } from "@/lib/money";
 import type { PriceSymbol } from "@/lib/prices";
 
-/** Compatibility input retained for the history command's public option shape. */
 export type HistoryAsset = {
   id: number;
   category: string;
@@ -16,7 +15,6 @@ export type HistoryAsset = {
   createdAt: Date | number;
 };
 
-/** Empty in journal-native plans; retained so the dry-run formatter stays compatible. */
 export type HoldingPlan = {
   assetId: number;
   label: string;
@@ -68,7 +66,6 @@ export type ReconstructedDay = {
   sourceNote: string;
 };
 
-/** Every local calendar day in an inclusive range. */
 export function eachDay(fromKey: DateKey, toKey: DateKey): DateKey[] {
   if (!isDateKey(fromKey)) throw new Error(`Invalid fromKey: ${String(fromKey)}`);
   if (!isDateKey(toKey)) throw new Error(`Invalid toKey: ${String(toKey)}`);

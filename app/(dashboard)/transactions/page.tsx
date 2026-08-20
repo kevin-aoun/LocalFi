@@ -67,10 +67,6 @@ import { ConfirmPendingTransaction } from "@/components/transactions/confirm-pen
 
 const ITEMS_PER_PAGE = 10;
 
-/**
- * A ledger row as this page needs it. The store's `Transaction` type omits
- * `pending`, so rows are widened once here rather than cast at each use.
- */
 type LedgerTransaction = {
   id: number;
   date: Date;
@@ -130,13 +126,9 @@ export default function TransactionsPage() {
 
   const [sortColumn, setSortColumn] = useState<LedgerSortColumn>("date");
   const [sortDirection, setSortDirection] = useState<LedgerSortDirection>("desc");
-  /** Failure from a delete/confirm action; null when there is nothing to report. */
+
   const [actionError, setActionError] = useState<string | null>(null);
 
-  /**
-   * Filters the shared store does not know about. Kept local on purpose: the
-   * store is shared with other routes and this page owns its own view state.
-   */
   const [query, setQuery] = useState("");
   const [fromDate, setFromDate] = useState<Date | null>(null);
   const [toDate, setToDate] = useState<Date | null>(null);
@@ -145,7 +137,6 @@ export default function TransactionsPage() {
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [defaultAccountId, setDefaultAccountId] = useState<number | null>(null);
 
-  /** Transfers get their own dialog: they have two accounts and NO category. */
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<LedgerTransaction | null>(null);
 
@@ -154,8 +145,7 @@ export default function TransactionsPage() {
       getTransactions(),
       getCategories(),
       getSettings(),
-      // Archived accounts INCLUDED on purpose: a row filed against a closed
-      // account must still show that account's name, not "Unassigned".
+
       getAccounts({ includeArchived: true }),
       getDefaultAccountId(),
     ]);
@@ -164,7 +154,6 @@ export default function TransactionsPage() {
     setAccounts(accountData as AccountRow[]);
     setDefaultAccountId(defaultId);
 
-    // Map quick commands from settings to use category IDs
     const commandsWithIds = (settings.quickCommands || []).map((qc) => {
       const category = catData.find((c) =>
         c.name.toLowerCase() === qc.categoryName.toLowerCase()
@@ -186,12 +175,9 @@ export default function TransactionsPage() {
 
   const rows = transactions as LedgerTransaction[];
 
-  // Split into pending vs confirmed. Pending rows are excluded from the cash
-  // balance but still appear in the ledger, in their own queue.
   const pendingTransactions = useMemo(() => rows.filter((tx) => tx.pending), [rows]);
   const confirmedTransactions = useMemo(() => rows.filter((tx) => !tx.pending), [rows]);
 
-  /** Category/account lookups hoisted once instead of a `find` per row per render. */
   const index = useMemo(
     () => buildLedgerIndex(categories, accounts),
     [categories, accounts],
@@ -200,7 +186,6 @@ export default function TransactionsPage() {
   const accountName = (id: number | null | undefined) =>
     id == null ? "" : index.accounts.get(id)?.name ?? "";
 
-  /** Active accounts first; a closed one is still offered so an old row can be edited. */
   const pickerAccounts = useMemo(
     () => [...accounts].sort((a, b) => Number(a.archived) - Number(b.archived)),
     [accounts],
@@ -219,16 +204,11 @@ export default function TransactionsPage() {
     [query, selectedDate, selectedType, selectedCategory, accountFilter, fromDate, toDate],
   );
 
-  /**
-   * In memory, one pass, predicate extracted to ledger-filter-logic.ts where it
-   * is unit-tested. Fast enough on a few thousand rows to re-run per keystroke.
-   */
   const filteredTransactions = useMemo(
     () => filterLedger(confirmedTransactions, index, filters),
     [confirmedTransactions, index, filters],
   );
 
-  // Keep the shared store's copy honest for any other consumer.
   useEffect(() => {
     setFilteredTransactions(filteredTransactions);
   }, [filteredTransactions, setFilteredTransactions]);
@@ -262,8 +242,7 @@ export default function TransactionsPage() {
     if (!transactionToDelete) return;
 
     const result = await deleteTransaction(transactionToDelete);
-    // The action reports failure by RETURNING { error }; closing regardless made
-    // a failed delete indistinguishable from a successful one.
+
     if (result && "error" in result && result.error) {
       setActionError(result.error);
       return;
@@ -274,7 +253,6 @@ export default function TransactionsPage() {
     setDeleteDialogOpen(false);
   };
 
-  /** Edit routes to the right dialog: a transfer has no category to pick. */
   const openEdit = (tx: LedgerTransaction) => {
     if (isTransfer(tx)) {
       setSelectedTransfer(tx);
@@ -289,7 +267,6 @@ export default function TransactionsPage() {
     setTransferDialogOpen(true);
   };
 
-  // Handle column sorting
   const handleSort = (column: LedgerSortColumn) => {
     if (sortColumn === column) {
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
@@ -304,14 +281,12 @@ export default function TransactionsPage() {
     [filteredTransactions, sortColumn, sortDirection, index],
   );
 
-  // Pagination
   const totalPages = Math.ceil(sortedTransactions.length / ITEMS_PER_PAGE);
   const paginatedTransactions = sortedTransactions.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE
   );
 
-  /** The Category cell: a category badge, or a distinct Transfer badge. */
   const renderTypeCell = (transaction: LedgerTransaction) => {
     if (isTransfer(transaction)) {
       return (
@@ -337,7 +312,6 @@ export default function TransactionsPage() {
     );
   };
 
-  /** The Account cell: one account, or a transfer's direction. */
   const renderAccountCell = (transaction: LedgerTransaction) => {
     if (isTransfer(transaction)) {
       return (
@@ -354,11 +328,6 @@ export default function TransactionsPage() {
     );
   };
 
-  /**
-   * The Amount cell. A transfer is signed NEITHER way: it is a movement, not
-   * income or expense, and rendering it with a "-" is exactly the mistake that
-   * made the old Investment-expense workaround look like real spend.
-   */
   const renderAmountCell = (transaction: LedgerTransaction) => {
     if (isTransfer(transaction)) {
       return (
@@ -454,7 +423,7 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      {/* Failures from confirm/delete are shown, not swallowed. */}
+      {}
       {actionError && !deleteDialogOpen && (
         <div
           role="alert"
@@ -558,7 +527,7 @@ export default function TransactionsPage() {
                     <SelectItem value="income">Income</SelectItem>
                     <SelectItem value="expense">Expense</SelectItem>
                     <SelectItem value="investment">Investment</SelectItem>
-                    {/* A transfer is neither income nor expense: its own bucket. */}
+                    {}
                     <SelectItem value="transfer">Transfer</SelectItem>
                   </SelectContent>
                 </Select>
@@ -886,12 +855,12 @@ export default function TransactionsPage() {
                         key={transaction.id}
                         className={cn(
                           "border-b last:border-0 hover:bg-muted/50 transition-colors",
-                          // A transfer is visually its own thing, not a coloured expense.
+
                           isTransfer(transaction) && "bg-sky-500/5",
                         )}
                       >
                         <td className="px-6 py-4 text-sm whitespace-nowrap">
-                          {/* Rendered from the LOCAL calendar day, never via toISOString. */}
+                          {}
                           {format(new Date(transaction.date), "d MMM yyyy")}
                         </td>
                         <td className="px-6 py-4">
@@ -1017,7 +986,7 @@ export default function TransactionsPage() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={(event) => {
-                // Keep the dialog open so a failure can be read.
+
                 event.preventDefault();
                 void handleDelete();
               }}

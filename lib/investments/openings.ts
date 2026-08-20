@@ -155,7 +155,7 @@ export type PostAssetOpeningInput = {
   source: "manual-holding" | "manual-live-holding";
 };
 
-/** Post or correct the explicit opening fact owned by one manually created asset. */
+
 export function postAssetOpeningPosition(
   raw: Database,
   input: PostAssetOpeningInput,
@@ -193,7 +193,7 @@ export function postAssetOpeningPosition(
     : postLedgerEventRaw(raw, { ...common, movements });
 }
 
-/** Delete only a manual opening chain; purchase-backed positions are not asset-owned. */
+
 export function deleteAssetOpeningPosition(
   raw: Database,
   assetId: number,

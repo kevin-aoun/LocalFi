@@ -1,13 +1,5 @@
 "use client";
 
-/**
- * Period-over-period and year-over-year.
- *
- * The one thing this card must never do is imply progress that is not there. When
- * the baseline period holds no data, "+100%" is meaningless — so the percentage is
- * replaced by a sentence saying there is nothing to compare against, and the
- * absolute figures are still shown because they are facts.
- */
 import { ArrowDown, ArrowUp, Info, Minus } from "lucide-react";
 
 import { formatMoney } from "@/lib/money";
@@ -92,8 +84,7 @@ export function ComparisonCard({
 
   return (
     <div>
-      {/* The mode itself is named by the tabs above this card; repeating it here
-          would just be the same sentence twice. */}
+      {}
       <div className="mb-3 grid grid-cols-[1fr_auto_auto_auto] gap-x-4 text-xs uppercase tracking-wide text-muted-foreground">
         <span>Metric</span>
         <span className="text-right">{formatRangeLabel(currentRange)}</span>

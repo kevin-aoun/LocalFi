@@ -33,7 +33,6 @@ import {
 } from "./account-form-logic";
 import { SUPPORTED_CURRENCIES, currencyOption, normalizeAccountCurrency } from "./currencies";
 
-/** Only what the dialog needs; `getAccountBalances` rows satisfy this. */
 export type AccountForEdit = {
   id: number;
   name: string;
@@ -47,14 +46,14 @@ export type AccountForEdit = {
 type AccountDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Null/absent = create. */
+
   account?: AccountForEdit | null;
   onSuccess: () => void;
 };
 
 export function AccountDialog({ open, onOpenChange, account, onSuccess }: AccountDialogProps) {
   const [loading, setLoading] = useState(false);
-  /** Server-side (or validation) failure to show the user; null when fine. */
+
   const [error, setError] = useState<string | null>(null);
   const [formState, setFormState] = useState<AccountFormState>(emptyAccountFormState);
 
@@ -63,8 +62,6 @@ export function AccountDialog({ open, onOpenChange, account, onSuccess }: Accoun
     setFormState(account ? accountFormStateFromAccount(account) : emptyAccountFormState());
   }, [account, open]);
 
-  // Changing the type re-forces the kind for every unambiguous type: the server
-  // rejects "a Mortgage that is an asset", and so does the form.
   const handleTypeChange = (value: string) => {
     setFormState((prev) => ({
       ...prev,
@@ -80,7 +77,6 @@ export function AccountDialog({ open, onOpenChange, account, onSuccess }: Accoun
     event.preventDefault();
     setError(null);
 
-    // Validate before touching the server so a bad amount is a message, not a throw.
     const validation = validateAccountForm(formState);
     if (!validation.ok) {
       setError(validation.error);
@@ -94,9 +90,6 @@ export function AccountDialog({ open, onOpenChange, account, onSuccess }: Accoun
         ? await updateAccount(account.id, formData)
         : await createAccount(formData);
 
-      // The actions report failure by RETURNING { error } — a duplicate name, for
-      // instance. Closing regardless is how a discarded write used to look like a
-      // successful one.
       if (result && "error" in result && result.error) {
         setError(result.error);
         return;
@@ -195,8 +188,8 @@ export function AccountDialog({ open, onOpenChange, account, onSuccess }: Accoun
             </Label>
             <Input
               id="account-opening-balance"
-              // Text, not number: "1,234.56" is a thing people type, and
-              // parseAmount accepts it exactly. Validation happens on submit.
+
+
               type="text"
               inputMode="decimal"
               data-private-input
@@ -207,9 +200,7 @@ export function AccountDialog({ open, onOpenChange, account, onSuccess }: Accoun
               placeholder="0.00"
             />
             <p className="text-xs text-muted-foreground">{openingBalanceHelp(formState.kind)}</p>
-            {/* `!== null`, not truthiness: an opening balance of 0 is a value the
-                user stated, and hiding its confirmation is the same falsy-0
-                mistake that has already been found twice in this codebase. */}
+            {}
             {openingPreviewCents !== null && (
               <p className="text-xs font-medium" data-private-value>
                 Starts at {formatMoney(openingPreviewCents, formState.currency || "USD")}
@@ -264,7 +255,7 @@ export function AccountDialog({ open, onOpenChange, account, onSuccess }: Accoun
             <p className="text-xs text-muted-foreground">
               {currencyOption(formState.currency)?.name ?? "Choose a supported ISO currency."}
             </p>
-            {/* The selector submits the ISO code, never the display name or icon. */}
+            {}
           </div>
 
           <div className="flex justify-end gap-2 pt-2">

@@ -1,20 +1,4 @@
-/**
- * Budget actions: spend-vs-budget for an arbitrary period, historical
- * performance, rollover, weekly/annual periods, and the legacy
- * `categories.monthly_limit_cents` fallback.
- *
- * The three things the old model could not do at all, pinned here:
- *   1. ask about a PAST period;
- *   2. use a period other than a calendar month;
- *   3. carry an unused surplus forward.
- *
- * And the rule the actions enforce, pinned in "an Income category cannot have a
- * budget" below: a budget is a SPENDING LIMIT, so income cannot hold one. This
- * file used to assert the opposite (an income "target" was accepted and
- * measured); those cases are inverted rather than deleted. The gate lives in the
- * action, not the dialog, because POST /api/agent and the CLI call these
- * functions directly.
- */
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {

@@ -7,24 +7,21 @@ type Category = {
   type: string;
   color: string;
   icon: string;
-  /** Monthly budget ceiling in integer cents; null means "no limit". */
+
   monthlyLimitCents: Cents | null;
 };
 
 type Transaction = {
   id: number;
-  /**
-   * NULL for a transfer (which has no category), or for a row whose category was
-   * deleted. See lib/db/schema/transactions.ts.
-   */
+
   categoryId: number | null;
-  /** Amount in integer cents. */
+
   amountCents: Cents;
   comment: string | null;
   date: Date;
-  /** The account this row belongs to; NULL for rows not yet assigned to one. */
+
   accountId?: number | null;
-  /** Set only on a transfer: the destination account. */
+
   transferAccountId?: number | null;
   pending?: boolean | null;
   currentEventId?: string | null;
@@ -37,13 +34,13 @@ type Transaction = {
 type QuickCommand = {
   command: string;
   categoryId: number;
-  /** Pre-filled amount in integer cents. */
+
   amountCents: Cents;
   comment: string;
 };
 
 type TransactionsStore = {
-  // Data
+
   transactions: Transaction[];
   categories: Category[];
   quickCommands: QuickCommand[];
@@ -54,7 +51,6 @@ type TransactionsStore = {
   setQuickCommands: (commands: QuickCommand[]) => void;
   setFilteredTransactions: (transactions: Transaction[]) => void;
 
-  // Filters
   selectedDate: Date | null;
   selectedType: string;
   selectedCategory: number | null;
@@ -65,7 +61,6 @@ type TransactionsStore = {
   setSelectedCategory: (categoryId: number | null) => void;
   setCurrentPage: (page: number | ((prev: number) => number)) => void;
 
-  // Dialog states
   dialogOpen: boolean;
   importDialogOpen: boolean;
   deleteDialogOpen: boolean;
@@ -74,14 +69,12 @@ type TransactionsStore = {
   setImportDialogOpen: (open: boolean) => void;
   setDeleteDialogOpen: (open: boolean) => void;
 
-  // Selected items
   selectedTransaction: Transaction | null;
   transactionToDelete: number | null;
 
   setSelectedTransaction: (transaction: Transaction | null) => void;
   setTransactionToDelete: (id: number | null) => void;
 
-  // Actions
   openAddDialog: () => void;
   openEditDialog: (transaction: Transaction) => void;
   openDeleteDialog: (transactionId: number) => void;
@@ -91,7 +84,7 @@ type TransactionsStore = {
 };
 
 export const useTransactionsStore = create<TransactionsStore>((set) => ({
-  // Initial state
+
   transactions: [],
   categories: [],
   quickCommands: [],
@@ -106,7 +99,6 @@ export const useTransactionsStore = create<TransactionsStore>((set) => ({
   selectedTransaction: null,
   transactionToDelete: null,
 
-  // Setters
   setTransactions: (transactions) => set({ transactions }),
   setCategories: (categories) => set({ categories }),
   setQuickCommands: (commands) => set({ quickCommands: commands }),
@@ -123,7 +115,6 @@ export const useTransactionsStore = create<TransactionsStore>((set) => ({
   setSelectedTransaction: (transaction) => set({ selectedTransaction: transaction }),
   setTransactionToDelete: (id) => set({ transactionToDelete: id }),
 
-  // Actions
   openAddDialog: () =>
     set({
       selectedTransaction: null,

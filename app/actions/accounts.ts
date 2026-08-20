@@ -1,12 +1,5 @@
 "use server";
 
-/**
- * Accounts, per-account balances, net worth, and net-worth history.
- *
- * The balance arithmetic is NOT here — it is in lib/cash-balance.ts, the single
- * source of the rule. These actions only load rows, hand them to it, and persist
- * the result.
- */
 import { and, asc, desc, eq, gte, lte, isNull, or } from "drizzle-orm";
 import { revalidate } from "@/lib/revalidate";
 
@@ -49,13 +42,6 @@ import {
 } from "@/lib/ledger";
 import type { Database } from "sql.js";
 
-/**
- * Ledger rows reduced to calendar days, for the acquisition rule.
- *
- * `toDateKey` on a local Date — never `toISOString()`, which converts to UTC
- * first and shifts the day for anyone not on UTC. A purchase dated the 30th must
- * stay the 30th in Beirut and in Honolulu.
- */
 export type ActionResult<T> = { success: true; data: T } | { error: string };
 
 type LivePriceRefresh = Awaited<ReturnType<typeof refreshLivePricedAssets>>;
@@ -64,26 +50,21 @@ export type NetWorthPriceRefresh =
   | ({ ok: true } & LivePriceRefresh)
   | { ok: false; error: string };
 
-/** An account row plus its derived balance — what an accounts page renders. */
 export type AccountWithBalance = Account & {
-  /** Net-worth contribution: positive = owned, negative = owed. */
+
   balanceCents: Cents;
-  /** Signed ledger activity since inception, excluding the opening balance. */
+
   activityCents: Cents;
-  /** For a liability, how much is still owed. 0 for assets and paid-off debts. */
+
   owedCents: Cents;
-  /** Current balance-sheet side; stored `kind` remains only the UI expectation. */
+
   balanceKind: "asset" | "liability";
 };
 
 export type NetWorthView = NetWorth & {
-  /** The day this was computed for, as a local calendar day. */
+
   dateKey: DateKey;
 };
-
-// ---------------------------------------------------------------------------
-// Input parsing
-// ---------------------------------------------------------------------------
 
 function str(formData: FormData, key: string): string | null {
   const raw = formData.get(key);
@@ -99,11 +80,7 @@ function parseType(value: string | null): AccountType {
   return value as AccountType;
 }
 
-/**
- * `kind` may be supplied explicitly, but it must agree with `type` for every type
- * whose side of the balance sheet is not ambiguous. Only "Other" may be either.
- * Getting this wrong is how a mortgage ends up inflating net worth.
- */
+
 function resolveKind(type: AccountType, requested: string | null): AccountKind {
   const implied = accountKindForType[type];
   if (requested === null) return implied;
@@ -130,9 +107,9 @@ function requireOpeningBalanceDate(value: string | null): DateKey {
   return dateKey;
 }
 
-// ---------------------------------------------------------------------------
-// Queries
-// ---------------------------------------------------------------------------
+
+
+
 
 function openingMovements(
   raw: Database,
@@ -305,7 +282,7 @@ function worthFromJournal(
   });
 }
 
-/** Every account, oldest first. Archived accounts are excluded by default. */
+
 export async function getAccounts(options?: { includeArchived?: boolean }): Promise<Account[]> {
   const includeArchived = options?.includeArchived === true;
   return readDb((db) => {
@@ -316,10 +293,7 @@ export async function getAccounts(options?: { includeArchived?: boolean }): Prom
   });
 }
 
-/**
- * The id new transactions should default to: the oldest non-archived asset
- * account. Null when the user has no accounts at all.
- */
+
 export async function getDefaultAccountId(): Promise<number | null> {
   const rows = await readDb((db) =>
     db
@@ -332,7 +306,7 @@ export async function getDefaultAccountId(): Promise<number | null> {
   return rows[0]?.id ?? null;
 }
 
-/** Signed real-account legs shaped for the existing dashboard cash chart. */
+
 export async function getLedgerCashMovements() {
   return readDb((_db, raw) => {
     const movements = [
@@ -352,8 +326,7 @@ export async function getLedgerCashMovements() {
   });
 }
 
-/** Every account with its derived balance. Includes archived accounts by default
- * because hiding an account that still holds money would change net worth. */
+
 export async function getAccountBalances(options?: {
   includeArchived?: boolean;
 }): Promise<AccountWithBalance[]> {
@@ -382,13 +355,11 @@ export async function getAccountBalances(options?: {
     });
 }
 
-/**
- * Net worth right now from current account and instrument movements.
- */
+
 export async function getNetWorth(): Promise<NetWorthView> {
-  // Read the day ONCE, here, and pass it down. Nothing deeper reads the clock,
-  // so the whole computation is one consistent calendar day even if it straddles
-  // local midnight — and `bun run test:tz` can pin the behaviour.
+
+
+
   const dateKey = todayKey();
   const result = await readDb(async (db, raw) => {
     const accountRows = await db.select().from(accounts);
@@ -397,7 +368,7 @@ export async function getNetWorth(): Promise<NetWorthView> {
   return { ...result, dateKey };
 }
 
-/** Net-worth history, oldest first, optionally bounded by calendar day. */
+
 export async function getNetWorthHistory(options?: {
   fromKey?: DateKey;
   toKey?: DateKey;
@@ -420,7 +391,7 @@ export async function getNetWorthHistory(options?: {
   });
 }
 
-/** The most recent snapshot, or null when history is empty. */
+
 export async function getLatestNetWorthSnapshot() {
   const rows = await readDb((db) =>
     db.select().from(netWorthSnapshots).orderBy(desc(netWorthSnapshots.date)).limit(1),
@@ -428,19 +399,11 @@ export async function getLatestNetWorthSnapshot() {
   return rows[0] ?? null;
 }
 
-// ---------------------------------------------------------------------------
-// Mutations
-// ---------------------------------------------------------------------------
 
-/**
- * Create an account.
- *
- * Fields: name, type, kind (optional — derived from type), openingBalance
- * (a decimal string, parsed to exact cents), currency, archived.
- *
- * `openingBalance` is a MAGNITUDE: for a liability it is how much is OWED. See
- * the sign convention in lib/cash-balance.ts.
- */
+
+
+
+
 export async function createAccount(formData: FormData): Promise<ActionResult<Account>> {
   try {
     const name = str(formData, "name");
@@ -482,7 +445,7 @@ export async function createAccount(formData: FormData): Promise<ActionResult<Ac
   }
 }
 
-/** Update an account. Only the fields present in `formData` are changed. */
+
 export async function updateAccount(id: number, formData: FormData): Promise<ActionResult<Account>> {
   try {
     const account = await withDb(async (db, raw) => {
@@ -549,7 +512,7 @@ export async function updateAccount(id: number, formData: FormData): Promise<Act
   }
 }
 
-/** Archive (or un-archive) an account. History is preserved either way. */
+
 export async function setAccountArchived(id: number, archived: boolean): Promise<ActionResult<Account>> {
   try {
     const account = await withDb(async (db) => {
@@ -569,13 +532,7 @@ export async function setAccountArchived(id: number, archived: boolean): Promise
   }
 }
 
-/**
- * Delete an account, but ONLY when nothing references it.
- *
- * An account with transactions is never deleted: doing so would either violate
- * the foreign key or (worse, if enforcement were off) orphan real financial
- * history. Archive it instead.
- */
+
 export async function deleteAccount(id: number): Promise<ActionResult<{ id: number }>> {
   try {
     await withDb(async (db, raw) => {
@@ -602,24 +559,14 @@ export async function deleteAccount(id: number): Promise<ActionResult<{ id: numb
   }
 }
 
-/**
- * Record today's net worth — IDEMPOTENTLY.
- *
- * `net_worth_snapshots.date` is UNIQUE per calendar day, so re-running this any
- * number of times on the same day UPDATES that day's row instead of appending a
- * duplicate. Without that, a chart would double-count every day the user happened
- * to open the app twice.
- *
- * Pass `dateKey` to backfill or to snapshot a specific day (the figures are still
- * "as of now" — this does not reconstruct a historical balance).
- */
+
 export async function snapshotNetWorth(options?: { dateKey?: DateKey }) {
   try {
     const dateKey = options?.dateKey ?? todayKey();
     if (!isDateKey(dateKey)) throw new Error(`Invalid dateKey: ${String(dateKey)}`);
-    // A snapshot records TODAY's derived figures. Filing them under a future day
-    // would plot a net worth that was never true on that date, and the chart
-    // reads snapshots as history — so refuse rather than fabricate a data point.
+
+
+
     if (dateKey > todayKey()) {
       return { error: `Cannot snapshot a future date (${dateKey}); today is ${todayKey()}.` };
     }
@@ -642,20 +589,20 @@ export async function snapshotNetWorth(options?: { dateKey?: DateKey }) {
         totalAssetsCents: worth.aggregate.totalAssetsCents,
         totalLiabilitiesCents: worth.aggregate.totalLiabilitiesCents,
         netWorthCents: worth.aggregate.netWorthCents,
-        // These figures are MEASURED from the live ledger, so the row is
-        // 'recorded' even when it overwrites a reconstruction. Without this,
-        // a day that lib/history estimated first and this function measured
-        // second would keep the 'reconstructed' label and its stale note —
-        // an estimate flag on real data, which is the one direction of error
-        // the column exists to prevent.
+
+
+
+
+
+
         source: "recorded" as const,
         sourceNote: null,
         updatedAt: new Date(),
       };
 
-      // `asset_history` is denomination-labelled and unique per holding/day.
-      // Upsert active holdings without deleting archived rows: archive is a
-      // retention operation (DECISION: DEC-006), not erasure.
+
+
+
       const recordedAt = fromDateKey(dateKey);
       const holdingRows = readPositionValuations(raw, dateKey)
         .filter((position) => position.assetId !== null && !position.archived)
@@ -740,13 +687,7 @@ function describePriceRefresh(prices: NetWorthPriceRefresh): string {
   return `${parts.join("; ")}.`;
 }
 
-/**
- * Refresh every live-priced holding, then record today's newest values.
- *
- * DECISION: DEC-002 — every manual and scheduled current-day recording calls
- * this orchestrator; `snapshotNetWorth` remains the network-free persistence
- * primitive for explicit historical dates.
- */
+
 export async function recordNetWorthToday() {
   let prices: NetWorthPriceRefresh;
   try {
@@ -771,7 +712,7 @@ export async function recordNetWorthToday() {
   };
 }
 
-/** Delete one day's snapshot. */
+
 export async function deleteNetWorthSnapshot(dateKey: DateKey) {
   try {
     if (!isDateKey(dateKey)) throw new Error(`Invalid dateKey: ${String(dateKey)}`);
@@ -907,10 +848,7 @@ function eventMetadata(raw: Database, eventId: string): CanonicalMetadata {
   }
 }
 
-/**
- * Attach every account-less transaction to `accountId`. Useful once, right after
- * the user creates their first real account, to empty the "unassigned" bucket.
- */
+
 export async function assignOrphanTransactions(accountId: number) {
   try {
     const moved = await withDb(async (db, raw) => {

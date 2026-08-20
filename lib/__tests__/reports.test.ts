@@ -1,12 +1,4 @@
-/**
- * Report arithmetic. This is money the user will read off a screen and act on,
- * so every rule gets pinned here rather than in JSX (there is no jsdom in this
- * repo, and the numbers — not the markup — are what can be wrong).
- *
- * Timezone safety: every date in this file is a literal 'YYYY-MM-DD' key, and the
- * only Dates constructed are built from LOCAL components. Nothing here asserts on
- * a UTC-derived string, so `bun run test:tz` passes at UTC+14 and UTC-11.
- */
+
 import { describe, expect, it } from "vitest";
 
 import { deriveCashBalanceCents } from "@/lib/cash-balance";
@@ -54,18 +46,13 @@ function tx(values: {
     amountCents: values.amountCents,
     categoryId: values.categoryId ?? null,
     pending: values.pending ?? false,
-    // `?? 1` would turn an EXPLICIT `accountId: null` (the unassigned bucket,
-    // which is a case under test) into account 1. Only an absent key defaults.
+
     accountId: "accountId" in values ? values.accountId ?? null : 1,
     transferAccountId: values.transferAccountId ?? null,
     direction: values.direction,
     currency: values.currency,
   };
 }
-
-// ---------------------------------------------------------------------------
-// flowInRange
-// ---------------------------------------------------------------------------
 
 describe("flowInRange", () => {
   it("derives income and consumption directly from signed category movements", () => {
@@ -103,7 +90,6 @@ describe("flowInRange", () => {
     ];
     const totals = flowInRange(rows, CATEGORIES, "2026-03-01", "2026-03-31");
 
-    // Same rule as lib/cash-balance.ts: Expense AND Investment both subtract.
     expect(totals.expenseCents).toBe(300_000);
     expect(totals.investmentCents).toBe(200_000);
     expect(totals.consumptionCents).toBe(100_000);
@@ -113,8 +99,7 @@ describe("flowInRange", () => {
   it("EXCLUDES transfers from both income and expense", () => {
     const rows = [
       tx({ dateKey: "2026-03-01", amountCents: 500_000, categoryId: 1 }),
-      // A transfer between the user's own accounts. Net-neutral, and invisible to
-      // income/expense even though it carries a (ignored) category.
+
       tx({
         dateKey: "2026-03-02",
         amountCents: 250_000,
@@ -200,7 +185,6 @@ describe("flowInRange", () => {
     ];
     const totals = flowInRange(rows, CATEGORIES, "2026-03-01", "2026-03-31");
 
-    // If these two ever disagree, the reports page contradicts the dashboard.
     expect(totals.netCents).toBe(deriveCashBalanceCents(rows, CATEGORIES));
   });
 
@@ -229,10 +213,6 @@ describe("flowInRange", () => {
     expect(() => flowInRange(rows, CATEGORIES, "2026-03-01", "2026-03-31")).toThrow(/cents/i);
   });
 });
-
-// ---------------------------------------------------------------------------
-// savings rate
-// ---------------------------------------------------------------------------
 
 describe("savingsRate", () => {
   it("is (income − expenses) / income as a fraction", () => {
@@ -274,16 +254,12 @@ describe("savingsRate", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// cashFlowByPeriod
-// ---------------------------------------------------------------------------
-
 describe("cashFlowByPeriod", () => {
   const rows = [
-    // January
+
     tx({ dateKey: "2026-01-15", amountCents: 400_000, categoryId: 1 }),
     tx({ dateKey: "2026-01-31", amountCents: 100_000, categoryId: 2 }),
-    // February — the row on the 1st must NOT fall into January.
+
     tx({ dateKey: "2026-02-01", amountCents: 50_000, categoryId: 2 }),
     tx({ dateKey: "2026-02-20", amountCents: 400_000, categoryId: 1 }),
   ];
@@ -300,9 +276,9 @@ describe("cashFlowByPeriod", () => {
     expect(flows.map((f) => f.key)).toEqual(["2026-01", "2026-02"]);
     expect(flows[0].startKey).toBe("2026-01-01");
     expect(flows[0].endKey).toBe("2026-01-31");
-    expect(flows[0].expenseCents).toBe(100_000); // the 31st stays in January
+    expect(flows[0].expenseCents).toBe(100_000);
     expect(flows[1].startKey).toBe("2026-02-01");
-    expect(flows[1].expenseCents).toBe(50_000); // the 1st starts February
+    expect(flows[1].expenseCents).toBe(50_000);
   });
 
   it("emits a zero row for a period with no activity rather than skipping it", () => {
@@ -340,7 +316,7 @@ describe("cashFlowByPeriod", () => {
       fromKey: "2026-01-15",
       toKey: "2026-01-15",
     });
-    // 2026-01-15 is a Thursday; the week starts Monday 2026-01-12.
+
     expect(weekly).toHaveLength(1);
     expect(weekly[0].startKey).toBe("2026-01-12");
     expect(weekly[0].endKey).toBe("2026-01-18");
@@ -369,10 +345,6 @@ describe("cashFlowByPeriod", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// period-over-period / year-over-year
-// ---------------------------------------------------------------------------
-
 describe("shiftYears", () => {
   it("moves a calendar day back a year", () => {
     expect(shiftYears("2026-03-15", -1)).toBe("2025-03-15");
@@ -380,8 +352,7 @@ describe("shiftYears", () => {
   });
 
   it("clamps Feb 29 instead of rolling over into March", () => {
-    // 2024-02-29 has no counterpart in 2023; the honest answer is the 28th, not
-    // 2023-03-01 (which is what `new Date(y-1, m, d)` would silently produce).
+
     expect(shiftYears("2024-02-29", -1)).toBe("2023-02-28");
     expect(shiftYears("2024-02-29", 4)).toBe("2028-02-29");
   });
@@ -475,7 +446,7 @@ describe("compareFlows", () => {
       "2025-03-31",
     );
     const cmp = compareFlows(current, previous);
-    // previous net = −100_000, current net = +200_000 -> +300_000, i.e. +300%.
+
     expect(cmp.net.absoluteCents).toBe(300_000);
     expect(cmp.net.ratio).toBeCloseTo(3, 12);
   });
@@ -491,14 +462,10 @@ describe("compareFlows", () => {
       "2025-03-31",
     );
     const cmp = compareFlows(current, previous);
-    // 40% now vs 20% then.
+
     expect(cmp.savingsRatePoints).toBeCloseTo(0.2, 12);
   });
 });
-
-// ---------------------------------------------------------------------------
-// categoryBreakdown
-// ---------------------------------------------------------------------------
 
 describe("categoryBreakdown", () => {
   const rows = [
@@ -522,11 +489,11 @@ describe("categoryBreakdown", () => {
 
     expect(breakdown.map((r) => r.name)).toEqual(["Rent", "Groceries"]);
     expect(breakdown[0].totalCents).toBe(300_000);
-    expect(breakdown[1].totalCents).toBe(150_000); // pending excluded
+    expect(breakdown[1].totalCents).toBe(150_000);
     expect(breakdown[1].count).toBe(2);
     expect(breakdown[0].share).toBeCloseTo(2 / 3, 12);
     expect(breakdown[1].share).toBeCloseTo(1 / 3, 12);
-    // Transfers are not a category of spending.
+
     expect(breakdown.some((r) => r.totalCents === 999_999)).toBe(false);
   });
 
@@ -557,7 +524,7 @@ describe("categoryBreakdown", () => {
     expect(orphan).toBeDefined();
     expect(orphan?.totalCents).toBe(4_242);
     expect(orphan?.uncategorized).toBe(true);
-    // It contributes to no direction total, so it has no share of one.
+
     expect(orphan?.share).toBeNull();
   });
 
@@ -572,10 +539,6 @@ describe("categoryBreakdown", () => {
     expect(breakdown[0].share).toBeNull();
   });
 });
-
-// ---------------------------------------------------------------------------
-// currency scope — no FX, ever
-// ---------------------------------------------------------------------------
 
 describe("currencyScope", () => {
   const accounts = [
@@ -605,8 +568,7 @@ describe("currencyScope", () => {
     );
     expect(scope.mixed).toBe(true);
     expect(scope.currencies).toEqual(["EUR", "LBP", "USD"]);
-    // The currency with the most counted rows wins the default view; ties break
-    // alphabetically so the page is deterministic.
+
     expect(scope.currencies).toContain(scope.primary);
   });
 
@@ -660,10 +622,6 @@ describe("currencyScope", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// export primitives
-// ---------------------------------------------------------------------------
-
 describe("centsToDecimalString", () => {
   it("renders exact two-decimal strings with no float arithmetic", () => {
     expect(centsToDecimalString(4_550)).toBe("45.50");
@@ -705,13 +663,9 @@ describe("buildTransactionsCsv", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// toReportTransactions — the one place a stored Date becomes a calendar day
-// ---------------------------------------------------------------------------
-
 describe("toReportTransactions", () => {
   it("uses the LOCAL calendar day of the stored timestamp", () => {
-    // Built from local components, so this assertion holds at UTC+14 and UTC-11.
+
     const rows = toReportTransactions([
       { date: new Date(2026, 0, 31), amountCents: 100, categoryId: 2 },
       { date: new Date(2026, 1, 1), amountCents: 200, categoryId: 2 },

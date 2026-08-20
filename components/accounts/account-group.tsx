@@ -17,10 +17,10 @@ import {
 
 type AccountGroupProps = {
   title: string;
-  /** One line explaining what this half of the balance sheet is. */
+
   description: string;
   rows: AccountRow[];
-  /** Header for the balance column — "Balance" for assets, "Owed" for liabilities. */
+
   balanceHeader: string;
   emptyMessage: string;
   onEdit: (account: AccountRow) => void;
@@ -34,7 +34,6 @@ const TONE_CLASS = {
   neutral: "text-muted-foreground",
 } as const;
 
-/** One half of the balance sheet: a titled card with a row per account. */
 export function AccountGroup({
   title,
   description,
@@ -121,9 +120,7 @@ export function AccountGroup({
                         )}
                       </td>
                       <td className="px-6 py-4">
-                        {/* Each of these already names itself with the account
-                            name via `aria-label`; the tooltip adds the sighted
-                            hover copy that `title=` used to give. */}
+                        {}
                         <div className="flex items-center justify-end gap-1">
                           <Tooltip>
                             <TooltipTrigger asChild>

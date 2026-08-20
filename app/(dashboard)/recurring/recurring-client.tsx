@@ -98,7 +98,7 @@ export default function RecurringClient({
 
   const [upcoming, setUpcoming] = useState<UpcomingItemLike[] | null>(null);
   const [upcomingLoading, setUpcomingLoading] = useState(true);
-  /** Anything that went wrong outside a dialog. Never swallowed. */
+
   const [error, setError] = useState<string | null>(null);
 
   const [confirmPostOpen, setConfirmPostOpen] = useState(false);
@@ -109,8 +109,6 @@ export default function RecurringClient({
   const [pendingDelete, setPendingDelete] = useState<RecurringTransaction | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
-  // The browser's own calendar day, read after mount so the first render matches
-  // what the server sent and hydration stays clean.
   useEffect(() => {
     setToday(todayKey());
   }, []);
@@ -158,7 +156,7 @@ export default function RecurringClient({
       setError(cause instanceof Error ? cause.message : "Failed to reload the templates.");
     }
     await loadUpcoming(throughKey);
-    // Other pages (transactions, dashboard) read the rows this page can create.
+
     router.refresh();
   }, [loadUpcoming, router, throughKey]);
 
@@ -173,14 +171,10 @@ export default function RecurringClient({
     [upcoming, today],
   );
   const days = useMemo(() => (upcoming === null ? [] : groupUpcomingByDate(upcoming)), [upcoming]);
-  /** Exactly what a post right now would materialise: occurrences up to today. */
+
   const dueToday = useMemo(() => days.filter((day) => day.key <= today), [days, today]);
 
-  /**
-   * An alert dialog is modal, so the page-level banner would sit BEHIND it. Any
-   * failure raised while one is open has to be rendered inside it or the user sees
-   * a dialog that simply refuses to close, with no reason given.
-   */
+
   const errorBanner = error && (
     <div
       role="alert"
@@ -195,8 +189,8 @@ export default function RecurringClient({
     setPosting(true);
     setError(null);
     try {
-      // No throughKey: the action defaults to its own "today", which is the day the
-      // rows must land on. Passing a client-side day could post tomorrow's rent.
+
+
       const result = await generateDueTransactions();
       if ("error" in result) {
         setError(result.error);
@@ -289,7 +283,7 @@ export default function RecurringClient({
         </div>
       )}
 
-      {/* ---- what the last run actually did ---- */}
+      {}
       {summary && (
         <Card>
           <CardHeader>
@@ -311,7 +305,7 @@ export default function RecurringClient({
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {/* Both numbers, always — "posted 0" is a result, not a failure to report. */}
+            {}
             <div className="flex gap-6 text-sm">
               <div>
                 <div className="text-2xl font-semibold">{summary.posted}</div>
@@ -371,7 +365,7 @@ export default function RecurringClient({
         </Card>
       )}
 
-      {/* ---- upcoming preview ---- */}
+      {}
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -468,7 +462,7 @@ export default function RecurringClient({
         </CardContent>
       </Card>
 
-      {/* ---- templates ---- */}
+      {}
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -634,7 +628,7 @@ export default function RecurringClient({
         onSuccess={() => void refresh()}
       />
 
-      {/* ---- preview before committing ---- */}
+      {}
       <AlertDialog open={confirmPostOpen} onOpenChange={setConfirmPostOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -675,7 +669,7 @@ export default function RecurringClient({
             <AlertDialogAction
               disabled={posting}
               onClick={(event) => {
-                // Keep the dialog mounted so a failure can be reported in place.
+
                 event.preventDefault();
                 void handlePost();
               }}
@@ -687,7 +681,7 @@ export default function RecurringClient({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ---- pause ---- */}
+      {}
       <AlertDialog
         open={pendingArchive !== null}
         onOpenChange={(open) => {
@@ -719,7 +713,7 @@ export default function RecurringClient({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ---- delete ---- */}
+      {}
       <AlertDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => {

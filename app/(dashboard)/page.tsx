@@ -17,9 +17,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertTriangle, ArchiveRestore, EyeOff, TrendingUp, TrendingDown, Plus, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
-// Recharts' `Tooltip` is a chart hover card, not the shadcn one, and the two
-// names collide in this file. The chart one is aliased so `Tooltip` keeps
-// meaning the same thing here as it does everywhere else in the app.
+
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip } from "recharts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
@@ -75,32 +73,15 @@ export default function DashboardPage() {
   const [userName, setUserName] = useState<string>("");
   const [chartPeriod, setChartPeriod] = useState<ChartPeriod>("monthly");
   const [cashCurrency, setCashCurrency] = useState("USD");
-  /** Why the last asset delete was refused; null when there is nothing to report. */
+
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [assetActionError, setAssetActionError] = useState<string | null>(null);
-  /**
-   * Net worth and per-account balances, from the SAME actions /accounts uses.
-   * The old headline was `deriveCashBalanceCents(...)`, which counts the ledger
-   * from zero and ignores both `accounts.openingBalanceCents` and liabilities —
-   * so the home page read too low and disagreed with /accounts.
-   */
+
   const [netWorth, setNetWorth] = useState<NetWorthView | null>(null);
   const [accountRows, setAccountRows] = useState<AccountWithBalance[]>([]);
-  /** `net_worth_snapshots`, oldest first — the net-worth-over-time chart. */
+
   const [history, setHistory] = useState<NetWorthSnapshotRow[]>([]);
-  /**
-   * The holdings the eye toggles have removed from the assets section's figures.
-   *
-   * VIEW STATE, AND ONLY VIEW STATE. It is never sent to a server action, never
-   * stored on a row, and deliberately NOT persisted to localStorage: hiding
-   * changes the money on screen, and a filter set weeks ago and forgotten is
-   * exactly how a wrong number becomes a believed one. A reload is the app's one
-   * guaranteed clean slate, so it takes it. See `HiddenKeys` in
-   * components/dashboard/asset-table.ts.
-   *
-   * It does NOT touch the net-worth headline above — that stays the owner's real
-   * position, so a filtered assets total always has the truth sitting above it.
-   */
+
   const [hiddenHoldings, setHiddenHoldings] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
@@ -126,8 +107,7 @@ export default function DashboardPage() {
       getCategories(),
       getSettings(),
       getNetWorth(),
-      // Archived accounts included: their balances still count towards net worth,
-      // so hiding them here would change the headline.
+
       getAccountBalances({ includeArchived: true }),
       getNetWorthHistory(),
     ]);
@@ -153,8 +133,7 @@ export default function DashboardPage() {
     if (!assetToDelete) return;
 
     const result = await deleteAsset(assetToDelete, { confirmed: true });
-    // `deleteAsset` REFUSES for the derived Cash row; closing regardless is how
-    // that refusal used to look like a successful delete.
+
     if (result && "error" in result && result.error) {
       setDeleteError(result.error);
       return;
@@ -175,8 +154,6 @@ export default function DashboardPage() {
     await loadData();
   };
 
-  // DECISION: DEC-004 — each history view is one denomination. The selector is
-  // explicit even for a single bucket so the currency scope is never implied.
   const cashBalances = deriveCashBalancesByCurrency(transactions, categories);
   const cashCurrencies = cashBalances.map((balance) => balance.currency);
   const selectedCashCurrency = cashCurrencies.includes(cashCurrency)
@@ -185,38 +162,16 @@ export default function DashboardPage() {
   const cashBalanceCents =
     cashBalances.find((balance) => balance.currency === selectedCashCurrency)?.balanceCents ?? 0;
 
-  /**
-   * The whole assets section — the allocation bar AND the table below it — from
-   * ONE pass over the asset rows and the account balances.
-   *
-   * The table used to render `assets.map(...)`, one row per holding, so two
-   * crypto holdings appeared as two "Crypto" rows with two percentages while the
-   * bar above had already merged them into one slice. Both now read the same
-   * `allocationRows()` result — `assetView.allocations` is what the bar draws, and
-   * every table row references elements of that same array — so the two cannot
-   * disagree. See components/dashboard/asset-table.ts.
-   *
-   * CASH IS IN THE LIST, from `accountRows` — the very balances `getNetWorth()`
-   * counted — and NOT from the auto-derived "Cash" asset row, which mirrors the
-   * same ledger and is still excluded. Net worth is unchanged to the cent; only
-   * the presentation moved. See THE CASH RULE in components/dashboard/asset-table.ts.
-   *
-   * NO FX: assets may carry different `currency` values and this app has no
-   * exchange-rate source, so totals stay PER CURRENCY and percentages are shares
-   * WITHIN a currency. See components/assets/currency-totals.ts.
-   */
   const assetView = buildAssetTable({
     assets,
-    // Archived included: their balances still count towards the net worth above.
+
     accounts: accountRows,
     hidden: hiddenHoldings,
   });
   const mixedCurrency = assetView.mixed;
-  /** True once a derived "Cash" asset row exists — this section shows accounts instead. */
+
   const hasDerivedCashAsset = assetView.derivedCashCount > 0;
 
-  // "vs. last month", computed from the same ledger rule as the headline above
-  // it — this used to be a hardcoded 0.
   const { growthAmountCents, growthPercent, baselineCents } = computeCashGrowth(
     transactions,
     categories,
@@ -224,9 +179,6 @@ export default function DashboardPage() {
     selectedCashCurrency,
   );
 
-  // OHLC candles. The series and the headline share ONE rule, so the last
-  // candle's close is exactly `cashBalanceCents`; the grouping keys come from
-  // lib/dates.ts, not toISOString(). See components/dashboard/cash-series.ts.
   const candlestickData = buildCashCandles(
     transactions,
     categories,
@@ -235,15 +187,13 @@ export default function DashboardPage() {
   ).map((candle) => ({
     ...candle,
     formattedPeriod: formatPeriodLabel(candle.period, chartPeriod),
-    // Charting boundary: recharts needs plain numbers for the bar body.
+
     bodyRange: [
       centsToDecimal(Math.min(candle.openCents, candle.closeCents)),
       centsToDecimal(Math.max(candle.openCents, candle.closeCents)),
     ] as [number, number],
   }));
 
-  // Y-axis domain: include all highs and lows with padding. These are pixel-space
-  // bounds, not money, so the padded floats are fine.
   const yDomain = candlestickData.length > 0
     ? [
         centsToDecimal(Math.min(...candlestickData.map((d) => d.lowCents))) * 0.95,
@@ -257,8 +207,6 @@ export default function DashboardPage() {
     },
   } satisfies ChartConfig;
 
-  // Custom candlestick shape. Geometry only: the values are converted to
-  // decimals here so they share `bodyRange`'s scale.
   const CandlestickShape = (props: any) => {
     const { x, y, width, height, payload } = props;
     if (!payload) return null;
@@ -273,7 +221,6 @@ export default function DashboardPage() {
     const bodyMax = Math.max(open, close);
     const bodySpan = bodyMax - bodyMin;
 
-    // Calculate wick positions using the bar's pixel-to-value ratio
     let wickHighY = y;
     let wickLowY = y + Math.abs(height);
 
@@ -282,7 +229,7 @@ export default function DashboardPage() {
       wickHighY = y - (high - bodyMax) * scale;
       wickLowY = y + Math.abs(height) + (bodyMin - low) * scale;
     } else {
-      // Doji candle (open === close): estimate wick from high/low
+
       const midY = y + Math.abs(height) / 2;
       const totalRange = high - low;
       if (totalRange > 0) {
@@ -317,7 +264,6 @@ export default function DashboardPage() {
     );
   };
 
-  // Custom tooltip for candlestick
   const CandlestickTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null;
     const data = payload[0]?.payload;
@@ -371,9 +317,7 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      {/* THE headline. Net worth from `getNetWorth()` — assets, liabilities and
-          opening balances included — so this page agrees with /accounts, and a
-          mortgage lowers the figure instead of vanishing. */}
+      {}
       {netWorth && (
         <NetWorthSection
           netWorth={netWorth}
@@ -418,18 +362,13 @@ export default function DashboardPage() {
           <div className="text-3xl font-bold">
             {formatMoney(cashBalanceCents, selectedCashCurrency)}
           </div>
-          {/* Said out loud, because this figure is NOT net worth: it is the sum of
-              the logged ledger only. Anyone who imported recent history alone will
-              see it sit below their account balances. */}
+          {}
           <p className="mt-1 text-xs text-muted-foreground">
             Income minus expenses and investments across your logged transactions.
             Opening balances and liabilities are not part of this figure; see net
             worth above.
           </p>
-          {/* Real numbers, derived from the same ledger rule as the cash figure
-              directly above and as the candles below. Hidden only when there is
-              genuinely nothing to compare (no prior month AND no movement) —
-              this block used to print a hardcoded 0. */}
+          {}
           {(growthAmountCents !== 0 || baselineCents !== 0) && (
             <div className="mt-1 flex items-center gap-2 text-sm">
               <span
@@ -484,7 +423,7 @@ export default function DashboardPage() {
                   domain={yDomain}
                   tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
                   tickFormatter={(value) => {
-                    // Chart ticks arrive as decimals; render them as money.
+
                     const cents = tryParseAmount(Number(value));
                     return cents === null ? "" : formatMoney(cents, selectedCashCurrency);
                   }}
@@ -509,9 +448,7 @@ export default function DashboardPage() {
         <div className="mb-4">
           <h2 className="flex flex-wrap items-center gap-2 text-lg font-semibold">
             <span>Assets{!assetView.isEmpty && ` · ${assetView.visibleTotalsLabel}`}</span>
-            {/* Right next to the total, never a bare icon: this figure is NOT the
-                owner's asset position while the filter is on, and the badge says
-                so in words. The full sentence is in the banner below. */}
+            {}
             {assetView.filter.active && (
               <span className="flex items-center gap-1 rounded-md border-2 border-amber-500/70 bg-amber-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-amber-900 dark:bg-amber-950 dark:text-amber-200">
                 <EyeOff className="h-3 w-3" />
@@ -521,10 +458,7 @@ export default function DashboardPage() {
             {mixedCurrency && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  {/* `tabIndex` because a span is not focusable and Radix opens
-                      on hover or focus only — without it this would be
-                      mouse-only. The badge text itself already says the totals
-                      are not converted; the tooltip adds the detail. */}
+                  {}
                   <span
                     tabIndex={0}
                     className="flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-50 px-2 py-0.5 text-xs font-normal text-amber-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-amber-950 dark:text-amber-300"
@@ -540,11 +474,7 @@ export default function DashboardPage() {
               </Tooltip>
             )}
           </h2>
-          {/* Cash IS in the list now — sourced from the account balances. Which
-              of the two cash figures is on screen matters, so it is stated: the
-              auto-derived Cash asset row mirrors the same ledger the accounts are
-              derived from, and `deriveNetWorth` counts that money exactly once,
-              through the accounts. Listing both would double it. */}
+          {}
           {hasDerivedCashAsset && assetView.cashAccountCount > 0 && (
             <p className="mt-1 text-xs text-muted-foreground">
               Cash is listed from your {assetView.cashAccountCount === 1 ? "account" : "accounts"},
@@ -567,9 +497,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* THE WARNING. Between the total it changed and the bar it changed, so
-            it cannot be scrolled past. It names the count, the excluded value and
-            the real unfiltered total — a filtered figure never appears alone. */}
+        {}
         <AssetFilterNotice
           filter={assetView.filter}
           onShow={showHoldings}
@@ -598,9 +526,7 @@ export default function DashboardPage() {
           </Card>
         ) : (
           <>
-            {/* One allocation bar PER CURRENCY. Percentages are shares within a
-                currency, because adding LBP to USD and calling the result a
-                percentage of net worth is not a fact. */}
+            {}
             <div className="mb-6 space-y-5">
               {assetView.currencyTotals.map((total) => {
                 const rows = assetView.allocations.filter((a) => a.currency === total.currency);
@@ -645,12 +571,7 @@ export default function DashboardPage() {
               })}
             </div>
 
-            {/* One row per CATEGORY, expanding into its holdings — the fix for
-                "Crypto appears twice". The category totals and percentages are
-                elements of `assetView.allocations`, i.e. the very rows the bar
-                above just drew, so the two can never disagree. Grouping,
-                ordering and the expansion rules are unit-tested in
-                components/dashboard/asset-table.ts. */}
+            {}
             <AssetTable
               view={assetView}
               onEdit={openEditDialog}
@@ -729,7 +650,7 @@ export default function DashboardPage() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={(event) => {
-                // Keep the dialog open so a refusal can be read.
+
                 event.preventDefault();
                 void handleDelete();
               }}

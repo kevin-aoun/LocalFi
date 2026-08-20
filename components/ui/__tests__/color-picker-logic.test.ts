@@ -1,10 +1,4 @@
-/**
- * Tests for the pure half of the colour picker.
- *
- * There is no jsdom in this project, so the component itself is untested by
- * construction; everything worth asserting therefore lives in
- * components/ui/color-picker-logic.ts and is exercised here.
- */
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -60,8 +54,7 @@ describe("normalizeHex", () => {
   });
 
   it("never returns a half-parsed colour for a half-typed one", () => {
-    // Typing "#a855f7" one character at a time: only the 3- and 6-digit
-    // prefixes are valid, and nothing in between produces a colour.
+
     const typed = "#a855f7";
     const valid = [];
     for (let i = 1; i <= typed.length; i++) {
@@ -80,7 +73,7 @@ describe("hexToRgb / rgbToHex", () => {
   });
 
   it("keeps a zero channel as zero", () => {
-    // Falsy-zero guard: black is a colour, not a missing value.
+
     expect(hexToRgb("#000000")).toEqual({ r: 0, g: 0, b: 0 });
     expect(rgbToHex({ r: 0, g: 0, b: 0 })).toBe("#000000");
   });
@@ -111,7 +104,7 @@ describe("hexToHsl", () => {
   });
 
   it("handles 3-digit hex, which the old inline copy turned into NaN", () => {
-    // `"#f00".substring(0, 2)` was "#f" -> parseInt -> NaN -> "NaN NaN% NaN%".
+
     expect(hexToHsl("#f00")?.hsl).toBe("0 100% 50%");
   });
 
@@ -135,27 +128,24 @@ describe("contrast", () => {
   });
 
   it("picks the foreground with the better contrast, not the lower HSL lightness", () => {
-    // Amber: HSL lightness 50 made the old rule choose white text at 2.06:1.
+
     const amber = hexToRgb("#f59e0b")!;
     expect(pickForeground(amber).hsl).toBe(FOREGROUND_DARK);
     expect(pickForeground(amber).ratio).toBeGreaterThan(4.5);
 
-    // Deep blue really does want light text.
     expect(pickForeground(hexToRgb("#1e3a8a")!).hsl).toBe(FOREGROUND_LIGHT);
   });
 
   it("gives every preset a foreground that clears WCAG AA", () => {
     for (const preset of ACCENT_PRESETS) {
       const rgb = hexToRgb(preset.value);
-      if (rgb === null) continue; // the "Default" sentinel
+      if (rgb === null) continue;
       expect(pickForeground(rgb).ratio, preset.name).toBeGreaterThanOrEqual(4.5);
     }
   });
 
   it("documents the removed #a855f7 special case", () => {
-    // The old code forced white text on purple. Measured against this app's own
-    // foregrounds, near-black is the higher-contrast AND the accessible choice,
-    // so the hack is gone rather than carried forward.
+
     const purple = hexToRgb("#a855f7")!;
     const onLight = contrastRatio(purple, { r: 249.9, g: 249.9, b: 249.9 });
     const onDark = contrastRatio(purple, { r: 22.95, g: 22.95, b: 22.95 });
@@ -165,8 +155,8 @@ describe("contrast", () => {
   });
 
   it("works for a user-entered hex that is not a preset", () => {
-    expect(pickForeground(hexToRgb("#ffff00")!).hsl).toBe(FOREGROUND_DARK); // yellow
-    expect(pickForeground(hexToRgb("#000080")!).hsl).toBe(FOREGROUND_LIGHT); // navy
+    expect(pickForeground(hexToRgb("#ffff00")!).hsl).toBe(FOREGROUND_DARK);
+    expect(pickForeground(hexToRgb("#000080")!).hsl).toBe(FOREGROUND_LIGHT);
     expect(pickForeground(hexToRgb("#fff")!).hsl).toBe(FOREGROUND_DARK);
     expect(pickForeground(hexToRgb("#000")!).hsl).toBe(FOREGROUND_LIGHT);
   });
@@ -261,7 +251,7 @@ describe("findPreset / describeColor", () => {
   it("labels a custom colour with its canonical hex", () => {
     expect(describeColor("#ABC", presets)).toBe("#aabbcc");
     expect(describeColor("#0ea5e9", presets)).toBe("Sky");
-    // Unusable values are echoed back rather than hidden.
+
     expect(describeColor("nonsense", presets)).toBe("nonsense");
   });
 
@@ -290,7 +280,7 @@ describe("hexInputError", () => {
 });
 
 describe("nextSwatchIndex", () => {
-  // The accent grid: 8 swatches, 4 per row.
+
   const count = 8;
   const columns = 4;
 
@@ -315,7 +305,7 @@ describe("nextSwatchIndex", () => {
   });
 
   it("clamps a ragged last row instead of focusing a swatch that is not there", () => {
-    // 6 swatches over 4 columns: the bottom row is 4,5 only.
+
     expect(nextSwatchIndex("ArrowDown", 2, 6, 4)).toBe(2);
     expect(nextSwatchIndex("ArrowUp", 2, 6, 4)).toBe(2);
     expect(nextSwatchIndex("ArrowDown", 1, 6, 4)).toBe(5);

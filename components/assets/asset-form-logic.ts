@@ -83,7 +83,7 @@ export function formFromAsset(asset: AssetFormAsset, centsToDecimal: (cents: num
   return {
     category: asset.category,
     currentValue: centsToDecimal(asset.currentValueCents).toString(),
-    // DECISION: DEC-004 — live provider quotes are USD and cannot be relabeled.
+
     currency: useLivePrice ? "USD" : asset.currency,
     notes: asset.notes || "",
     commodityType: asset.commodityType || "Gold",

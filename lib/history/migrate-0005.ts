@@ -1,28 +1,4 @@
-/**
- * One-shot application of migration 0005 (`net_worth_snapshots.source`,
- * `.source_note`) to an existing budget database.
- *
- * The default target holds the owner's REAL financial history, so this follows
- * the house pattern set by lib/db/migrate-to-cents.ts and
- * lib/db/migrate-to-priced-holdings.ts: its job is not to migrate — 0005's SQL
- * does that — but to REFUSE to leave a damaged file behind.
- *
- *  1. A byte-for-byte backup of the PRE-migration file lands in
- *     data/backups/budget.<timestamp>.pre-0005.db before anything is modified.
- *  2. All work happens on an in-memory copy; nothing is written until every
- *     assertion passes, and what lands on disk is re-opened and verified again.
- *  3. Row counts must be unchanged for every table.
- *  4. Every pre-existing snapshot row must come out byte-identical in its three
- *     money columns AND labelled `source = 'recorded'`. Those rows WERE measured;
- *     0005 must not turn a single one of them into an estimate.
- *  5. On any failure the backup is copied back and the error is rethrown.
- *  6. Running it twice is a reported no-op, not an error.
- *
- * ⚠ SINGLE WRITER. lib/db/client.ts keeps the whole database in memory and
- * flushes the file wholesale, so a running app (the Docker stack points at
- * ./data) can overwrite anything this changes underneath it. STOP THE STACK
- * before pointing this at the live file.
- */
+
 import initSqlJs, { type Database } from "sql.js";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -69,7 +45,7 @@ export type Migrate0005Result = {
   countsBefore: Record<string, number>;
   countsAfter: Record<string, number>;
   snapshotsBefore: SnapshotRow[];
-  /** Rows the ALTER labelled 'recorded' — i.e. every row that already existed. */
+
   labelledRecorded: number;
 };
 
@@ -78,7 +54,7 @@ export type Migrate0005Options = {
   backupDir: string;
   dryRun?: boolean;
   migrationSqlPath?: string;
-  /** Test seam: damage the migrated image to prove the verification bites. */
+
   corruptForTest?: (db: Database) => void;
   log?: (message: string) => void;
 };
@@ -133,7 +109,7 @@ function execScript(db: Database, sql: string) {
   }
 }
 
-/** pre-0005 | post-0005, refusing a half-applied state. */
+
 export function detect0005State(db: Database): "pre-0005" | "post-0005" {
   if (!tableNames(db).has("net_worth_snapshots")) {
     throw new Error(
@@ -242,8 +218,8 @@ export async function migrateDatabaseTo0005(options: Migrate0005Options): Promis
           }
         }
 
-        // Every row that already existed was MEASURED. It must survive untouched
-        // and be labelled 'recorded' — never silently downgraded to an estimate.
+
+
         const after = readSnapshots(target);
         if (after.length !== snapshotsBefore.length) {
           throw new Error(`${phase}: net_worth_snapshots row count changed`);
@@ -290,7 +266,7 @@ export async function migrateDatabaseTo0005(options: Migrate0005Options): Promis
 
       const inMemory = verify(db, "in-memory check");
       const migrated = Buffer.from(db.export());
-      db.run("PRAGMA foreign_keys = ON"); // export() re-opened the connection
+      db.run("PRAGMA foreign_keys = ON");
 
       if (dryRun) {
         log("Dry run: verified but nothing written.");

@@ -11,7 +11,6 @@ async function migrateFromJSON() {
 
   const db = await getDb();
 
-  // Read JSON files
   const categoriesPath = path.join(DATA_DIR, "categories.json");
   const transactionsPath = path.join(DATA_DIR, "transactions.json");
   const assetsPath = path.join(DATA_DIR, "assets.json");
@@ -38,11 +37,11 @@ async function migrateFromJSON() {
   console.log(`  Assets: ${assetsJSON.length}`);
   console.log(`  Quick Commands: ${settingsJSON.quickCommands?.length || 0}\n`);
 
-  // Migration ID mapping (JSON IDs to SQLite IDs)
+
   const categoryIdMap = new Map<number, number>();
   const transactionIdMap = new Map<number, number>();
 
-  // 1. Migrate Categories
+
   console.log("Migrating categories...");
   for (const cat of categoriesJSON) {
     const result = await db.insert(schema.categories).values({
@@ -59,7 +58,7 @@ async function migrateFromJSON() {
     console.log(`  ✓ ${cat.name} (${cat.id} -> ${result[0].id})`);
   }
 
-  // 2. Migrate Transactions
+
   console.log("\nMigrating transactions...");
   for (const tx of transactionsJSON) {
     const newCategoryId = categoryIdMap.get(tx.categoryId);
@@ -81,10 +80,10 @@ async function migrateFromJSON() {
     console.log(`  ✓ Transaction ${tx.id} -> ${result[0].id} (${formatMoney(parseAmount(tx.amount))})`);
   }
 
-  // 3. Migrate Assets
+
   console.log("\nMigrating assets...");
   for (const asset of assetsJSON) {
-    // Handle linkedTransactionIds mapping
+
     let linkedIds = null;
     if (asset.linkedTransactionIds) {
       try {
@@ -104,9 +103,9 @@ async function migrateFromJSON() {
       currency: asset.currency || "USD",
       notes: asset.notes || null,
       commodityType: asset.commodityType || null,
-      // `|| null` would turn a quantity of exactly 0 into "no quantity recorded",
-      // losing the distinction between an emptied holding and one that never had
-      // a quantity. 0 is a real value here.
+
+
+
       quantity: asset.quantity ?? null,
       unit: asset.unit || null,
       linkedTransactionIds: linkedIds,
@@ -118,7 +117,7 @@ async function migrateFromJSON() {
     console.log(`  ✓ ${asset.category} asset (${formatMoney(parseAmount(asset.currentValue), asset.currency || "USD")})`);
   }
 
-  // 4. Migrate Settings
+
   console.log("\nMigrating settings...");
   await db.insert(schema.settings).values({
     userName: settingsJSON.userName,
@@ -127,7 +126,7 @@ async function migrateFromJSON() {
   });
   console.log(`  ✓ User: ${settingsJSON.userName}, Theme: ${settingsJSON.theme}`);
 
-  // 5. Migrate Quick Commands
+
   if (settingsJSON.quickCommands && settingsJSON.quickCommands.length > 0) {
     console.log("\nMigrating quick commands...");
     for (const cmd of settingsJSON.quickCommands) {
@@ -141,7 +140,7 @@ async function migrateFromJSON() {
     }
   }
 
-  // Save database to file
+
   await saveDb();
 
   console.log("\n✅ Migration completed successfully!");
@@ -151,7 +150,7 @@ async function migrateFromJSON() {
   console.log(`  Assets: ${assetsJSON.length}`);
   console.log(`  Quick Commands: ${settingsJSON.quickCommands?.length || 0}`);
 
-  // Verify Cash asset value
+
   const cashAsset = assetsJSON.find((a: any) => a.category === "Cash");
   if (cashAsset) {
     console.log(`\nCash Asset Value: ${formatMoney(parseAmount(cashAsset.currentValue), cashAsset.currency || "USD")}`);

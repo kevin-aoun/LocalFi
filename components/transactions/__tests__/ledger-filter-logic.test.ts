@@ -1,16 +1,4 @@
-/**
- * The ledger's search / date-range / month / type / category / account predicate.
- *
- * Before this module the transactions page had month, type and category
- * dropdowns and NOTHING else: no free-text search and no date range, so finding
- * "that coffee thing in March" meant paging through the whole ledger by hand.
- * The filtering also lived inline in the page component, where none of it could
- * be tested.
- *
- * These tests must pass under `bun run test:tz` (UTC+14 and UTC-11): a filter
- * that drops the 1st of the month east of UTC is the same class of bug as the
- * one transaction-form-logic.ts exists to prevent.
- */
+
 import { describe, expect, it } from "vitest";
 import {
   buildLedgerIndex,
@@ -37,7 +25,6 @@ const ACCOUNTS = [
 
 const INDEX = buildLedgerIndex(CATEGORIES, ACCOUNTS);
 
-/** A confirmed expense on Main Checking. */
 function row(over: Partial<LedgerRow> = {}): LedgerRow {
   return {
     id: 1,
@@ -55,12 +42,12 @@ function row(over: Partial<LedgerRow> = {}): LedgerRow {
 describe("ledgerRowDateKey", () => {
   it("reads the LOCAL calendar day, whatever the stored representation", () => {
     expect(ledgerRowDateKey(row({ date: new Date(2026, 6, 28) }))).toBe("2026-07-28");
-    // The same instant arriving as a number (post-serialization) must agree.
+
     expect(ledgerRowDateKey(row({ date: new Date(2026, 6, 28).getTime() }))).toBe("2026-07-28");
   });
 
   it("never shifts the 1st of a month into the previous one", () => {
-    // toISOString() would report 2026-07-31 east of UTC.
+
     expect(ledgerRowDateKey(row({ date: new Date(2026, 7, 1) }))).toBe("2026-08-01");
   });
 });
@@ -140,7 +127,7 @@ describe("free-text search", () => {
 
   it("requires ALL terms, so a second word narrows instead of widening", () => {
     const groceries = row({ comment: "Coffee beans", categoryId: 1 });
-    // "coffee" is in the comment, "groceries" is the category: both must match.
+
     expect(matchesLedgerFilters(groceries, INDEX, { query: "coffee groceries" })).toBe(true);
     expect(matchesLedgerFilters(groceries, INDEX, { query: "coffee salary" })).toBe(false);
   });
@@ -187,8 +174,7 @@ describe("date-range filter", () => {
   });
 
   it("keeps the 1st of the month in range in every timezone", () => {
-    // The old inline filter compared instants; east of UTC the 1st could be
-    // dropped from a range that starts on the 1st.
+
     const kept = filterLedger([feb1], INDEX, { fromKey: "2026-02-01", toKey: "2026-02-01" });
     expect(kept).toHaveLength(1);
   });
@@ -226,14 +212,14 @@ describe("type filter", () => {
 
   it("has a TRANSFER type of its own — a transfer is neither income nor expense", () => {
     expect(filterLedger(rows, INDEX, { type: "transfer" }).map((r) => r.id)).toEqual([4]);
-    // and it is never swept up by the income/expense/investment buckets
+
     for (const type of ["income", "expense", "investment"]) {
       expect(filterLedger(rows, INDEX, { type }).map((r) => r.id)).not.toContain(4);
     }
   });
 
   it("keeps a transfer out of the expense bucket even if it carries a category", () => {
-    // The schema allows it; lib/cash-balance ignores the category outright.
+
     const mislabelled = row({ id: 5, categoryId: 1, transferAccountId: 11 });
     expect(filterLedger([mislabelled], INDEX, { type: "expense" })).toHaveLength(0);
     expect(filterLedger([mislabelled], INDEX, { type: "transfer" })).toHaveLength(1);

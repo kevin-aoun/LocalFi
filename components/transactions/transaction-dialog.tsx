@@ -35,40 +35,35 @@ type Category = {
 
 type Transaction = {
   id: number;
-  /** null for a transfer, or for a row whose category was deleted. */
+
   categoryId: number | null;
-  /** Amount in integer cents. */
+
   amountCents: Cents;
   comment: string | null;
   date: Date;
   pending?: boolean | null;
-  /** The account the row belongs to; null for rows not yet assigned to one. */
+
   accountId?: number | null;
   instrumentId?: string | null;
   quantityDelta?: string | null;
 };
 
-/** The subset of an account row the picker needs. */
 type AccountOption = {
   id: number;
   name: string;
   type: string;
-  /** A closed account is still offered, labelled, so an old row can be edited. */
+
   archived?: boolean;
 };
 
 type QuickCommand = {
   command: string;
   categoryId: number;
-  /** Pre-filled amount in integer cents. */
+
   amountCents: Cents;
   comment: string;
 };
 
-/**
- * Cents -> the decimal string an `<input type="number">` expects. The server
- * action parses it back with `parseAmount`, which round-trips exactly.
- */
 function centsToInputValue(cents: Cents): string {
   return centsToDecimal(cents).toString();
 }
@@ -78,9 +73,9 @@ type TransactionDialogProps = {
   onOpenChange: (open: boolean) => void;
   transaction?: Transaction | null;
   categories: Category[];
-  /** Accounts the row can be filed against. Empty is fine (pre-accounts data). */
+
   accounts?: AccountOption[];
-  /** `getDefaultAccountId()` — what a NEW transaction is pre-filled with. */
+
   defaultAccountId?: number | null;
   quickCommands: QuickCommand[];
   onSuccess: () => void;
@@ -99,7 +94,7 @@ export function TransactionDialog({
   const [loading, setLoading] = useState(false);
   const [providerLoading, setProviderLoading] = useState(false);
   const [previewSource, setPreviewSource] = useState<string | null>(null);
-  /** Server-side failure to show the user; null when there is nothing wrong. */
+
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     categoryId: "",
@@ -109,11 +104,7 @@ export function TransactionDialog({
   const [date, setDate] = useState<Date>(new Date());
   const [isPending, setIsPending] = useState(false);
   const [showQuickCommands, setShowQuickCommands] = useState(false);
-  /**
-   * The account this row belongs to, as a string for the `<Select>`. "" means
-   * "not supplied", which the action reads as: default account on create, leave
-   * the account UNCHANGED on update.
-   */
+
   const [accountId, setAccountId] = useState("");
   const [investment, setInvestment] = useState({
     instrumentSymbol: "",
@@ -127,16 +118,14 @@ export function TransactionDialog({
     setPreviewSource(null);
     if (transaction) {
       setFormData({
-        // A row with no category (a transfer, or one whose category was
-        // deleted) opens with the Category field empty rather than crashing.
+
         categoryId: transaction.categoryId === null ? "" : transaction.categoryId.toString(),
         amount: centsToInputValue(transaction.amountCents),
         comment: transaction.comment || "",
       });
       setDate(transaction.date);
       setIsPending(transaction.pending || false);
-      // `== null` and not `|| ""`: an account id is never 0, but the nullish
-      // check is what keeps a falsy-zero bug from being introduced later.
+
       setAccountId(transaction.accountId == null ? "" : String(transaction.accountId));
       const instrumentSymbol = transaction.instrumentId?.split(":").at(-1) ?? "";
       const quantity = transaction.quantityDelta ?? "";
@@ -166,7 +155,6 @@ export function TransactionDialog({
   const handleCommentChange = (value: string) => {
     setFormData((prev) => ({ ...prev, comment: value }));
 
-    // Check for quick command
     if (value.startsWith("/")) {
       const command = value.slice(1).toLowerCase();
       const matchingCommand = quickCommands.find((qc) =>
@@ -174,7 +162,7 @@ export function TransactionDialog({
       );
 
       if (matchingCommand && value === `/${matchingCommand.command}`) {
-        // Apply quick command
+
         setFormData({
           categoryId: matchingCommand.categoryId.toString(),
           amount: centsToInputValue(matchingCommand.amountCents),
@@ -209,17 +197,17 @@ export function TransactionDialog({
     setLoading(true);
 
     try {
-      // The date is serialized by toTransactionFormData, NOT by toISOString():
-      // see transaction-form-logic.ts for why that mattered.
+
+
       const formDataObj = toTransactionFormData(state);
 
       const result = transaction
         ? await updateTransaction(transaction.id, formDataObj)
         : await createTransaction(formDataObj);
 
-      // The server action reports failure by RETURNING { error }, not by
-      // throwing. Ignoring it is how a rejected write used to look like a
-      // successful one.
+
+
+
       if (result && "error" in result && result.error) {
         setError(result.error);
         return;

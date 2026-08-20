@@ -1,27 +1,4 @@
-/**
- * The price-provider registry: ONE provider, six symbols, four of them priceable.
- *
- * WHY THESE TESTS EXIST
- *
- *   1. A previous bug persisted a live-priced asset at $0 when the fetch failed,
- *      with no error at all. So EVERY failure mode here — unknown symbol, a
- *      symbol with no source, a rate limit, an HTTP error, an unparseable body,
- *      an empty payload, a socket error because the machine is offline — must
- *      produce a TYPED error, never a number, and never 0.
- *   2. TWO of the six prices are NOT the thing they price. Gold and silver come
- *      from proxy tokens. Every quote must carry that fact with it, because a
- *      proxy the owner does not know about is the failure mode that matters.
- *   3. TWO of the six cannot be priced at all, and must say so rather than being
- *      quietly mapped onto something plausible-looking.
- *   4. `quantity` is a physical/asset amount, not money: 0.0345 BTC and
- *      1.1376 troy oz are both exact inputs. Value = quantity x price is
- *      fractional and must be rounded to the cent EXACTLY ONCE.
- *   5. A quantity of 0 is a quantity. `if (!quantity)` is a bug.
- *   6. The keyless tier rate-limits hard, so N symbols must cost ONE request.
- *
- * No test here touches the network: `fetchImpl` is injected and every payload is
- * a recorded response shape.
- */
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -54,14 +31,6 @@ import {
   type PriceQuote,
   type PriceSymbol,
 } from "@/lib/prices";
-
-// --------------------------------------------------------------------------
-// Recorded response shapes.
-//
-// GET https://api.coingecko.com/api/v3/simple/price
-//       ?ids=pax-gold,kinesis-silver,bitcoin,ethereum&vs_currencies=usd
-// probed live on 2026-08-06 — these are the real figures.
-// --------------------------------------------------------------------------
 
 const COINGECKO_OK = {
   "pax-gold": { usd: 4257.87 },
@@ -110,8 +79,6 @@ const quoteFor = (symbol: "XAU" | "XAG" | "BTC", price: number): PriceQuote => (
   fetchedAt: 1_785_000_000_000,
 });
 
-// --------------------------------------------------------------------------
-
 describe("there is exactly one provider", () => {
   it("lists CoinGecko and nothing else", () => {
     expect([...PRICE_PROVIDERS]).toEqual(["coingecko"]);
@@ -135,8 +102,7 @@ describe("there is exactly one provider", () => {
     for (const name of Object.keys(priceModule)) {
       expect(name).not.toMatch(/swissquote|spreadprofile/i);
     }
-    // The bug that hid gold for months was a `"prime" === "Prime"` comparison.
-    // There is now no profile string to get the case of.
+
     expect(priceModule.SPREAD_PROFILES).toBeUndefined();
     expect(priceModule.parseSwissQuotePrice).toBeUndefined();
     expect(priceModule.SWISSQUOTE_BASE_URL).toBeUndefined();
@@ -152,8 +118,7 @@ describe("what one unit of each price actually is", () => {
       expect(PRICED_HOLDINGS[symbol].assetCategory).toBe("Commodities");
       const proxy = PRICED_HOLDINGS[symbol].proxy;
       expect(proxy).not.toBeNull();
-      // The unit claim and the EVIDENCE for it are both recorded. An unverified
-      // unit is how a per-gram token misprices a holding by 31x.
+
       expect(proxy!.unitClaim).toMatch(/troy ounce/);
       expect(proxy!.unitEvidence.length).toBeGreaterThan(40);
       expect(proxy!.tracking).toMatch(/2026-08-06/);
@@ -171,7 +136,7 @@ describe("what one unit of each price actually is", () => {
       expect(PRICED_HOLDINGS[symbol].priceUnit).toBe("coin");
       expect(PRICED_HOLDINGS[symbol].assetCategory).toBe("Crypto");
       expect(PRICED_HOLDINGS[symbol].proxy).toBeNull();
-      // Crypto is NOT a commodity and must never leak into commodity_type.
+
       expect(PRICED_HOLDINGS[symbol].commodityType).toBeNull();
     }
     expect(cryptoPriceSymbols).toEqual(["BTC", "ETH"]);
@@ -184,16 +149,14 @@ describe("what one unit of each price actually is", () => {
       expect(PRICED_HOLDINGS[symbol].provider).toBeNull();
       expect(PRICED_HOLDINGS[symbol].proxy).toBeNull();
       expect(canBePriced(symbol)).toBe(false);
-      // The reason names the trap: the only candidate token is an ETF SHARE.
+
       expect(PRICED_HOLDINGS[symbol].noSourceReason).toMatch(/ETF SHARE|share/i);
     }
     expect([...priceableSymbols]).toEqual(["XAU", "XAG", "BTC", "ETH"]);
   });
 
   it("keeps XPT and XPD as valid stored symbols, so no migration is needed", () => {
-    // The whole point: an existing `assets` row saying "XPT" stays a legal
-    // price_symbol and keeps its stored value. Dropping the enum member would
-    // have forced a migration AND invalidated real rows.
+
     expect(PRICE_SYMBOLS).toEqual(["XAU", "XAG", "XPT", "XPD", "BTC", "ETH"]);
     expect(isPriceSymbol("XPT")).toBe(true);
     expect(priceSymbolForCommodityType("Platinum")).toBe("XPT");
@@ -219,14 +182,12 @@ describe("what one unit of each price actually is", () => {
 
 describe("the registry and the database schema agree", () => {
   it("declares the same price symbols and units as lib/db/schema/assets.ts", async () => {
-    // The schema deliberately duplicates these lists (drizzle-kit resolves no
-    // path aliases at runtime), so something has to keep them honest.
+
     const { priceSymbols, quantityUnits, commodityTypes } = await import("@/lib/db/schema/assets");
     expect([...priceSymbols]).toEqual([...PRICE_SYMBOLS]);
-    // Every unit the registry can price must be storable, and "coins" is what a
-    // crypto quantity is measured in.
+
     expect([...quantityUnits]).toEqual(["oz", "grams", "coins"]);
-    // commodity_type still only ever holds a commodity — never BTC or ETH.
+
     expect([...commodityTypes]).toEqual(["Gold", "Silver", "Platinum", "Palladium"]);
     for (const symbol of cryptoPriceSymbols) {
       expect(commodityTypes).not.toContain(PRICED_HOLDINGS[symbol].label);
@@ -248,7 +209,7 @@ describe("disclosure: a proxy price never travels alone", () => {
     expect(silver.kind).toBe("proxy");
     expect(silver.badge).toBe("KAG proxy");
     expect(silver.detail).toMatch(/Kinesis Silver/);
-    // The silver proxy tracks materially worse than the gold one and says so.
+
     expect(silver.detail).toMatch(/2\.19%/);
   });
 
@@ -343,7 +304,7 @@ describe("batching: N symbols cost ONE request", () => {
     expect(quotes.get("XAU")!.pricePerUnitUsd).toBe(4257.87);
     expect(quotes.get("XAG")!.pricePerUnitUsd).toBe(60.5);
     expect(quotes.get("BTC")!.pricePerUnitUsd).toBe(118_432);
-    // One request means one observation instant for all of them.
+
     expect([...quotes.values()].every((q) => q.fetchedAt === 7)).toBe(true);
   });
 
@@ -388,8 +349,7 @@ describe("privacy: the request carries nothing but coin ids", () => {
     await fetchHoldingValueCents("BTC", 12.3456789, "coins", { fetchImpl });
 
     const url = calls[0];
-    // The URL is a constant made of coin ids. A quantity, a value, an asset id
-    // or a user's chosen symbol appearing here would leak the ledger.
+
     expect(url).toBe(COINGECKO_URL);
     expect(url).not.toMatch(/12\.34|quantity|value|asset|user|id=\d/);
     expect(url.split("?")[1]).toBe("ids=pax-gold,kinesis-silver,bitcoin,ethereum&vs_currencies=usd");
@@ -400,7 +360,6 @@ describe("privacy: the request carries nothing but coin ids", () => {
     expect(init.credentials).toBe("omit");
     expect(init.referrerPolicy).toBe("no-referrer");
 
-    // Exactly one header, and it identifies nobody.
     const headers = init.headers as Record<string, string>;
     expect(Object.keys(headers)).toEqual(["accept"]);
     for (const key of Object.keys(headers)) {
@@ -540,7 +499,7 @@ describe("a rate limit is not an outage", () => {
       ok: false,
       error: { code: "rate_limited", status: 429, provider: "coingecko", symbol: "XAU" },
     });
-    // NOT the generic bucket.
+
     if (result.ok) throw new Error("expected a failure");
     expect(result.error.code).not.toBe("http_error");
     expect(result.error.code).not.toBe("network_error");
@@ -568,7 +527,6 @@ describe("a rate limit is not an outage", () => {
     expect(offline).toMatch(/offline/);
     expect(offline).not.toMatch(/wait about a minute/i);
 
-    // The two must not read alike: one says check the network, one says wait.
     expect(throttled).not.toBe(offline);
   });
 
@@ -618,18 +576,18 @@ describe("describePriceError", () => {
 
 describe("quantity x price -> integer cents, rounded exactly once", () => {
   it("prices a fractional bitcoin holding", () => {
-    // 0.0345 BTC x $118,432.00 = $4,085.904 -> 408590 cents (rounded once).
+
     const result = holdingValueCents(quoteFor("BTC", 118_432), 0.0345, "coins");
     expect(result).toEqual({ ok: true, valueCents: 408_590 });
   });
 
   it("rounds half away from zero at the cent, not per-operation", () => {
-    // 0.0345 x 3781.22 = 130.452089...  -> 13045 cents
+
     expect(holdingValueCents(quoteFor("BTC", 3781.22), 0.0345, "coins")).toEqual({
       ok: true,
       valueCents: 13_045,
     });
-    // A value whose third decimal is exactly 5 must round UP, once.
+
     expect(holdingValueCents(quoteFor("BTC", 100.05), 0.1, "coins")).toEqual({
       ok: true,
       valueCents: 1001,
@@ -637,7 +595,7 @@ describe("quantity x price -> integer cents, rounded exactly once", () => {
   });
 
   it("prices the live database's gold holding the way it always did", () => {
-    // 1.1376 oz x $3,315.58 = $3,771.803808 -> 377180 cents.
+
     expect(holdingValueCents(quoteFor("XAU", 3315.58), 1.1376, "oz")).toEqual({
       ok: true,
       valueCents: 377_180,
@@ -645,7 +603,7 @@ describe("quantity x price -> integer cents, rounded exactly once", () => {
   });
 
   it("prices a silver holding per troy ounce", () => {
-    // 10 oz x $60.50 = $605.00
+
     expect(holdingValueCents(quoteFor("XAG", 60.5), 10, "oz")).toEqual({
       ok: true,
       valueCents: 60_500,
@@ -694,7 +652,7 @@ describe("quantity x price -> integer cents, rounded exactly once", () => {
   });
 
   it("defaults a missing unit to the holding's own unit", () => {
-    // Legacy metals rows can have unit NULL; crypto rows are counted in coins.
+
     expect(holdingValueCents(quoteFor("XAU", 3315.58), 1, null)).toEqual(
       holdingValueCents(quoteFor("XAU", 3315.58), 1, "oz"),
     );
@@ -712,7 +670,7 @@ describe("fetchHoldingValueCents", () => {
 
     expect(result).toEqual({
       ok: true,
-      valueCents: 945_305, // 2.5 x 3781.22 = 9453.05
+      valueCents: 945_305,
       quote: {
         symbol: "ETH",
         label: "Ethereum",
@@ -756,10 +714,9 @@ describe("holdingValueFromQuotes — valuing N holdings off one batch", () => {
     const { quotes, errors } = await fetchPriceQuotes(["XAU", "BTC"], { fetchImpl });
     expect(calls).toHaveLength(1);
 
-    // Two holdings, zero further requests.
     expect(holdingValueFromQuotes("XAU", 1.1376, "oz", quotes, errors)).toMatchObject({
       ok: true,
-      valueCents: 484_375, // 1.1376 x 4257.87 = 4843.752912, rounded once
+      valueCents: 484_375,
     });
     expect(holdingValueFromQuotes("BTC", 0.0345, "coins", quotes, errors)).toMatchObject({
       ok: true,

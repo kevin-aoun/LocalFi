@@ -1,17 +1,4 @@
-/**
- * The Bitcoin / Ethereum server actions, and the metals path they now share.
- *
- * `fetch` is stubbed for every test — no network call is ever made — and each
- * test gets a throwaway database in a temp dir (BUDGET_DB_PATH + mkdtemp), so
- * data/budget.db is never opened.
- *
- * The invariants under test are the ones that lost money before:
- *   - a failed price fetch must NEVER be persisted as $0; it must return
- *     { error } and leave the stored value exactly as it was;
- *   - a quantity of 0 is a quantity;
- *   - a live-priced holding records WHICH symbol prices it, so it can be
- *     refreshed later without guessing from a category name.
- */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTempDb, execOn, type TempDb } from "./support/temp-db";
 import { GRAMS_PER_TROY_OUNCE } from "@/lib/prices";
@@ -121,9 +108,9 @@ describe("createLivePricedAsset", () => {
       {
         id: 1,
         category: "Crypto",
-        current_value_cents: 408_590, // 0.0345 x 118432 = 4085.904
+        current_value_cents: 408_590,
         currency: "USD",
-        commodity_type: null, // Bitcoin is NOT a commodity
+        commodity_type: null,
         price_symbol: "BTC",
         quantity: 0.0345,
         unit: "coins",
@@ -217,7 +204,7 @@ describe("updateLivePricedAsset", () => {
     const result = await updateLivePricedAsset(Number(before.id), holdingForm({ quantity: "0.0345" }));
 
     expect(result).toMatchObject({ error: expect.stringContaining("nothing was saved") });
-    expect(storedAssets()).toEqual([before]); // byte-for-byte the same row
+    expect(storedAssets()).toEqual([before]);
   });
 
   it("refuses to touch a missing asset or the derived Cash row", async () => {

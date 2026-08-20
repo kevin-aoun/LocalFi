@@ -67,7 +67,6 @@ function scalarHead(raw: Database): { sequence: number; hash: string | null } {
   return row ? { sequence: Number(row[0]), hash: String(row[1]) } : { sequence: 0, hash: null };
 }
 
-/** Low-level primitive used by migration while it owns an outer SQLite transaction. */
 export function postLedgerEventRaw(raw: Database, input: LedgerEventInput): PostedLedgerEvent {
   const eventId = input.eventId ?? randomUUID();
   if (!UUID.test(eventId)) throw new Error("eventId must be a UUID");
@@ -115,8 +114,6 @@ export function postLedgerEventRaw(raw: Database, input: LedgerEventInput): Post
     ],
   );
 
-  // CONTRACT-013: exact positions are a same-transaction projection of
-  // instrument-target movements, never a price-derived rewrite.
   for (const movement of movements) {
     const targetStatement = raw.prepare(
       "SELECT instrument_id FROM ledger_accounts WHERE id = ? AND target_type = 'instrument'",
@@ -175,7 +172,6 @@ export function postLedgerEventRaw(raw: Database, input: LedgerEventInput): Post
   return { ...event, movements };
 }
 
-/** CONTRACT-010: journal rows and their projection commit in one real SQLite transaction. */
 export async function postLedgerEvent<T = void>(
   input: LedgerEventInput,
   applyProjection?: LedgerProjectionCallback<T>,

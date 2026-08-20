@@ -40,7 +40,7 @@ describe("categorySwatch", () => {
   });
 
   it("is the single source of truth shared by the table and the pie", () => {
-    // The pie must resolve a row's colour to exactly what the table shows.
+
     const r = row({ categoryId: 2 });
     const pie = buildCategoryPie([r], COLORS);
     expect(pie.slices[0].color).toBe(categorySwatch(r, COLORS));
@@ -82,8 +82,6 @@ describe("buildCategoryPie", () => {
     expect(pie.slices.map((s) => s.name)).toEqual(["A", "B"]);
   });
 
-  // --- the reason this module exists ------------------------------------
-
   it("excludes a ZERO row rather than treating it as absent", () => {
     const pie = buildCategoryPie(
       [
@@ -113,9 +111,7 @@ describe("buildCategoryPie", () => {
   });
 
   it("re-bases shares on the DRAWN total, never on the direction total", () => {
-    // Rows carry share=0.5 each against a direction total that includes the
-    // undrawable row. The pie must not print 50% beside a wedge that is 100%
-    // of the circle.
+
     const pie = buildCategoryPie(
       [
         row({ categoryId: 1, name: "Rent", totalCents: cents("100.00"), share: 0.5 }),
@@ -130,8 +126,7 @@ describe("buildCategoryPie", () => {
   });
 
   it("carries a null share through as a drawable wedge, re-based", () => {
-    // `share` is null when the row counts towards no direction. The money is
-    // still real, so it gets a wedge — with a share the pie computed itself.
+
     const pie = buildCategoryPie(
       [
         row({ categoryId: 1, totalCents: cents("30.00"), share: null }),
@@ -152,8 +147,6 @@ describe("buildCategoryPie", () => {
     expect(pie.slices).toHaveLength(1);
     expect(pie.slices[0].uncategorized).toBe(true);
   });
-
-  // --- degenerate inputs -------------------------------------------------
 
   it("returns an empty, non-throwing model for no rows", () => {
     const pie = buildCategoryPie([], COLORS);

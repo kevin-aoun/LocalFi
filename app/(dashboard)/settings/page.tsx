@@ -22,8 +22,7 @@ import {
 export default function SettingsPage() {
   const [loading, setLoading] = useState(false);
   const [userName, setUserName] = useState("");
-  // Matches the column default in lib/db/schema/settings.ts, so the picker shows
-  // the truthful "Default" rather than a black swatch while settings load.
+
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT);
   const [quickCommands, setQuickCommands] = useState<QuickCommand[]>([]);
   const [showLedger, setShowLedger] = useState(false);
@@ -31,7 +30,7 @@ export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const [saved, setSaved] = useState(false);
   const [mounted, setMounted] = useState(false);
-  /** Failure from `updateSettings`; null when there is nothing to report. */
+
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -45,14 +44,9 @@ export default function SettingsPage() {
     setAccentColor(settings.accentColor);
     setShowLedger(settings.showLedger);
     setQuickCommands(settings.quickCommands || []);
-    // Don't override the current theme - it's already set by next-themes
+
   };
 
-  /**
-   * `updateSettings` reports failure by RETURNING `{ error }`. Every call site
-   * here used to discard that, so a rejected save looked exactly like a
-   * successful one — including the "Saved!" confirmation.
-   */
   const save = async (next: Parameters<typeof updateSettings>[0]): Promise<boolean> => {
     const result = await updateSettings(next);
     if (result && "error" in result && result.error) {
@@ -98,12 +92,6 @@ export default function SettingsPage() {
     });
   };
 
-  /**
-   * `ColorPicker` only ever emits a canonical `#rrggbb` or a preset sentinel,
-   * so `resolveAccent` should never fail here. It is still checked: a value can
-   * also arrive from the database, and an accent that cannot be rendered must
-   * be reported rather than quietly doing nothing.
-   */
   const handleAccentColorChange = async (color: string) => {
     const application = resolveAccent(color);
     if (application === null) {
@@ -114,7 +102,6 @@ export default function SettingsPage() {
     setAccentColor(color);
     applyAccentColorImmediately(application);
 
-    // Auto-save accent color
     await save({
       userName,
       accentColor: color,
@@ -154,15 +141,10 @@ export default function SettingsPage() {
     }
   };
 
-  /**
-   * The only DOM-touching part of the accent pipeline. Every decision — which
-   * properties, which HSL, which foreground — is made by `resolveAccent` in
-   * components/ui/color-picker-logic.ts, where it can be unit tested.
-   */
   const applyAccentColorImmediately = (application: AccentApplication) => {
     const root = document.documentElement;
     if (application.kind === "reset") {
-      // "Default": drop the overrides and let app/globals.css win again.
+
       for (const property of application.remove) root.style.removeProperty(property);
       return;
     }
@@ -230,7 +212,7 @@ export default function SettingsPage() {
       </Card>
 
       <div className="grid gap-6 md:grid-cols-2">
-        {/* Profile Settings */}
+        {}
         <Card>
           <CardHeader>
             <CardTitle>Profile</CardTitle>
@@ -254,7 +236,7 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Appearance Settings */}
+        {}
         <Card>
           <CardHeader>
             <CardTitle>Appearance</CardTitle>
@@ -310,13 +292,13 @@ export default function SettingsPage() {
         </Card>
       </div>
 
-      {/* Quick Commands */}
+      {}
       <QuickCommandsManager
         quickCommands={quickCommands}
         onSave={handleQuickCommandsSave}
       />
 
-      {/* Save Button */}
+      {}
       <div className="flex items-center justify-between rounded-lg border p-4">
         <div>
           <h3 className="font-semibold">Save Profile & Appearance</h3>

@@ -1,10 +1,4 @@
-/**
- * Currencies offered by the account form.
- *
- * Keep this list deliberately finite: account currency is a ledger contract,
- * not free-form display text. The icon is intentionally text-based so the
- * selector remains portable and accessible without a second icon dependency.
- */
+
 export const SUPPORTED_CURRENCIES = [
   { code: "AED", name: "UAE dirham", icon: "د.إ" },
   { code: "AUD", name: "Australian dollar", icon: "A$" },
@@ -32,7 +26,6 @@ export type SupportedCurrencyCode = (typeof SUPPORTED_CURRENCIES)[number]["code"
 
 const CURRENCY_BY_CODE = new Map(SUPPORTED_CURRENCIES.map((currency) => [currency.code, currency]));
 
-/** Normalize common user terminology before validating the selected code. */
 export function normalizeAccountCurrency(value: string | null | undefined): string {
   const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
   const aliases: Record<string, SupportedCurrencyCode> = {

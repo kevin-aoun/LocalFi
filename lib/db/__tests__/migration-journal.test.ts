@@ -1,11 +1,4 @@
-/**
- * Replays every migration in journal order — exactly what lib/db/init.ts does —
- * and asserts the resulting schema is the cents schema the Drizzle definitions
- * describe. This is what keeps a freshly initialised database and a converted
- * one from drifting apart.
- *
- * Runs entirely in memory: no file in data/ is read or written.
- */
+
 import { beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -29,7 +22,6 @@ beforeAll(async () => {
   journal = JSON.parse(readFileSync(JOURNAL_PATH, "utf-8"));
 });
 
-/** Mirrors the replay loop in lib/db/init.ts. */
 function replayJournal(): Database {
   const db = new SQL.Database();
   const entries = [...journal.entries].sort((a, b) => a.idx - b.idx);

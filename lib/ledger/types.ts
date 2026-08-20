@@ -17,7 +17,6 @@ export type LedgerMovementInput = {
 
 export type PositionedMovement = LedgerMovementInput & { position: number };
 
-/** Version 1 is frozen by CONTRACT-010; later shapes require a new version. */
 export type LedgerCanonicalPayload = {
   version: 1;
   eventId: string;

@@ -1,14 +1,4 @@
-/**
- * `app/actions/export.ts` against a real (throwaway) database.
- *
- * The unit tests in lib/__tests__ pin the serializers; this pins the ACTION —
- * which rows it selects, which it leaves out, and whether the bytes it produces
- * still survive the app's own importer once they have been through drizzle, SQLite
- * and a timestamp column.
- *
- * The user's real database (data/budget.db) is never opened: every test gets its
- * own `mkdtemp` file via BUDGET_DB_PATH, and no db:init / db:seed script is run.
- */
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -49,8 +39,6 @@ const CATEGORIES: ImportCategory[] = [
 beforeEach(async () => {
   temp = await createDomainDb();
 
-  // The 0003 migration already seeds account id 1, 'Main'. Use ids of our own so
-  // the fixture never collides with the schema's own default account.
   seedAccount(temp, { id: 10, name: "Checking", kind: "asset", type: "Checking", openingBalanceCents: 250_000 });
   seedAccount(temp, { id: 11, name: "Savings", kind: "asset", type: "Savings" });
   seedCategory(temp, { id: 1, name: "Salary", type: "Income" });
@@ -61,11 +49,11 @@ beforeEach(async () => {
   seedTransaction(temp, { id: 1, categoryId: 1, accountId: 10, amountCents: 512_345, dateKey: "2026-01-31", comment: "January pay" });
   seedTransaction(temp, { id: 2, categoryId: 2, accountId: 10, amountCents: 4_550, dateKey: "2026-02-01", comment: 'Coffee, "black"' });
   seedTransaction(temp, { id: 3, categoryId: 3, accountId: 10, amountCents: 200_000, dateKey: "2026-02-10", comment: null });
-  // Excluded by default: pending.
+
   seedTransaction(temp, { id: 4, categoryId: 2, accountId: 10, amountCents: 9_900, dateKey: "2026-02-11", pending: true });
-  // Excluded by default: a transfer (no category at all).
+
   seedTransaction(temp, { id: 5, accountId: 10, transferAccountId: 11, amountCents: 100_000, dateKey: "2026-02-12" });
-  // Out of range.
+
   seedTransaction(temp, { id: 6, categoryId: 2, accountId: 10, amountCents: 1, dateKey: "2026-03-01" });
 });
 

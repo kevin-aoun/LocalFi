@@ -1,19 +1,5 @@
 "use client";
 
-/**
- * Getting the data out, from inside the app.
- *
- * Three levels of fidelity, in the order a user should think about them:
- *   1. the SQLite file — the real backup, and the thing the whole app is about;
- *   2. a JSON backup of every table — readable, and complete;
- *   3. a CSV of transactions — the useful, lossy one, which this app can re-import.
- *
- * Every download is built by a server action (`app/actions/export.ts`) and handed
- * over as text or base64; this component only turns it into a Blob and clicks a
- * link. Every action returns `{ error }` on failure and every one of those is
- * rendered — silently swallowing a failed backup is the worst possible outcome
- * here, because the user would only find out on the day they needed it.
- */
 import { useEffect, useState } from "react";
 import { AlertTriangle, Check, Database, Download, FileJson, FileSpreadsheet, Info, Loader2 } from "lucide-react";
 
@@ -34,12 +20,11 @@ import type { KeyRange } from "@/lib/reports";
 
 type ExportCardProps = {
   range: KeyRange;
-  /** Null when the ledger is in a single currency; a code when the user picked one. */
+
   currency: string | null;
   mixedCurrency: boolean;
 };
 
-/** Trigger a browser download from data the server action already produced. */
 function download(fileName: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   try {
@@ -51,13 +36,11 @@ function download(fileName: string, blob: Blob) {
     link.click();
     link.remove();
   } finally {
-    // Revoked on the next tick: Safari cancels an in-flight download if the URL
-    // disappears synchronously.
+
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 }
 
-/** base64 -> bytes, without a data: URL (which some browsers cap at ~2MB). */
 function base64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -71,7 +54,7 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** An INSTANT, so the browser's locale formatting of it is correct. */
+
 function formatInstant(iso: string | null): string {
   if (!iso) return "never";
   const d = new Date(iso);
@@ -213,7 +196,7 @@ export function ExportCard({ range, currency, mixedCurrency }: ExportCardProps) 
           </div>
         )}
 
-        {/* 1. The real backup ------------------------------------------------ */}
+        {}
         <div>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -272,7 +255,7 @@ export function ExportCard({ range, currency, mixedCurrency }: ExportCardProps) 
 
         <Separator />
 
-        {/* 2. JSON ---------------------------------------------------------- */}
+        {}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="flex items-center gap-2 font-medium">
@@ -298,7 +281,7 @@ export function ExportCard({ range, currency, mixedCurrency }: ExportCardProps) 
 
         <Separator />
 
-        {/* 3. CSV ----------------------------------------------------------- */}
+        {}
         <div>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>

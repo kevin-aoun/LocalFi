@@ -30,31 +30,22 @@ type AccountOption = {
   kind: string;
   type: string;
   currency?: string;
-  /** A closed account is still offered, labelled, so an old transfer can be edited. */
+
   archived?: boolean;
 };
 
 type TransferDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The transfer being edited, or null/undefined to create a new one. */
+
   transfer?: StoredTransfer | null;
   accounts: AccountOption[];
   expenseCategories?: Array<{ id: number; name: string; type: string }>;
-  /** Pre-selected source account for a new transfer. */
+
   defaultAccountId: number | null;
   onSuccess: () => void;
 };
 
-/**
- * Move money between two of the user's own accounts.
- *
- * A SIBLING of the transaction dialog rather than a mode inside it, because the
- * two forms have almost nothing in common: a transfer has two accounts and NO
- * category, and it must never present a category field at all (see
- * transfer-form-logic.ts). The old workaround — booking the move as an
- * "Investment" expense — showed up as a net-worth LOSS.
- */
 export function TransferDialog({
   open,
   onOpenChange,
@@ -65,7 +56,7 @@ export function TransferDialog({
   onSuccess,
 }: TransferDialogProps) {
   const [loading, setLoading] = useState(false);
-  /** Server-side or validation failure to show; null when there is nothing wrong. */
+
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<TransferFormState>(() => emptyTransferForm(defaultAccountId));
 
@@ -80,7 +71,6 @@ export function TransferDialog({
   const nameOf = (id: string) => accounts.find((a) => String(a.id) === id)?.name ?? "";
   const currencyOf = (id: string) => accounts.find((a) => String(a.id) === id)?.currency ?? "USD";
 
-  // `!== null`, never a truthiness test: a 0-cent transfer is a real value.
   const previewCents = tryParseAmount(form.amount);
   const principalPreview = form.principalAmount.trim() === ""
     ? previewCents
@@ -92,8 +82,6 @@ export function TransferDialog({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validated here first so the user is told without a round trip. The action
-    // enforces all of it again — this is a courtesy, not the only check.
     const problem = validateTransferForm(form, accounts);
     if (problem) {
       setError(problem);
@@ -104,15 +92,12 @@ export function TransferDialog({
     setError(null);
 
     try {
-      // The date is serialized by toTransferFormData, NOT by toISOString():
-      // see transaction-form-logic.ts for why that mattered.
+
       const formData = toTransferFormData(form);
       const result = transfer
         ? await updateTransfer(transfer.id, formData)
         : await createTransfer(formData);
 
-      // The action reports failure by RETURNING { error }, not by throwing.
-      // Closing regardless is how a rejected write used to look like a good one.
       if (result && "error" in result && result.error) {
         setError(result.error);
         return;
@@ -190,8 +175,7 @@ export function TransferDialog({
               </Select>
             </div>
 
-            {/* Icon-only, so `aria-label` carries the name and the tooltip only
-                repeats it for a sighted mouse user. */}
+            {}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

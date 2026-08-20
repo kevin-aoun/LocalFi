@@ -1,18 +1,4 @@
-/**
- * End to end, against a real (throwaway) database: plan → write → re-run.
- *
- * The rules being defended:
- *   - a dry run writes NOTHING;
- *   - a written row is labelled `reconstructed` and carries a note saying why;
- *   - a day that already holds a RECORDED snapshot is skipped, never replaced;
- *   - re-running changes nothing at all — no duplicates, no drift, not even
- *     `updated_at`;
- *   - reconstruction replays exact journal positions and observations without
- *     consulting mutable assets or a live price API.
- *
- * Every test gets its own mkdtemp database via the shared domain fixture, so
- * data/budget.db is never opened, and every fetch is injected or stubbed.
- */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -30,7 +16,6 @@ import { prepareInvestmentPurchase, projectInvestmentPurchase } from "@/lib/inve
 
 let temp: DomainDb;
 
-/** Local-midnight unix seconds — matches how the fixture stores dates. */
 function secondsFor(dateKey: string): number {
   const [y, m, d] = dateKey.split("-").map(Number);
   return Math.floor(new Date(y, m - 1, d).getTime() / 1000);

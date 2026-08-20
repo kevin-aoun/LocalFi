@@ -32,7 +32,6 @@ export type PrepareInvestmentPurchaseInput = {
   source?: string | null;
 };
 
-/** Deterministic provider preview; the returned decimal becomes frozen when confirmed. */
 export function previewPurchaseQuantity(
   paidAmountMinor: number,
   unitPriceMinor: number,
@@ -59,11 +58,7 @@ export function previewPurchaseQuantity(
   return canonicalDecimal(decimal);
 }
 
-/**
- * Discover/register the instrument, freeze exact quantity, store the required
- * quote, and return the two registered targets used by the movement builder.
- * Call this inside the same outer `withDb` callback as `postLedgerEventRaw`.
- */
+
 export function prepareInvestmentPurchase(
   raw: Database,
   input: PrepareInvestmentPurchaseInput,
@@ -120,7 +115,7 @@ export function prepareInvestmentPurchase(
   };
 }
 
-/** Run after the ledger's exact position update, in the same transaction. */
+
 export function projectInvestmentPurchase(
   raw: Database,
   purchase: Pick<PreparedInvestmentPurchase, "instrumentId" | "currency">,

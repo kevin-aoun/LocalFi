@@ -42,19 +42,17 @@ import {
   type RecurringFormState,
 } from "./recurring-form-logic";
 
-/** The subset of `getRecurringFormOptions()` this dialog needs. */
 export type AccountOption = { id: number; name: string; kind: string; type: string };
 export type CategoryOption = { id: number; name: string; type: string };
 
 const NONE = "none";
 
-/** How far ahead the in-dialog "this will post on" sanity check looks. */
 const PREVIEW_DAYS = 400;
 
 type RecurringDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** null/undefined = create. */
+
   template?: RecurringTransaction | null;
   accounts: AccountOption[];
   categories: CategoryOption[];
@@ -84,7 +82,7 @@ function stateFromTemplate(template: RecurringTransaction): RecurringFormState {
     transferAccountId:
       template.transferAccountId === null ? "" : template.transferAccountId.toString(),
     categoryId: template.categoryId === null ? "" : template.categoryId.toString(),
-    // A stored amount of 0 cents must render as "0", not as an empty field.
+
     amount: centsToInputValue(template.amountCents),
     comment: template.comment ?? "",
     frequency: template.frequency,
@@ -104,7 +102,7 @@ export function RecurringDialog({
   onSuccess,
 }: RecurringDialogProps) {
   const [loading, setLoading] = useState(false);
-  /** Failure from the server action, or from local validation. */
+
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<RecurringFormState>(emptyState);
 
@@ -118,16 +116,10 @@ export function RecurringDialog({
 
   const isTransfer = state.transferAccountId !== "";
 
-  /**
-   * The occurrences this rule really produces, computed by `lib/recurrence` — not
-   * re-derived here. This is what makes the month-end behaviour visible BEFORE the
-   * template is saved: an anchor on the 31st shows Feb 28 in the list.
-   */
   const preview = useMemo(() => {
     const rule = ruleFromFormState(state);
     if (!rule) return null;
-    // The cursor is deliberately ignored: this panel answers "what does this rule
-    // mean", not "what is outstanding".
+
     return previewOccurrences(rule, {
       throughKey: upcomingThroughKey(rule.startDate, PREVIEW_DAYS),
       limit: 8,
@@ -141,12 +133,7 @@ export function RecurringDialog({
 
   const hint = categoryHint(state);
   const parsedInterval = state.interval.trim();
-  /**
-   * The typed amount in integer cents, or null when the field is empty/unparseable.
-   * `tryParseAmount` is the only float-free way to read this field — never
-   * `Number(x) * 100`, which drifts (2.675 * 100 === 267.49999999999994) — and the
-   * comparison below is `!== null`, because 0 cents is a real amount.
-   */
+
   const previewCents = tryParseAmount(state.amount.trim() === "" ? null : state.amount);
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -166,9 +153,6 @@ export function RecurringDialog({
         ? await updateRecurringTransaction(template.id, formData)
         : await createRecurringTransaction(formData);
 
-      // The action reports failure by RETURNING { error }. Ignoring that is how a
-      // rejected write used to look identical to a successful one — so the dialog
-      // stays OPEN with the message the server gave.
       if (result && "error" in result && result.error) {
         setError(result.error);
         return;
@@ -438,7 +422,7 @@ export function RecurringDialog({
             </div>
           )}
 
-          {/* What the rule really means, straight from the recurrence engine. */}
+          {}
           <div className="rounded-md border bg-muted/40 p-3 space-y-2">
             <div className="flex items-center gap-2 text-sm font-medium">
               <Info className="h-4 w-4" />

@@ -1,15 +1,4 @@
-/**
- * The ledger's income / expense / breakdown totals.
- *
- * WHY THESE TESTS EXIST: before transfers were a first-class row type, moving
- * $1,000 from checking to savings had to be entered as an "Investment" expense.
- * The app then booked it as a net-worth LOSS and counted it as spend. A transfer
- * is neither income nor expense, and the ONLY authority on that is
- * `isTransfer` / `isSpendable` in lib/cash-balance.ts — the same rule the budgets
- * page uses, so the ledger and the budgets page cannot disagree.
- *
- * Every assertion below is about that exclusion or about integer-cent exactness.
- */
+
 import { describe, expect, it } from "vitest";
 import { isSpendable, isTransfer } from "@/lib/cash-balance";
 import { categoryBreakdown, summarizeLedger } from "../ledger-summary-logic";
@@ -36,7 +25,6 @@ function tx(over: Partial<LedgerRow> = {}): LedgerRow {
   };
 }
 
-/** A transfer: no category, both accounts set. */
 function transfer(over: Partial<LedgerRow> = {}): LedgerRow {
   return tx({ categoryId: null, accountId: 10, transferAccountId: 11, amountCents: 100_000, ...over });
 }
@@ -45,10 +33,10 @@ describe("summarizeLedger", () => {
   it("adds income and subtracts expense and investment, in exact cents", () => {
     const summary = summarizeLedger(
       [
-        tx({ id: 1, categoryId: 2, amountCents: 500_000 }), // income
-        tx({ id: 2, categoryId: 1, amountCents: 4_599 }), // expense
-        tx({ id: 3, categoryId: 4, amountCents: 120_000 }), // expense
-        tx({ id: 4, categoryId: 3, amountCents: 50_000 }), // investment
+        tx({ id: 1, categoryId: 2, amountCents: 500_000 }),
+        tx({ id: 2, categoryId: 1, amountCents: 4_599 }),
+        tx({ id: 3, categoryId: 4, amountCents: 120_000 }),
+        tx({ id: 4, categoryId: 3, amountCents: 50_000 }),
       ],
       CATEGORIES,
     );
@@ -68,7 +56,7 @@ describe("summarizeLedger", () => {
     expect(withTransfer.incomeCents).toBe(withoutTransfer.incomeCents);
     expect(withTransfer.expenseCents).toBe(withoutTransfer.expenseCents);
     expect(withTransfer.investmentCents).toBe(withoutTransfer.investmentCents);
-    // The one figure that must be identical: a transfer is net-neutral.
+
     expect(withTransfer.netCents).toBe(withoutTransfer.netCents);
   });
 
@@ -84,8 +72,7 @@ describe("summarizeLedger", () => {
   });
 
   it("ignores the category on a transfer row instead of trusting it", () => {
-    // This is the exact shape the old "fake it as an Investment" workaround
-    // produced. It must NOT count as investment spend.
+
     const mislabelled = transfer({ categoryId: 3, amountCents: 100_000 });
     const summary = summarizeLedger([mislabelled], CATEGORIES);
     expect(summary.investmentCents).toBe(0);

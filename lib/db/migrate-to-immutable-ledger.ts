@@ -436,7 +436,7 @@ export function assertImmutableLedgerBackfill(raw: Database): void {
   }
 }
 
-/** Apply schema plus deterministic provenance backfill to an upgrade-owned image. */
+
 export function applyImmutableLedgerMigration(raw: Database, migrationSql: string): void {
   raw.create_function("ledger_sha256", (value: unknown) => {
     if (typeof value !== "string") throw new Error("ledger_sha256 requires text");
@@ -459,7 +459,7 @@ export function applyImmutableLedgerMigration(raw: Database, migrationSql: strin
     assertImmutableLedgerBackfill(raw);
     raw.run("COMMIT");
   } catch (error) {
-    try { raw.run("ROLLBACK"); } catch { /* preserve the original failure */ }
+    try { raw.run("ROLLBACK"); } catch {  }
     throw error;
   }
 }

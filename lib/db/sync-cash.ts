@@ -1,17 +1,4 @@
-/**
- * Keeps the derived "Cash" asset row in step with the ledger.
- *
- * This is glue, NOT a business rule: the rule itself is `deriveCashBalanceCents`
- * in lib/cash-balance.ts and is not restated here. The glue lives in its own
- * module because several server actions (transactions, recurring generation) must
- * run it, and a `"use server"` file may only export async functions — so they
- * cannot share a helper through one of those files without also making it a
- * server action.
- *
- * IMPORTANT: this takes an already-open drizzle handle and performs no locking or
- * flushing. Call it INSIDE a `withDb(...)` callback (or between getDb/saveDb).
- * Calling `withDb` from within `withDb` deadlocks — the lock is not reentrant.
- */
+
 import { eq } from "drizzle-orm";
 import {
   deriveCashBalanceCents,
@@ -47,7 +34,7 @@ export function cashProjectionMarker(currency: unknown, assetId: number): string
   return `${CASH_PROJECTION_MARKER_PREFIX}${normalizedCurrency}:${assetId}`;
 }
 
-/** Shared marker parser/selector for live sync and raw CONTRACT-014 recovery. */
+
 export function selectCashProjectionTarget<T extends CashAssetIdentity>(
   projectionNames: readonly string[],
   cashAssets: readonly T[],
@@ -81,7 +68,7 @@ export type CashAssetProjection = {
   currency: string;
 };
 
-/** Shared CONTRACT-014 projection rule for the provenance-marked Cash row. */
+
 export function deriveCashAssetProjection(
   ledgerTransactions: readonly CashLedgerTransaction[],
   ledgerCategories: readonly CashLedgerCategory[],
@@ -94,10 +81,7 @@ export function deriveCashAssetProjection(
   };
 }
 
-/**
- * Recompute the "Cash" asset from the whole ledger and write it back, creating
- * the row if it does not exist yet. Returns the balance it stored.
- */
+
 export async function syncCashAssetWithin(db: BudgetDb): Promise<Cents> {
   const allTransactions = await db.select().from(transactions);
   const allCategories = await db.select().from(categories);
@@ -114,8 +98,8 @@ export async function syncCashAssetWithin(db: BudgetDb): Promise<Cents> {
   if (target.kind === "invalid-marker") {
     throw new Error("Cash projection marker state is invalid");
   }
-  // DECISION: DEC-004 — the compatibility Cash row has one stored
-  // denomination, so it mirrors only transaction facts in that denomination.
+
+
   const projection = deriveCashAssetProjection(
     allTransactions,
     allCategories,

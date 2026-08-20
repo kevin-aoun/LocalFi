@@ -1,4 +1,4 @@
-/** Pure form transport for the category dialog. Budget limits have their own form. */
+
 
 import type { BudgetPeriod } from "@/lib/budgets";
 import type { DateKey } from "@/lib/dates";
@@ -38,13 +38,9 @@ export function toCategoryFormData(state: BudgetFormState): FormData {
   return formData;
 }
 
-// ---------------------------------------------------------------------------
-// Savings-goal fields for the budget rule dialog
-// ---------------------------------------------------------------------------
-
 export type BudgetRuleFormState = BaseBudgetRuleFormState & {
   goalName: string;
-  /** Decimal string; empty together with goalName means no goal. */
+
   goalAmount: string;
 };
 
@@ -78,7 +74,7 @@ export function validateBudgetForm(
 export function buildBudgetFormValues(state: BudgetRuleFormState): Record<string, string> {
   return {
     ...buildBaseBudgetFormValues(state),
-    // Always send both keys so editing can clear the pair atomically.
+
     goalName: state.goalName.trim(),
     goalAmount: state.goalAmount.trim(),
   };

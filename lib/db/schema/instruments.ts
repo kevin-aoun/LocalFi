@@ -1,7 +1,6 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-/** DECISION: DEC-013 — stable instruments and timestamped observations. */
 export const instrumentKinds = ["currency", "security", "commodity", "manual"] as const;
 export type InstrumentKind = (typeof instrumentKinds)[number];
 

@@ -43,7 +43,7 @@ function observationFromRow(row: SqlRow): InvestmentObservation {
   };
 }
 
-/** CONTRACT-013: at most one row per instrument/kind/day; the latest observation wins. */
+
 export function recordInstrumentObservation(
   raw: Database,
   input: ObservationInput,
@@ -121,7 +121,7 @@ export function latestInstrumentObservation(
   return row ? observationFromRow(row) : null;
 }
 
-/** Latest usable value fact; an exact valuation wins a timestamp tie with a unit price. */
+
 export function latestPositionObservation(
   raw: Database,
   instrumentId: string,

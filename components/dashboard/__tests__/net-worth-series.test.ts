@@ -1,26 +1,4 @@
-/**
- * Tests for the net-worth-over-time series behind the dashboard chart.
- *
- * What these exist to prevent:
- *
- *  1. **A misleading flat line.** A brand-new database has zero or one snapshot.
- *     Rendering a chart from one point draws a horizontal line that reads as
- *     "your net worth has not moved", which is a statement about data that does
- *     not exist. `buildNetWorthSeries` reports `empty` / `single` so the UI can
- *     say "record a snapshot to start tracking" instead.
- *
- *  2. **The chart contradicting the headline.** Every figure here is ECHOED from
- *     the snapshot row (which `deriveNetWorth` wrote); nothing is re-subtracted,
- *     so the plotted point and the number on the same card cannot drift.
- *
- *  3. **Timezone day-shift.** Snapshot dates are 'YYYY-MM-DD' calendar days.
- *     Labelling them via `toISOString()` moves every point a day east of UTC.
- *     These label assertions must hold under `bun run test:tz`.
- *
- *  4. **A fabricated "vs. last month".** When there is no snapshot from before
- *     this month there is no comparison to make, and the answer is `null` — not
- *     0, not Infinity.
- */
+
 import { describe, expect, it } from "vitest";
 import { centsToDecimal, formatMoney } from "@/lib/money";
 import {
@@ -62,7 +40,7 @@ describe("empty and single-snapshot history is reported, not drawn", () => {
     expect(series.status).toBe("single");
     expect(series.points).toHaveLength(1);
     expect(series.latest?.netWorthCents).toBe(750_00);
-    // A trend needs two points; the caller must not plot a line from one.
+
     expect(series.spanChangeCents).toBeNull();
     expect(series.message).toMatch(/record/i);
   });
@@ -95,8 +73,7 @@ describe("buildNetWorthSeries", () => {
   });
 
   it("ECHOES the stored net worth instead of re-deriving assets − liabilities", () => {
-    // A deliberately inconsistent row: if this module did its own subtraction the
-    // chart could disagree with the snapshot table it is drawn from.
+
     const series = buildNetWorthSeries([snap("2026-01-01", 100_00, 40_00, 55_00)]);
     expect(series.points[0].netWorthCents).toBe(55_00);
     expect(series.points[0].totalAssetsCents).toBe(100_00);
@@ -112,7 +89,7 @@ describe("buildNetWorthSeries", () => {
       expect(point.netWorth).toBe(centsToDecimal(point.netWorthCents));
       expect(point.assets).toBe(centsToDecimal(point.totalAssetsCents));
       expect(point.liabilities).toBe(centsToDecimal(point.totalLiabilitiesCents));
-      // Cents stay integers, so arithmetic elsewhere is still exact.
+
       expect(Number.isInteger(point.netWorthCents)).toBe(true);
     }
   });
@@ -130,7 +107,7 @@ describe("buildNetWorthSeries", () => {
   it("drops rows whose stored date is not a real calendar day, and counts them", () => {
     const series = buildNetWorthSeries([
       snap("2026-07-01", 100_00, 0),
-      snap("2026-02-30", 999_00, 0), // not a real day
+      snap("2026-02-30", 999_00, 0),
       snap("nonsense", 999_00, 0),
     ]);
     expect(series.points.map((p) => p.dateKey)).toEqual(["2026-07-01"]);
@@ -190,7 +167,7 @@ describe("formatSnapshotLabel", () => {
 });
 
 describe("netWorthChangeVsLastMonth", () => {
-  const now = new Date(2026, 6, 20); // 20 July 2026
+  const now = new Date(2026, 6, 20);
 
   it("compares the live figure against the last snapshot before this month", () => {
     const change = netWorthChangeVsLastMonth(
@@ -207,7 +184,7 @@ describe("netWorthChangeVsLastMonth", () => {
 
   it("returns null — never a fabricated 0 — when there is no earlier snapshot", () => {
     expect(netWorthChangeVsLastMonth([], 1_000_00, now)).toBeNull();
-    // A snapshot from THIS month is not a baseline for "vs. last month".
+
     expect(
       netWorthChangeVsLastMonth([snap("2026-07-01", 500_00, 0)], 1_000_00, now),
     ).toBeNull();
@@ -225,7 +202,6 @@ describe("netWorthChangeVsLastMonth", () => {
     expect(down?.changeCents).toBe(-100_00);
     expect(down?.changePercent).toBeCloseTo(-10, 10);
 
-    // Baseline underwater: −$1,000 -> −$500 is an IMPROVEMENT of $500, i.e. +50%.
     const negative = netWorthChangeVsLastMonth(
       [snap("2026-06-30", 0, 1_000_00)],
       -500_00,
@@ -244,7 +220,7 @@ describe("the chart and the headline agree for the same input", () => {
   it("plots exactly the figure the headline prints, and reports no drift", () => {
     const rows = [snap("2026-06-30", 1_000_00, 200_00), snap("2026-07-28", 1_400_00, 150_00)];
     const series = buildNetWorthSeries(rows);
-    const liveNetWorthCents = 1_250_00; // == the latest snapshot
+    const liveNetWorthCents = 1_250_00;
 
     const plotted = series.points[series.points.length - 1];
     expect(plotted.netWorth).toBe(centsToDecimal(liveNetWorthCents));

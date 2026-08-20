@@ -1,24 +1,9 @@
-/**
- * Regression tests for item 6: live-priced commodities silently saving as $0.
- *
- * Two separate defects at app/actions/assets.ts:38, both of which lost money
- * without a word:
- *
- *   a) when live pricing is on the dialog HIDES the Current Value input, so the
- *      form submits `""`. If the SwissQuote fetch then failed,
- *      `calculateCommodityValue` returned null, the `if` did not fire, and the
- *      asset was persisted at the fallback value — $0 — with a success result.
- *
- *   b) the guard was `useLivePrice && … && quantity && …`, so a quantity of
- *      exactly 0 was falsy and live pricing was skipped entirely, silently
- *      falling back to whatever was typed.
- */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTempDb, type TempDb } from "./support/temp-db";
 
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
-/** Stands in for the SwissQuote feed. null = the fetch failed. */
 const priceCents = vi.fn<(type: string, quantity: number, unit: string) => Promise<number | null>>();
 
 vi.mock("../commodities", () => ({
@@ -65,18 +50,18 @@ const storedValues = () =>
 
 describe("a failed live-price fetch never persists a $0 asset", () => {
   it("refuses to create the asset and says why", async () => {
-    priceCents.mockResolvedValue(null); // SwissQuote is down
+    priceCents.mockResolvedValue(null);
 
     const result = await createAsset(assetForm({ quantity: "10" }));
 
     expect(result).toMatchObject({
       error: expect.stringContaining("Could not fetch a live Gold price"),
     });
-    expect(storedValues()).toEqual([]); // and definitely not a $0 row
+    expect(storedValues()).toEqual([]);
   });
 
   it("leaves an existing asset's value alone when the fetch fails", async () => {
-    priceCents.mockResolvedValue(4_000_000); // $40,000
+    priceCents.mockResolvedValue(4_000_000);
     expect(await createAsset(assetForm({ quantity: "10" }))).toMatchObject({ success: true });
     const [gold] = await getAssets();
     expect(gold.currentValueCents).toBe(4_000_000);
@@ -94,8 +79,7 @@ describe("a failed live-price fetch never persists a $0 asset", () => {
     priceCents.mockResolvedValue(123_456);
     expect(await createAsset(assetForm({ quantity: "2.5" }))).toMatchObject({ success: true });
     expect(storedValues()).toEqual([
-      // The compatibility projection values the exact position from the stored
-      // integer-cent unit-price observation (49,382 × 2.5, rounded once).
+
       { category: "Commodities", current_value_cents: 123_455, quantity: 2.5, use_live_price: 1 },
     ]);
   });
@@ -148,8 +132,7 @@ describe("a quantity of 0 is a quantity, not an absent value", () => {
     const result = await createAsset(assetForm({ quantity: "0", currentValue: "999" }));
 
     expect(result).toMatchObject({ success: true });
-    // THE BUG: `quantity &&` made 0 falsy, so live pricing was skipped and the
-    // typed 999 was stored instead.
+
     expect(priceCents).toHaveBeenCalledWith("Gold", 0, "oz");
     expect(storedValues()).toEqual([
       { category: "Commodities", current_value_cents: 0, quantity: 0, use_live_price: 1 },
@@ -218,7 +201,7 @@ describe("the derived Cash asset stays derived", () => {
   });
 
   it("refuses to edit or delete the derived one", async () => {
-    // Insert a Cash row the way syncCashAsset does, bypassing the guard.
+
     const { execOn } = await import("./support/temp-db");
     execOn(temp, (db) => {
       db.run(

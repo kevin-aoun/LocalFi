@@ -1,22 +1,4 @@
-/**
- * CSV import — held to EXACTLY the same rules as the .xlsx path.
- *
- * Import used to accept Excel only. Adding .csv is only safe if it goes
- * through the same pipeline, because the three bugs that pipeline exists to
- * prevent (see import-logic.ts) are all easy to reintroduce with a second
- * parser:
- *
- *   1. **Sign inversion** — a bank CSV writes an expense as `-45.00`. The stored
- *      amount must be the MAGNITUDE; the category decides the direction.
- *   2. **Ambiguous dates** — `01/02/2026` is 1 February in Beirut and 2 January
- *      in Boston. The explicit `dayFirst` toggle must decide, never the parser.
- *   3. **Duplicate rows** — re-importing the same file must not double the ledger.
- *
- * CSV cells stay as text so no parser can commit to a date order before the
- * explicit `dayFirst` review setting is applied.
- *
- * Must pass under `bun run test:tz` (UTC+14 and UTC-11).
- */
+
 import { describe, expect, it } from "vitest";
 import {
   collectDateValues,
@@ -35,12 +17,10 @@ const CATEGORIES: ImportCategory[] = [
   { id: 3, name: "Brokerage", type: "Investment" },
 ];
 
-/** Build CSV text from a header row and data rows. */
 function csv(header: readonly string[], rows: ReadonlyArray<readonly (string | number)[]>): string {
   return [header.join(","), ...rows.map((r) => r.join(","))].join("\n") + "\n";
 }
 
-/** A signed bank export: expenses negative, income positive. */
 const SIGNED_CSV = csv(
   ["Date", "Category", "Amount", "Description"],
   [
@@ -74,8 +54,7 @@ describe("readCsvRows keeps cells raw, so our date/amount rules stay in charge",
   });
 
   it("does not attach a spurious time-of-day to an ISO date", () => {
-    // Without raw, ISO dates come back as fractional serials (e.g. 46085.0833),
-    // which floor to the PREVIOUS day in some timezones.
+
     const text = csv(["Date", "Category", "Amount"], [["2026-03-04", "Groceries", "1"]]);
     expect(readCsvRows(text)[0].Date).toBe("2026-03-04");
     const value = readCsvRows(text)[0].Date;
@@ -98,7 +77,7 @@ describe("CSV reads as tolerantly as a real bank export requires", () => {
   it("strips a UTF-8 BOM instead of corrupting the first column name", () => {
     const rows = readCsvRows("﻿Date,Category,Amount\n2026-07-28,Groceries,-45.00\n");
     const parsed = parseImportRows(rows, CATEGORIES, { dayFirst: false });
-    // If the BOM survived, the Date column would not be found at all.
+
     expect(parsed[0].date).toBe("2026-07-28");
     expect(parsed[0].problems).toEqual([]);
   });
@@ -124,9 +103,9 @@ describe("THE SIGN RULE is identical for CSV", () => {
   it("stores magnitudes, so a signed export does not invert the ledger", () => {
     const rows = parseImportRows(readCsvRows(SIGNED_CSV), CATEGORIES, { dayFirst: false });
     expect(rows.map((r) => r.amountCents)).toEqual([4500, 120_000, 25_050]);
-    // The sign is preserved for display only.
+
     expect(rows.map((r) => r.sign)).toEqual([-1, 1, -1]);
-    // Direction comes from the category, never from the sign.
+
     expect(rows.map((r) => r.suggestedType)).toEqual(["Expense", "Income", "Investment"]);
     expect(rows.every((r) => r.problems.length === 0)).toBe(true);
   });
@@ -181,7 +160,7 @@ describe("THE dayFirst RULE is identical for CSV", () => {
     );
     const detection = detectDateOrder(collectDateValues(rows));
     expect(detection).toMatchObject({ dayFirst: true, evidence: "day-first" });
-    // ...and the ambiguous row in the same file then reads as 1 February.
+
     expect(parseImportRows(rows, CATEGORIES, { dayFirst: true })[1].date).toBe("2026-02-01");
   });
 

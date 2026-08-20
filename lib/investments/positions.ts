@@ -67,7 +67,6 @@ export function getExactPositions(raw: Database): ExactInstrumentPosition[] {
   ).map(positionFromRow);
 }
 
-/** Multiply canonical decimal quantity by integer minor-unit price with one half-up rounding. */
 export function quantityValueMinor(quantity: string, unitPriceMinor: number): number {
   if (!Number.isSafeInteger(unitPriceMinor)) throw new Error("Unit price must be integer minor units");
   const canonical = canonicalDecimal(quantity);
@@ -123,7 +122,7 @@ export function positionHoldingValues(
   };
 }
 
-/** Mirror one exact ledger position into the current compatibility asset projection. */
+
 export function projectPositionHolding(
   raw: Database,
   instrumentId: string,
@@ -202,7 +201,7 @@ export function projectPositionHolding(
   };
 }
 
-/** Keep the compatibility asset projection absent when its exact position is fully zero. */
+
 export function syncPositionHoldingProjection(
   raw: Database,
   instrumentId: string,

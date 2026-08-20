@@ -1,11 +1,4 @@
-/**
- * The historical price layer: reading CoinGecko's market_chart body, mapping a
- * provider timestamp to the day it belongs to, and carrying a price forward.
- *
- * NO NETWORK. `PAXG_BODY` and friends are trimmed copies of real responses
- * recorded on 2026-08-06 (366 points, daily 00:00:00Z closes plus one intraday
- * point for the current day), and every fetch is injected.
- */
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -22,15 +15,14 @@ import {
 } from "../prices";
 import type { PriceFetchLike, PriceFetchResponse } from "@/lib/prices";
 
-/** Shape recorded from https://api.coingecko.com/api/v3/coins/pax-gold/market_chart. */
 const PAXG_BODY = {
   prices: [
-    [1754524800000, 3370.8895362829107], // 2025-08-07T00:00:00Z
-    [1754611200000, 3393.5621804374223], // 2025-08-08
-    [1754697600000, 3385.8568448801175], // 2025-08-09
-    [1754784000000, 3390.1234567890123], // 2025-08-10
-    [1785974400000, 4266.99464546129], //   2026-08-06 00:00Z
-    [1786008850000, 4269.554635667261], //  2026-08-06 09:34Z — same day, later point
+    [1754524800000, 3370.8895362829107],
+    [1754611200000, 3393.5621804374223],
+    [1754697600000, 3385.8568448801175],
+    [1754784000000, 3390.1234567890123],
+    [1785974400000, 4266.99464546129],
+    [1786008850000, 4269.554635667261],
   ],
   market_caps: [[1754524800000, 1017885526.0]],
   total_volumes: [[1754524800000, 39528165.5]],
@@ -59,8 +51,7 @@ function series(points: Array<[string, number]>): PriceSeries {
 
 describe("utcDayKey", () => {
   it("reads the provider's stamp as the provider's UTC day, in any timezone", () => {
-    // Same assertion at TZ=Pacific/Kiritimati (+14) and TZ=Pacific/Niue (−11):
-    // a local reading would file this close under the 6th or the 8th.
+
     expect(utcDayKey(1754524800000)).toBe("2025-08-07");
     expect(utcDayKey(1786008850000)).toBe("2026-08-06");
   });
@@ -110,7 +101,7 @@ describe("priceOn", () => {
   const gaps = series([
     ["2026-01-02", 100],
     ["2026-01-03", 110],
-    // 4th and 5th missing — a weekend
+
     ["2026-01-06", 120],
   ]);
 
@@ -160,7 +151,7 @@ describe("fetchPriceSeries", () => {
 
     const result = await fetchPriceSeries(["XAU", "BTC", "XAU"], { fetchImpl });
     expect(result.ok).toBe(true);
-    expect(calls).toHaveLength(2); // not one per day, and the duplicate symbol is collapsed
+    expect(calls).toHaveLength(2);
     if (!result.ok) return;
     expect([...result.series.keys()].sort()).toEqual(["BTC", "XAU"]);
     expect(result.series.get("XAU")!.source.proxy).toBe(true);

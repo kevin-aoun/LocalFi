@@ -32,9 +32,9 @@ export class DatabaseRestoreError extends Error {
 export type RestoreDatabaseOptions = {
   sourcePath: string;
   dbPath: string;
-  /** Preview by default. Only `apply: true` is allowed to replace the target. */
+
   apply?: boolean;
-  /** DECISION: DEC-005 -- the caller must hold the target writer lease. */
+
   lease: WriterLease;
 };
 
@@ -75,7 +75,7 @@ function assertDifferentFiles(sourcePath: string, dbPath: string): void {
   }
 }
 
-/** Fully parse an image and make SQLite inspect every page before it is trusted. */
+
 export async function validateRestoreImage(bytes: Uint8Array, label: string): Promise<void> {
   if (bytes.byteLength < MIN_DB_BYTES) {
     throw new DatabaseRestoreError(`${label} is too small to be a SQLite database.`);
@@ -113,7 +113,7 @@ function fsyncDirectory(directory: string): void {
       closeSync(fd);
     }
   } catch {
-    // Some filesystems do not support directory fsync. The file is still fsynced.
+
   }
 }
 
@@ -152,13 +152,6 @@ function writePreRestoreBackup(dbPath: string, bytes: Uint8Array): string {
   throw new DatabaseRestoreError("Could not allocate a unique pre-restore backup path.");
 }
 
-/**
- * Validate and optionally restore one database image.
- *
- * Dry-run is the default. Apply mode retains the current target byte-for-byte,
- * fsyncs both generations, then atomically renames the validated image over the
- * target. The source is never modified or removed.
- */
 export async function restoreDatabase(
   options: RestoreDatabaseOptions,
 ): Promise<RestoreDatabaseResult> {

@@ -2,8 +2,6 @@ import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import lockfile from "proper-lockfile";
 
-// DECISION: DEC-005 -- every sql.js writer owns one cross-process lease for
-// the entire lifetime of its in-memory database image.
 const STALE_AFTER_MS = 30_000;
 const UPDATE_EVERY_MS = 10_000;
 
@@ -35,10 +33,7 @@ export class WriterLeaseError extends Error {
   }
 }
 
-/**
- * Resolve aliases through the existing file (or its existing parent for a new
- * database) so two spellings of one path cannot acquire independent leases.
- */
+
 export function canonicalWriterTarget(dbPath: string): string {
   const absolute = path.resolve(dbPath);
   const parent = path.dirname(absolute);
@@ -96,7 +91,7 @@ export async function acquireWriterLease(dbPath: string): Promise<WriterLease> {
     async release() {
       if (released) return;
       released = true;
-      // proper-lockfile marks a compromised lease as released itself.
+
       if (compromised) return;
       await releaseLock();
     },

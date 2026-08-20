@@ -1,11 +1,7 @@
 "use client";
 
-/** Net-worth summary and recorded/reconstructed history chart. */
-
 import { useState } from "react";
-// Recharts' `Tooltip` is a chart hover card, not the shadcn one, and the two
-// names collide in this file. The chart one is aliased so `Tooltip` keeps
-// meaning the same thing here as it does everywhere else in the app.
+
 import {
   Area,
   AreaChart,
@@ -49,17 +45,16 @@ import {
 } from "./net-worth-series";
 
 type NetWorthSectionProps = {
-  /** Live figures from `getNetWorth()` — the same action /accounts uses. */
+
   netWorth: NetWorthView;
-  /** From `getAccountBalances()`; drives the liability list and the currency check. */
+
   accounts: AccountWithBalance[];
-  /** `net_worth_snapshots`, oldest first, from `getNetWorthHistory()`. */
+
   history: readonly NetWorthSnapshotRow[];
-  /** Called after a snapshot is recorded so the caller can reload. */
+
   onRecorded: () => void | Promise<void>;
 };
 
-/** A DateKey rendered in the user's locale, never through UTC. */
 function formatDateKey(key: string): string {
   return isDateKey(key) ? fromDateKey(key).toLocaleDateString() : key;
 }
@@ -114,7 +109,7 @@ export function NetWorthSection({
   onRecorded,
 }: NetWorthSectionProps) {
   const [snapshotting, setSnapshotting] = useState(false);
-  /** Why the last snapshot failed; null when there is nothing to report. */
+
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [snapshotNote, setSnapshotNote] = useState<string | null>(null);
 
@@ -137,7 +132,6 @@ export function NetWorthSection({
       : describeSnapshotDrift(netWorth.aggregate.netWorthCents, series.latest, chartCurrency);
   const domain = netWorthDomain(series.points);
 
-  // Largest debt first, selected by `kind` — see liabilitiesForDisplay.
   const liabilities = liabilitiesForDisplay(accounts);
 
   const handleSnapshot = async () => {
@@ -146,8 +140,7 @@ export function NetWorthSection({
     setSnapshotting(true);
     try {
       const result = await recordNetWorthToday();
-      // The action reports failure by RETURNING { error }; ignoring that is how a
-      // refused write used to look like a successful one.
+
       if (result && "error" in result) {
         setSnapshotError(result.error || "Failed to record net worth.");
         return;
@@ -246,9 +239,7 @@ export function NetWorthSection({
           <CardContent className="p-6">
             <div className="text-sm text-muted-foreground">Net worth</div>
             <BucketValues netWorth={netWorth} field="netWorthCents" className="mt-1 text-3xl font-bold" />
-            {/* Real or absent. When no snapshot predates this month there is
-                nothing to compare against, and the block is hidden rather than
-                printing a made-up 0. */}
+            {}
             {change ? (
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
                 <span
@@ -351,8 +342,8 @@ export function NetWorthSection({
         </div>
 
         {series.status === "ready" ? (
-          // Fixed-height wrapper + h-full chart: the same idiom as the cash
-          // candlestick on this page.
+
+
           <div className="h-72">
             <ChartContainer config={chartConfig} className="h-full w-full">
               <AreaChart
@@ -380,7 +371,7 @@ export function NetWorthSection({
                   domain={domain}
                   tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
                   tickFormatter={(value) => {
-                    // Ticks arrive as decimals; render them as money.
+
                     const cents = tryParseAmount(Number(value));
                     return cents === null ? "" : formatMoney(cents, chartCurrency);
                   }}
@@ -403,8 +394,7 @@ export function NetWorthSection({
         ) : (
           <div className="flex h-72 flex-col items-center justify-center gap-3 text-center">
             <LineChart className="h-10 w-10 text-muted-foreground" />
-            {/* One or zero snapshots: a line here would assert a trend nobody
-                measured, so say what is missing instead of drawing it. */}
+            {}
             <p className="max-w-md text-sm text-muted-foreground">{series.message}</p>
             {series.status === "single" && series.latest && (
               <p className="text-sm font-medium">
@@ -461,9 +451,7 @@ export function NetWorthSection({
           {mixed && (
             <Tooltip>
               <TooltipTrigger asChild>
-                {/* `tabIndex` because a paragraph is not focusable and Radix
-                    opens on hover or focus only. The warning itself is already
-                    visible prose — this tooltip only restates why. */}
+                {}
                 <p
                   tabIndex={0}
                   className="flex items-start gap-2 rounded-sm text-amber-700 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:text-amber-400"

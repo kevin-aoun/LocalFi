@@ -127,7 +127,7 @@ function boundedPayload(value: SqlValue, label: string): string {
   return serialized;
 }
 
-/** DECISION: DEC-015 — raw sequence and previous_hash remain the only linked structure. */
+
 export function readLedgerExplorerPageRaw(
   raw: Database,
   input: LedgerExplorerQuery = {},
@@ -335,10 +335,7 @@ export function readLedgerExplorerPage(
   return readDb((_db, raw) => readLedgerExplorerPageRaw(raw, input));
 }
 
-/**
- * Read canonical bytes for one explicitly selected event. Base explorer pages
- * intentionally never carry these fields across the server boundary.
- */
+
 export function readLedgerEventPayloadRaw(
   raw: Database,
   requestedEventId: string,

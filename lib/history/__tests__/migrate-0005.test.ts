@@ -1,17 +1,4 @@
-/**
- * Migration 0005 exercised two ways, like 0003 and 0004 before it:
- *
- *   1. replayed from empty (what lib/db/init.ts does for a fresh install);
- *   2. applied by lib/history/migrate-0005.ts to a PRE-0005 database that already
- *      holds measured snapshots — the shape of the live file.
- *
- * The property that matters: a row that was MEASURED must survive byte-identical
- * and come out labelled `recorded`. 0005 must never turn an observation into an
- * estimate, and must never touch the money columns.
- *
- * Everything runs in memory or in a mkdtemp directory. data/budget.db is never
- * opened.
- */
+
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";

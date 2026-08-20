@@ -1,13 +1,5 @@
 "use client";
 
-/**
- * Where the money went (or came from) over the selected range.
- *
- * Shares are a fraction of that DIRECTION's total — a share of money out, never a
- * share of (income + expenses), which is not a quantity. A row whose category was
- * deleted is shown explicitly as uncategorized instead of being dropped: the money
- * is real even when the label is gone.
- */
 import { AlertTriangle } from "lucide-react";
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -19,12 +11,11 @@ import { cn } from "@/lib/utils";
 
 type CategoryBreakdownProps = {
   rows: readonly CategoryBreakdownRow[];
-  /** Category id -> colour. Resolved via `categorySwatch` so the pie matches. */
+
   colors: CategoryColors;
   currency: string;
 };
 
-/** Bar width as a percentage, clamped to something visible and to 100. */
 function barWidth(share: number | null): number {
   if (share === null || !Number.isFinite(share)) return 0;
   return Math.max(0, Math.min(100, share * 100));
@@ -61,20 +52,7 @@ export function CategoryBreakdown({ rows, colors, currency }: CategoryBreakdownP
                 <span className={cn("font-medium", row.uncategorized && "text-muted-foreground")}>
                   {row.name}
                 </span>
-                {/*
-                  NOT an ordinary hint. This says the owner's money is sitting in
-                  a row that no budget, no category total and no report will ever
-                  count — and the only thing on screen without hovering is the
-                  three words "counts towards nothing".
-
-                  Converted from `title=` so it at least renders consistently and
-                  is reachable by keyboard (`tabIndex={0}`, because a bare span is
-                  not focusable and Radix only opens on hover or focus). It is
-                  still hover-only for a mouse user and still invisible on touch,
-                  where tooltips never fire at all. Flagged for the owner: this
-                  sentence probably wants to be visible text or a banner, not a
-                  tooltip.
-                */}
+                {}
                 {row.uncategorized && (
                   <Tooltip>
                     <TooltipTrigger asChild>

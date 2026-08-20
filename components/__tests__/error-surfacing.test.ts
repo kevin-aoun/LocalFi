@@ -1,18 +1,4 @@
-/**
- * Guard for item 5: every dialog reported success on failure.
- *
- * The server actions in this app never throw on a rejected write — they RETURN
- * `{ error: "..." }`. Each dialog called the action, ignored the return value,
- * and then ran `onSuccess(); onOpenChange(false)`, so a duplicate category name,
- * a refused Cash asset or a failed live-price fetch was indistinguishable from a
- * successful save.
- *
- * A unit test cannot render these components (there is no jsdom in this repo), so
- * this file asserts the *shape* of the code instead: every call site must inspect
- * the result, and every component must be able to render it. That is a cheap,
- * durable guard against the exact regression — the same technique
- * app/actions/__tests__/money-boundaries.test.ts uses for money.
- */
+
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -20,7 +6,6 @@ import path from "node:path";
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
 const read = (rel: string) => readFileSync(path.join(PROJECT_ROOT, rel), "utf-8");
 
-/** Files that call a server action and must surface its `{ error }`. */
 const ERROR_AWARE = [
   "components/transactions/transaction-dialog.tsx",
   "components/transactions/import-dialog.tsx",

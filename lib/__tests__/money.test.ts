@@ -24,7 +24,7 @@ describe("parseAmount", () => {
   it("tolerates surrounding whitespace", () => {
     expect(parseAmount(" 45.00 ")).toBe(4500);
     expect(parseAmount("\t45.50\n")).toBe(4550);
-    // non-breaking space, as pasted from bank statements / Excel
+
     expect(parseAmount(" 45.00 ")).toBe(4500);
   });
 
@@ -83,15 +83,15 @@ describe("parseAmount", () => {
   });
 
   it("does not drift on values that are unrepresentable in binary floats", () => {
-    // 0.145 * 100 === 14.499999999999998 in float64 -> naive Math.round gives 14.
+
     expect(parseAmount("0.145")).toBe(15);
     expect(parseAmount("-0.145")).toBe(-15);
-    // 2.675 * 100 === 267.49999999999994 in float64 -> naive Math.round gives 267.
+
     expect(parseAmount("2.675")).toBe(268);
     expect(parseAmount("-2.675")).toBe(-268);
-    // 1.005 * 100 === 100.49999999999999
+
     expect(parseAmount("1.005")).toBe(101);
-    // 8.165 * 100 === 816.4999999999999
+
     expect(parseAmount("8.165")).toBe(817);
   });
 
@@ -102,7 +102,7 @@ describe("parseAmount", () => {
   });
 
   it("sums exactly where floats would drift", () => {
-    // The classic 0.1 + 0.2 !== 0.3 case, in cents.
+
     expect(parseAmount("0.1") + parseAmount("0.2")).toBe(parseAmount("0.3"));
     let total = 0;
     for (let i = 0; i < 10; i += 1) total += parseAmount("0.1");
@@ -123,7 +123,7 @@ describe("parseAmount", () => {
   it("throws a clear error on empty / missing input", () => {
     expect(() => parseAmount("")).toThrow(/amount/i);
     expect(() => parseAmount("   ")).toThrow(/amount/i);
-    // Callers are expected to validate first; these are deliberately loud.
+
     expect(() => parseAmount(null as unknown as string)).toThrow(/amount/i);
     expect(() => parseAmount(undefined as unknown as string)).toThrow(/amount/i);
   });

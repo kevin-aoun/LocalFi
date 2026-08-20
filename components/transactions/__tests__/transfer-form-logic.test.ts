@@ -1,15 +1,4 @@
-/**
- * The transfer dialog's form -> FormData mapping and its validation.
- *
- * WHY: moving money between your own accounts used to be entered as an
- * "Investment" expense, which the app booked as a net-worth LOSS. A transfer is
- * a first-class row with NO category, a source account and a destination
- * account, and `createTransfer` in app/actions/transactions.ts expects exactly
- * the field names asserted below.
- *
- * Must pass under `bun run test:tz`: the date goes over the wire through the
- * same local-midnight serialization as an ordinary transaction.
- */
+
 import { describe, expect, it } from "vitest";
 import { monthKey, toDateKey } from "@/lib/dates";
 import {
@@ -77,11 +66,11 @@ describe("buildTransferFormValues", () => {
   });
 
   it("serializes the picked day, not its UTC equivalent", () => {
-    // toISOString() on local midnight stores the PREVIOUS day east of UTC.
-    const picked = new Date(2026, 7, 1); // 1 August — the month-boundary case
+
+    const picked = new Date(2026, 7, 1);
     const wire = buildTransferFormValues(state({ date: picked })).date;
     expect(wire).toBe("2026-08-01T00:00:00");
-    const stored = new Date(wire); // exactly what the server action does
+    const stored = new Date(wire);
     expect(toDateKey(stored)).toBe("2026-08-01");
     expect(monthKey(stored)).toBe("2026-08");
   });
@@ -174,7 +163,7 @@ describe("transferFormFromTransaction", () => {
     });
     expect(form.fromAccountId).toBe("10");
     expect(form.toAccountId).toBe("11");
-    // Cents -> the decimal string an <input type="number"> expects.
+
     expect(form.amount).toBe("1000");
     expect(form.comment).toBe("To savings");
     expect(toDateKey(form.date)).toBe("2026-07-28");

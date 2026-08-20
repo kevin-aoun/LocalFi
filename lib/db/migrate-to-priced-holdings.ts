@@ -1,49 +1,4 @@
-/**
- * One-shot application of migration 0004 (priced holdings: `assets.price_symbol`
- * and `assets.priced_at`) to an existing budget database.
- *
- *   bun x tsx lib/db/migrate-to-priced-holdings.ts [--db <path>] [--dry-run]
- *
- * The database this points at by default holds the owner's REAL financial
- * history, so this script is written the same way lib/db/migrate-to-cents.ts and
- * lib/db/migrate-to-accounts.ts are: its job is not to migrate — 0004's SQL does
- * that — but to REFUSE to leave a damaged file behind.
- *
- *  1. A byte-for-byte backup of the PRE-migration file is written to
- *     data/backups/budget.<timestamp>.pre-0004.db before anything is modified.
- *  2. All work happens on an in-memory copy. Nothing is written to the live path
- *     until every assertion has passed, and what lands on disk is re-opened and
- *     verified AGAIN.
- *  3. Row counts must be unchanged for every table — `asset_history` very much
- *     included, because `asset_history.asset_id` REFERENCES assets ON DELETE
- *     CASCADE and a careless rebuild of `assets` would cascade real history away.
- *     (0004 adds two nullable columns and does NOT rebuild any table, which is
- *     the cheapest possible way to be safe here.)
- *  4. Every asset row must be IDENTICAL except for the two new columns: value,
- *     currency, category, commodity_type, quantity, unit, notes, timestamps. In
- *     particular `quantity` is compared exactly — 1.1376 troy ounces must not
- *     become 1.14.
- *  5. The derived cash balance — computed with the app's own single rule,
- *     `deriveCashBalanceCents` — must be IDENTICAL before and after, and equal to
- *     an expected value when one is supplied (449618 = $4,496.18 for the live
- *     file). The sum of `transactions.amount_cents` and of
- *     `assets.current_value_cents` must be conserved too.
- *  6. `PRAGMA foreign_key_check` must introduce no NEW violations. 0003 repaired
- *     the two long-standing `category_id = 0` orphans, so on the live file this
- *     should be 0 before and 0 after — verified, not assumed.
- *  7. Every metals row must come out pointing at the right symbol, and no
- *     non-commodity row may acquire one.
- *  8. If ANY of that fails, the backup is copied back over the live file and the
- *     script throws.
- *  9. Running it twice is refused: an already-migrated schema is detected and the
- *     file is left untouched.
- *
- * Like its predecessors this opens its own sql.js handle instead of going through
- * lib/db/client.ts: it must control the `foreign_keys` pragma itself and must not
- * disturb the process-cached connection. Note that `Database.export()` internally
- * closes and re-opens the connection, silently resetting connection-scoped
- * pragmas — so `PRAGMA foreign_keys = ON` is re-applied after every export.
- */
+
 import initSqlJs, { type Database } from "sql.js";
 import {
   copyFileSync,
@@ -61,7 +16,6 @@ import { priceSymbolForCommodityType } from "@/lib/prices";
 
 const MIGRATION_SQL_PATH = path.join("drizzle", "migrations", "0004_priced_holdings.sql");
 
-/** Tables whose row count must be identical before and after. */
 const PRESERVED_TABLES = [
   "transactions",
   "categories",
@@ -76,7 +30,6 @@ const PRESERVED_TABLES = [
   "visited_countries",
 ] as const;
 
-/** The columns 0004 adds. */
 const NEW_COLUMNS = [
   { column: "price_symbol", type: "text" },
   { column: "priced_at", type: "integer" },
@@ -84,7 +37,6 @@ const NEW_COLUMNS = [
 
 export type TableCounts = Record<string, number>;
 
-/** Everything about an asset row that 0004 must NOT change. */
 export type AssetRow = {
   id: number;
   category: string;
@@ -131,13 +83,8 @@ export type MigrateToPricedHoldingsResult = {
   foreignKeyViolationsBefore: unknown[][];
   foreignKeyViolationsAfter: unknown[][];
 
-  /** Commodity rows given a symbol by the backfill. */
   backfilled: Array<{ id: number; commodityType: string; priceSymbol: string }>;
-  /**
-   * Rows in a priceable category that the migration deliberately left
-   * hand-valued, because nothing in the database says how much is held (the
-   * live file's "$70.00 of BTC + ETH" note is exactly this).
-   */
+
   unmigratableRows: Array<{
     id: number;
     category: string;
@@ -149,17 +96,14 @@ export type MigrateToPricedHoldingsResult = {
 export type MigrateToPricedHoldingsOptions = {
   dbPath: string;
   backupDir: string;
-  /** Verify and report, but never write the database or a backup. */
+
   dryRun?: boolean;
   migrationSqlPath?: string;
-  /**
-   * When set, the derived cash balance must equal this exactly, before AND
-   * after. For data/budget.db that is 449618 ($4,496.18).
-   */
+
   expectedCashBalanceCents?: Cents;
-  /** When set, these row counts must match before AND after. */
+
   expectedCounts?: Partial<Record<(typeof PRESERVED_TABLES)[number], number>>;
-  /** Test seam: mutate the migrated database to prove verification bites. */
+
   corruptForTest?: (db: Database) => void;
   log?: (message: string) => void;
 };
@@ -247,7 +191,7 @@ function readCategories(db: Database) {
   }));
 }
 
-/** The app's own rule, not a re-implementation of it. */
+
 function cashBalance(db: Database): Cents {
   return deriveCashBalanceCents(readLedger(db), readCategories(db));
 }
@@ -275,7 +219,7 @@ function execScript(db: Database, sql: string) {
   }
 }
 
-/** Decides whether 0004 still has to be applied. Refuses a half-applied state. */
+
 function detectState(db: Database): "pre-0004" | "post-0004" {
   const tables = tableNames(db);
   for (const required of ["transactions", "categories", "assets"]) {
@@ -304,10 +248,7 @@ function detectState(db: Database): "pre-0004" | "post-0004" {
   );
 }
 
-/**
- * Apply 0004 to `options.dbPath` in place, with a backup and full verification.
- * Idempotent: a second run reports `alreadyMigrated` and writes nothing.
- */
+
 export async function migrateDatabaseToPricedHoldings(
   options: MigrateToPricedHoldingsOptions,
 ): Promise<MigrateToPricedHoldingsResult> {
@@ -356,7 +297,7 @@ export async function migrateDatabaseToPricedHoldings(
       };
     }
 
-    // ---- 1. Snapshot everything the assertions will compare against.
+
     const countsBefore = counts(db);
     const assetsBefore = readAssets(db);
     const ledgerBefore = readLedger(db);
@@ -382,12 +323,12 @@ export async function migrateDatabaseToPricedHoldings(
       );
     }
 
-    /** What the backfill is expected to produce, computed independently of the SQL. */
+
     const expectedSymbols = new Map<number, string | null>(
       assetsBefore.map((row) => [row.id, priceSymbolForCommodityType(row.commodityType)]),
     );
 
-    // ---- 2. Back up the ORIGINAL bytes before anything else.
+
     let backupPath: string | null = null;
     if (!dryRun) {
       mkdirSync(backupDir, { recursive: true });
@@ -405,13 +346,13 @@ export async function migrateDatabaseToPricedHoldings(
     };
 
     try {
-      // ---- 3. Apply the migration.
-      //
-      // 0004 only ADDs nullable columns, so no table is rebuilt and nothing can
-      // cascade through asset_history.asset_id. The pragma is still bracketed
-      // OFF/ON: it costs nothing, and it is the house rule for schema work here
-      // precisely so that a future statement in this position cannot quietly
-      // become destructive.
+
+
+
+
+
+
+
       const sqlPath = path.isAbsolute(migrationSqlPath)
         ? migrationSqlPath
         : path.resolve(process.cwd(), migrationSqlPath);
@@ -423,9 +364,9 @@ export async function migrateDatabaseToPricedHoldings(
 
       if (corruptForTest) corruptForTest(db);
 
-      // ---- 4. Verify. Every check below throws, which triggers the restore.
+
       const verify = (target: Database, phase: string) => {
-        // 4a. The new columns exist, are nullable, and have the right types.
+
         for (const spec of NEW_COLUMNS) {
           const column = columnSpec(target, "assets", spec.column);
           if (!column) throw new Error(`${phase}: assets.${spec.column} was not added`);
@@ -444,7 +385,7 @@ export async function migrateDatabaseToPricedHoldings(
           throw new Error(`${phase}: rebuild scaffolding __new_assets was left behind`);
         }
 
-        // 4b. Row counts unchanged everywhere (asset_history: cascade guard).
+
         const countsAfter = counts(target);
         for (const table of Object.keys(countsBefore)) {
           if (countsAfter[table] !== countsBefore[table]) {
@@ -461,7 +402,7 @@ export async function migrateDatabaseToPricedHoldings(
           }
         }
 
-        // 4c. Every asset row identical except the two new columns.
+
         const assetsAfter = readAssets(target);
         if (assetsAfter.length !== assetsBefore.length) {
           throw new Error(`${phase}: assets row count changed`);
@@ -485,7 +426,7 @@ export async function migrateDatabaseToPricedHoldings(
             "createdAt",
             "updatedAt",
           ] as const) {
-            // Exact comparison, quantity included: 1.1376 must not become 1.14.
+
             if (after[key] !== before[key]) {
               throw new Error(
                 `${phase}: asset ${before.id} ${snake(key)} changed: ` +
@@ -495,7 +436,7 @@ export async function migrateDatabaseToPricedHoldings(
           }
         }
 
-        // 4d. The backfill: every metals row on its symbol, nothing else touched.
+
         const symbolRows = rows(
           target,
           "SELECT id, commodity_type, price_symbol FROM assets ORDER BY id",
@@ -521,7 +462,7 @@ export async function migrateDatabaseToPricedHoldings(
             });
           }
         }
-        // Nothing may have been priced by this migration: it fetches nothing.
+
         const pricedAtSet = Number(
           scalar(target, "SELECT COUNT(*) FROM assets WHERE priced_at IS NOT NULL") ?? 0,
         );
@@ -531,7 +472,7 @@ export async function migrateDatabaseToPricedHoldings(
           );
         }
 
-        // 4e. Totals and the ledger.
+
         const ledgerAfter = readLedger(target);
         if (ledgerAfter.length !== ledgerBefore.length) {
           throw new Error(`${phase}: ledger length changed`);
@@ -578,7 +519,7 @@ export async function migrateDatabaseToPricedHoldings(
           );
         }
 
-        // 4f. No NEW referential damage. On the live file: 0 before, 0 after.
+
         const fkAfter = foreignKeyCheck(target);
         const known = new Set(fkBefore.map(fkKey));
         const introduced = fkAfter.filter((row) => !known.has(fkKey(row)));
@@ -616,7 +557,7 @@ export async function migrateDatabaseToPricedHoldings(
       const inMemory = verify(db, "in-memory check");
 
       const migrated = Buffer.from(db.export());
-      // export() closes and re-opens the connection, resetting pragmas.
+
       db.run("PRAGMA foreign_keys = ON");
 
       if (dryRun) {
@@ -644,7 +585,7 @@ export async function migrateDatabaseToPricedHoldings(
 
       writeFileSync(dbPath, migrated);
 
-      // Re-open what actually landed on disk and verify THAT, not the memory copy.
+
       db.close();
       db = new SQL.Database(readFileSync(dbPath));
       const onDisk = verify(db, "post-write check");
@@ -677,12 +618,12 @@ export async function migrateDatabaseToPricedHoldings(
   }
 }
 
-/** camelCase -> snake_case, so error messages name real column names. */
+
 function snake(key: string): string {
   return key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 }
 
-/** Renders the before/after report. */
+
 export function formatPricedHoldingsReport(result: MigrateToPricedHoldingsResult): string {
   if (result.alreadyMigrated) {
     return "Already migrated to priced holdings: no changes made.";
@@ -763,7 +704,7 @@ export function formatPricedHoldingsReport(result: MigrateToPricedHoldingsResult
   return lines.join("\n");
 }
 
-/** The live database's known-good figures, asserted by default. */
+
 const LIVE_EXPECTATIONS = {
   cashBalanceCents: 449618,
   counts: { transactions: 71, categories: 14, assets: 3 } as const,
@@ -779,7 +720,7 @@ async function main() {
   );
   const backupDir = path.resolve(path.dirname(dbPath), "backups");
   const dryRun = argv.includes("--dry-run");
-  // The live-file assertions only make sense for the live file.
+
   const isLive = !argv.includes("--no-expect") && dbPath.endsWith(path.join("data", "budget.db"));
 
   console.log("Applying migration 0004 (priced holdings: price_symbol, priced_at)");
@@ -814,7 +755,7 @@ async function main() {
   }
 }
 
-// Only run when invoked directly, never on import.
+
 if (/migrate-to-priced-holdings\.[cm]?ts$/.test(process.argv[1] ?? "")) {
   main().catch((error) => {
     console.error("");

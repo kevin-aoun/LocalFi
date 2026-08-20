@@ -23,12 +23,6 @@ type DatePickerProps = {
   className?: string
 }
 
-/**
- * Shared calendar-day control. The public value is always a local DateKey;
- * Date is used only at the react-day-picker boundary so a selected day cannot
- * move when the browser's timezone changes.
- * DECISION: DEC-009
- */
 function DatePicker({
   value,
   onChange,

@@ -42,7 +42,7 @@ export function BudgetDialog({
   onSuccess,
 }: BudgetDialogProps) {
   const [loading, setLoading] = useState(false);
-  /** Server-side failure to show the user; null when there is nothing wrong. */
+
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: "",
@@ -82,8 +82,6 @@ export function BudgetDialog({
         ? await updateCategory(category.id, formDataObj)
         : await createCategory(formDataObj);
 
-      // The action reports failure by RETURNING { error }. Ignoring it is how a
-      // duplicate category name used to be silently discarded.
       if (result && "error" in result && result.error) {
         setError(result.error);
         return;

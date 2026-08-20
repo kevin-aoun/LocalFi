@@ -17,19 +17,13 @@ import { assignOrphanTransactions } from "@/app/actions/accounts";
 import { orphanSummary, type AccountRow } from "./account-form-logic";
 
 type OrphanRepairCardProps = {
-  /** How many transactions have no account. 0 hides the card entirely. */
+
   orphanCount: number;
-  /** Accounts the orphans may be attached to (archived ones excluded upstream). */
+
   accounts: AccountRow[];
   onRepaired: () => void;
 };
 
-/**
- * The repair for a real defect in the user's database: transactions with no
- * account. They still count towards net worth (the `accountId: null` bucket in
- * lib/cash-balance.ts), but no account's balance reflects them, so the accounts
- * page and the dashboard headline appear to disagree.
- */
 export function OrphanRepairCard({ orphanCount, accounts, onRepaired }: OrphanRepairCardProps) {
   const summary = orphanSummary(orphanCount);
   const [targetId, setTargetId] = useState<string>("");
@@ -50,9 +44,7 @@ export function OrphanRepairCard({ orphanCount, accounts, onRepaired }: OrphanRe
     setLoading(true);
     try {
       const result = await assignOrphanTransactions(id);
-      // `"error" in result` on its own, with no truthiness test on the message:
-      // that is what lets TypeScript narrow to the success branch below, and it
-      // cannot mistake an empty message for a success.
+
       if (result && "error" in result) {
         setError(result.error || "Failed to assign the transactions.");
         return;

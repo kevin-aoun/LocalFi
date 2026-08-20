@@ -47,11 +47,6 @@ function categoryTarget(raw: Database | null, id: number | null, currency: strin
     : targetId(raw, { targetType: "category", targetRef: id, currency });
 }
 
-/**
- * Canonical full movement state for one confirmed transaction projection.
- * Passing a database registers its targets for posting; passing null is a
- * read-only derivation used by verification.
- */
 export function buildProjectedTransactionMovements(
   raw: Database | null,
   row: CurrentTransactionFacts,
@@ -112,7 +107,7 @@ export function buildProjectedTransactionMovements(
   });
 }
 
-/** Collapse duplicate target legs and omit a chain whose current state is zero. */
+
 export function normalizeCurrentTransactionMovements(
   movements: readonly LedgerMovementInput[],
 ): LedgerMovementInput[] {

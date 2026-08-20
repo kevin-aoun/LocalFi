@@ -1,24 +1,4 @@
-/**
- * The runnable half of historical reconstruction: replay immutable account and
- * position movements against timestamped observations, then — only if explicitly
- * asked — write the result.
- *
- * ORDER OF OPERATIONS IS THE SAFETY PROPERTY. Everything that can fail happens
- * in `planNetWorthReconstruction`, which touches nothing. `applyNetWorthReconstruction`
- * takes a finished plan and writes it inside ONE `withDb` call, so a failure
- * cannot leave the table half-backfilled: either every row lands or none does.
- *
- * WRITE RULES
- *   - A day that already has a `recorded` row is SKIPPED, never replaced. A real
- *     measurement always outranks an estimate; the count of skips is reported.
- *   - A day whose `reconstructed` row already holds the same figures and note is
- *     left completely alone — not even `updated_at` moves — so re-running is a
- *     true no-op and the table cannot drift.
- *   - Anything else is inserted (or updated) with `source = 'reconstructed'`.
- *
- * `today` is a PARAMETER, never a clock read in a helper: the test suite runs at
- * UTC+14 and UTC−11 and every day boundary here has to be the caller's.
- */
+
 import { and, asc, eq, gte, lte } from "drizzle-orm";
 
 import { readDb, withDb } from "@/lib/db/client";
@@ -53,7 +33,6 @@ function firstLedgerKey(raw: Database): DateKey | null {
   return readCurrentMovements(raw).map((movement) => movement.dateKey).sort()[0] ?? null;
 }
 
-/** CONTRACT-012/013 historical replay: journal signs + exact quantities + observations. */
 function reconstructJournalDays(raw: Database, fromKey: DateKey, toKey: DateKey): ReconstructedDay[] | PlanError {
   const days: ReconstructedDay[] = [];
   const currentMovements = readCurrentMovements(raw);
@@ -151,14 +130,14 @@ export type ReconstructionPlan = {
   fromKey: DateKey;
   toKey: DateKey;
   today: DateKey;
-  /** The first day the ledger has anything to say. Null when there are no rows. */
+
   ledgerFirstKey: DateKey | null;
   days: ReconstructedDay[];
   holdings: HoldingPlan[];
   continuity: PurchaseContinuity[];
   warnings: ReconstructionWarning[];
   series: SeriesInfo[];
-  /** Snapshot rows that already exist in the range, as seen while planning. */
+
   existing: ExistingSnapshot[];
 };
 
@@ -180,7 +159,7 @@ export type WriteReport = {
   inserted: number;
   updated: number;
   unchanged: number;
-  /** Days left alone because a REAL snapshot already exists for them. */
+
   skippedRecorded: number;
   total: number;
 };
@@ -188,19 +167,19 @@ export type WriteReport = {
 export type PlanOptions = {
   fromKey?: DateKey;
   toKey?: DateKey;
-  /** The caller's today. Defaults to the local calendar day. */
+
   today?: DateKey;
-  /** Legacy caller compatibility; journal-native reconstruction does not fetch. */
+
   days?: number;
-  /** Legacy caller compatibility; ignored because observations are persisted facts. */
+
   fetchImpl?: PriceFetchLike;
-  /** Legacy caller compatibility; mutable stored values are never carried. */
+
   carryUnpriced?: boolean;
-  /** Legacy caller compatibility; journal reconstruction has no provider throttle. */
+
   onPriceRateLimitRetry?: (symbol: PriceSymbol, delayMs: number) => void;
 };
 
-/** Which symbols this database actually needs a series for. */
+
 export function neededSymbols(assets: readonly HistoryAsset[]): PriceSymbol[] {
   const wanted = new Set<PriceSymbol>();
   for (const asset of assets) {
@@ -214,10 +193,7 @@ export function neededSymbols(assets: readonly HistoryAsset[]): PriceSymbol[] {
   return [...wanted];
 }
 
-/**
- * Everything except the write. Returns exact day-by-day journal reconstruction
- * or an error, having written nothing.
- */
+
 export async function planNetWorthReconstruction(options: PlanOptions = {}): Promise<PlanResult> {
   const today = options.today ?? todayKey();
   if (!isDateKey(today)) {
@@ -227,7 +203,7 @@ export async function planNetWorthReconstruction(options: PlanOptions = {}): Pro
   const ledgerFirstKey = await readDb((_db, raw) => firstLedgerKey(raw));
 
   const fromKey = options.fromKey ?? ledgerFirstKey ?? today;
-  // Never past today: reconstruction computes what WAS, and tomorrow has no was.
+
   const requestedTo = options.toKey ?? today;
   const toKey = requestedTo > today ? today : requestedTo;
 
@@ -277,10 +253,7 @@ export async function planNetWorthReconstruction(options: PlanOptions = {}): Pro
   };
 }
 
-/**
- * Write a finished plan. One `withDb`, so it is all-or-nothing, and the existing
- * rows are re-read INSIDE it rather than trusted from planning time.
- */
+
 export async function applyNetWorthReconstruction(plan: ReconstructionPlan): Promise<WriteReport> {
   return withDb(async (db) => {
     const rows = await db
@@ -300,15 +273,15 @@ export async function applyNetWorthReconstruction(plan: ReconstructionPlan): Pro
     for (const day of plan.days) {
       const existing = byDate.get(day.dateKey);
 
-      // A measurement always outranks an estimate.
+
       if (existing && existing.source !== "reconstructed") {
         report.skippedRecorded++;
         continue;
       }
 
-      // Keep the per-holding child ledger aligned with this reconstructed day.
-      // `recordedDay` is the database uniqueness key; the timestamp is retained
-      // only for chronology and compatibility.
+
+
+
       const recordedAt = fromDateKey(day.dateKey);
       await db.delete(assetHistory).where(eq(assetHistory.recordedDay, day.dateKey));
       const holdingRows = day.holdings
@@ -346,7 +319,7 @@ export async function applyNetWorthReconstruction(plan: ReconstructionPlan): Pro
         existing.sourceNote === values.sourceNote;
 
       if (same) {
-        // Identical: leave updated_at alone so a re-run is a true no-op.
+
         report.unchanged++;
         continue;
       }
@@ -366,7 +339,7 @@ export type RunResult =
   | { ok: true; plan: ReconstructionPlan; write: WriteReport | null }
   | { ok: false; error: PlanError };
 
-/** Plan, and write only when `apply` is explicitly true. */
+
 export async function runNetWorthReconstruction(
   options: PlanOptions & { apply?: boolean } = {},
 ): Promise<RunResult> {

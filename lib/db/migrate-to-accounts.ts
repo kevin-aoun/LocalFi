@@ -1,45 +1,4 @@
-/**
- * One-shot application of migration 0003 (accounts, transfers, budgets,
- * recurring templates, net-worth history) to an existing budget database.
- *
- *   bun x tsx lib/db/migrate-to-accounts.ts [--db <path>] [--dry-run]
- *
- * Safety properties, in order of importance — the same shape as
- * lib/db/migrate-to-cents.ts, because that shape is what makes it safe to point a
- * schema change at a file holding somebody's real finances:
- *
- *  1. A byte-for-byte backup of the PRE-migration file is written to
- *     data/backups/budget.<timestamp>.pre-0003.db before anything is modified.
- *  2. All work happens on an in-memory copy. Nothing is written to the live path
- *     until every assertion has passed.
- *  3. Row counts must be unchanged for transactions, categories, assets,
- *     asset_history, quick_commands, settings and visited_countries. In
- *     particular `asset_history` is checked because `asset_history.asset_id`
- *     REFERENCES assets ON DELETE CASCADE, and a careless table rebuild can
- *     cascade real rows away.
- *  4. The derived cash balance — computed with the app's own single rule,
- *     `deriveCashBalanceCents` — must be IDENTICAL before and after. It is also
- *     compared against an expected value when one is supplied.
- *  5. `PRAGMA foreign_key_check` must introduce no NEW violations. On the live
- *     file it should go from 2 (the pre-existing category_id = 0 orphans) to 0,
- *     because 0003 repairs them.
- *  6. Every existing transaction must end up on the seeded default account, with
- *     its amount, date, comment and pending flag untouched.
- *  7. Every non-null `categories.monthly_limit_cents` must appear as a `budgets`
- *     row with the same amount, and the legacy column must survive.
- *  8. If ANY of that fails, the backup is copied back over the live file and the
- *     script throws.
- *  9. Running it twice is refused: an already-migrated schema is detected and the
- *     file is left untouched.
- *
- * The DDL itself is drizzle/migrations/0003_accounts_and_budget_periods.sql, so
- * a database created by replaying the journal (lib/db/init.ts) and one converted
- * by this script end up identical.
- *
- * This deliberately opens its own sql.js handle instead of going through
- * lib/db/client.ts: it must control the foreign_keys pragma across a table
- * rebuild, and it must not disturb the process-cached connection.
- */
+
 import initSqlJs, { type Database } from "sql.js";
 import {
   copyFileSync,
@@ -61,7 +20,6 @@ const MIGRATION_SQL_PATH = path.join(
   "0003_accounts_and_budget_periods.sql",
 );
 
-/** Tables whose row count must be identical before and after. */
 const PRESERVED_TABLES = [
   "transactions",
   "categories",
@@ -72,7 +30,6 @@ const PRESERVED_TABLES = [
   "visited_countries",
 ] as const;
 
-/** Tables 0003 creates. */
 const NEW_TABLES = ["accounts", "budgets", "recurring_transactions", "net_worth_snapshots"] as const;
 
 export type TableCounts = Record<string, number>;
@@ -105,7 +62,6 @@ export type MigrateToAccountsResult = {
   foreignKeyViolationsBefore: unknown[][];
   foreignKeyViolationsAfter: unknown[][];
 
-  /** Rows whose category_id no longer resolved and were therefore set to NULL. */
   repairedRows: Array<{ id: number; previousCategoryId: number; amountCents: Cents; comment: string | null }>;
 
   defaultAccount: { id: number; name: string; kind: string; type: string } | null;
@@ -118,17 +74,14 @@ export type MigrateToAccountsResult = {
 export type MigrateToAccountsOptions = {
   dbPath: string;
   backupDir: string;
-  /** Verify and report, but never write the database or a backup. */
+
   dryRun?: boolean;
   migrationSqlPath?: string;
-  /**
-   * When set, the derived cash balance after migration must equal this exactly.
-   * For data/budget.db that is 449618 ($4,496.18).
-   */
+
   expectedCashBalanceCents?: Cents;
-  /** When set, these row counts must match before AND after. */
+
   expectedCounts?: Partial<Record<(typeof PRESERVED_TABLES)[number], number>>;
-  /** Test seam: mutate the migrated database to prove verification bites. */
+
   corruptForTest?: (db: Database) => void;
   log?: (message: string) => void;
 };
@@ -194,7 +147,7 @@ function readCategories(db: Database) {
   }));
 }
 
-/** The app's own rule, not a re-implementation of it. */
+
 function cashBalance(db: Database): Cents {
   return deriveCashBalanceCents(readLedger(db), readCategories(db));
 }
@@ -218,7 +171,7 @@ function execScript(db: Database, sql: string) {
   }
 }
 
-/** Decides whether 0003 still has to be applied. Refuses a half-applied state. */
+
 function detectState(db: Database): "pre-0003" | "post-0003" {
   const tables = tableNames(db);
   for (const required of ["transactions", "categories", "assets"]) {
@@ -243,10 +196,7 @@ function detectState(db: Database): "pre-0003" | "post-0003" {
   );
 }
 
-/**
- * Apply 0003 to `options.dbPath` in place, with a backup and full verification.
- * Idempotent: a second run reports `alreadyMigrated` and writes nothing.
- */
+
 export async function migrateDatabaseToAccounts(
   options: MigrateToAccountsOptions,
 ): Promise<MigrateToAccountsResult> {
@@ -295,7 +245,7 @@ export async function migrateDatabaseToAccounts(
       };
     }
 
-    // ---- 1. Snapshot everything the assertions will compare against.
+
     const countsBefore = counts(db);
     const ledgerBefore = readLedger(db);
     const cashBalanceBefore = cashBalance(db);
@@ -329,7 +279,7 @@ export async function migrateDatabaseToAccounts(
       "SELECT id, name, monthly_limit_cents FROM categories WHERE monthly_limit_cents IS NOT NULL ORDER BY id",
     ).map((r) => ({ categoryId: Number(r[0]), name: String(r[1]), limitCents: Number(r[2]) }));
 
-    // ---- 2. Back up the ORIGINAL bytes before anything else.
+
     let backupPath: string | null = null;
     if (!dryRun) {
       mkdirSync(backupDir, { recursive: true });
@@ -347,10 +297,10 @@ export async function migrateDatabaseToAccounts(
     };
 
     try {
-      // ---- 3. Apply the migration. FKs off for the transactions rebuild: the
-      // drop/rename dance cannot run with enforcement on, and asset_history's
-      // ON DELETE CASCADE makes a mistake here destructive. The SQL brackets
-      // itself, but be explicit.
+
+
+
+
       const sqlPath = path.isAbsolute(migrationSqlPath)
         ? migrationSqlPath
         : path.resolve(process.cwd(), migrationSqlPath);
@@ -362,7 +312,7 @@ export async function migrateDatabaseToAccounts(
 
       if (corruptForTest) corruptForTest(db);
 
-      // ---- 4. Verify. Every check below throws, which triggers the restore.
+
       const verify = (target: Database, phase: string) => {
         const present = tableNames(target);
         for (const table of NEW_TABLES) {
@@ -372,7 +322,7 @@ export async function migrateDatabaseToAccounts(
           throw new Error(`${phase}: rebuild scaffolding __new_transactions was left behind`);
         }
 
-        // 4a. Row counts unchanged (asset_history included: cascade guard).
+
         const countsAfter = counts(target);
         for (const table of Object.keys(countsBefore)) {
           if (countsAfter[table] !== countsBefore[table]) {
@@ -382,8 +332,8 @@ export async function migrateDatabaseToAccounts(
           }
         }
 
-        // 4b. transactions.category_id must now be nullable, and the account
-        // columns must exist.
+
+
         const txColumns = columnNames(target, "transactions");
         for (const column of ["account_id", "transfer_account_id", "recurring_id", "recurring_occurrence"]) {
           if (!txColumns.has(column)) throw new Error(`${phase}: transactions.${column} missing`);
@@ -392,7 +342,7 @@ export async function migrateDatabaseToAccounts(
           throw new Error(`${phase}: transactions.category_id is still NOT NULL`);
         }
 
-        // 4c. Every money column added by 0003 is an integer column.
+
         for (const spec of CENTS_ONLY_COLUMNS) {
           if (!present.has(spec.table)) continue;
           if (!columnNames(target, spec.table).has(spec.column)) {
@@ -403,8 +353,8 @@ export async function migrateDatabaseToAccounts(
           }
         }
 
-        // 4d. Ledger integrity, row by row: only category_id may have changed,
-        // and only for rows whose category did not resolve.
+
+
         const ledgerAfter = readLedger(target);
         if (ledgerAfter.length !== ledgerBefore.length) {
           throw new Error(`${phase}: ledger length changed`);
@@ -445,7 +395,7 @@ export async function migrateDatabaseToAccounts(
           }
         }
 
-        // 4e. Totals.
+
         const sumAmountsAfter = sumAmounts(target);
         if (sumAmountsAfter !== sumAmountsBefore) {
           throw new Error(
@@ -464,7 +414,7 @@ export async function migrateDatabaseToAccounts(
           );
         }
 
-        // 4f. The default account, and every transaction on it.
+
         const accountRows = rows(target, "SELECT id, name, kind, type FROM accounts ORDER BY id");
         if (accountRows.length !== 1) {
           throw new Error(`${phase}: expected exactly 1 seeded account, found ${accountRows.length}`);
@@ -490,7 +440,7 @@ export async function migrateDatabaseToAccounts(
           throw new Error(`${phase}: migration invented ${strayTransfers} transfer(s)`);
         }
 
-        // 4g. Legacy limits copied across, and the legacy column preserved.
+
         const migratedBudgets = rows(
           target,
           "SELECT category_id, period, limit_cents, effective_from FROM budgets ORDER BY category_id",
@@ -526,7 +476,7 @@ export async function migrateDatabaseToAccounts(
           );
         }
 
-        // 4h. No NEW referential damage. On the live file this goes 2 -> 0.
+
         const fkAfter = foreignKeyCheck(target);
         const known = new Set(fkBefore.map(fkKey));
         const introduced = fkAfter.filter((row) => !known.has(fkKey(row)));
@@ -543,7 +493,7 @@ export async function migrateDatabaseToAccounts(
       const inMemory = verify(db, "in-memory check");
 
       const migrated = Buffer.from(db.export());
-      // export() closes and re-opens the connection, resetting pragmas.
+
       db.run("PRAGMA foreign_keys = ON");
 
       const repairedRows = willRepair.map((row) => ({
@@ -579,7 +529,7 @@ export async function migrateDatabaseToAccounts(
 
       writeFileSync(dbPath, migrated);
 
-      // Re-open what actually landed on disk and verify THAT, not the memory copy.
+
       db.close();
       db = new SQL.Database(readFileSync(dbPath));
       const onDisk = verify(db, "post-write check");
@@ -613,7 +563,7 @@ export async function migrateDatabaseToAccounts(
   }
 }
 
-/** Renders the before/after report. */
+
 export function formatAccountsReport(result: MigrateToAccountsResult): string {
   if (result.alreadyMigrated) {
     return "Already migrated to the accounts schema: no changes made.";
@@ -704,7 +654,7 @@ export function formatAccountsReport(result: MigrateToAccountsResult): string {
   return lines.join("\n");
 }
 
-/** The live database's known-good figures, asserted by default. */
+
 const LIVE_EXPECTATIONS = {
   cashBalanceCents: 449618,
   counts: { transactions: 71, categories: 14, assets: 3 } as const,
@@ -720,7 +670,7 @@ async function main() {
   );
   const backupDir = path.resolve(path.dirname(dbPath), "backups");
   const dryRun = argv.includes("--dry-run");
-  // The live-file assertions only make sense for the live file.
+
   const isLive = !argv.includes("--no-expect") && dbPath.endsWith(path.join("data", "budget.db"));
 
   console.log("Applying migration 0003 (accounts, transfers, budgets, recurring, net worth)");
@@ -755,7 +705,7 @@ async function main() {
   }
 }
 
-// Only run when invoked directly, never on import.
+
 if (/migrate-to-accounts\.[cm]?ts$/.test(process.argv[1] ?? "")) {
   main().catch((error) => {
     console.error("");

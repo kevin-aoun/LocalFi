@@ -26,7 +26,7 @@ export type RegisterLedgerAccountInput = {
   createdAt?: number;
 };
 
-/** Register or verify a target without creating a second domain identity. */
+
 export function registerLedgerAccount(
   raw: Database,
   input: RegisterLedgerAccountInput,

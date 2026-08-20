@@ -3,7 +3,7 @@ import { verifyLedger } from "../lib/ledger/verify";
 
 async function main() {
   const result = await verifyLedger();
-  // Structured diagnostics contain invariant names and event references only.
+
   console.log(JSON.stringify(result, null, 2));
   if (!result.ok) process.exitCode = 1;
 }

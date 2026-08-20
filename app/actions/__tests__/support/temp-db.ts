@@ -1,15 +1,4 @@
-/**
- * Throwaway database fixture for server-action tests.
- *
- * Every test gets its own file in a fresh `mkdtemp` directory, pointed at via
- * BUDGET_DB_PATH. The real database (data/budget.db — the user's actual
- * financial history) is never opened, and no `db:init` / `db:seed` script is
- * ever run.
- *
- * The schema is produced by replaying drizzle/migrations in journal order, the
- * same way lib/db/init.ts does, so the fixture tracks the real schema instead of
- * duplicating DDL that would rot.
- */
+
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import os from "node:os";
@@ -40,12 +29,11 @@ async function sqlJs() {
 export type TempDb = {
   dir: string;
   file: string;
-  /** Read rows without going through lib/db/client (independent verification). */
+
   query: (sql: string) => Array<Record<string, unknown>>;
   cleanup: () => Promise<void>;
 };
 
-/** Create a migrated, empty database and point BUDGET_DB_PATH at it. */
 export async function createTempDb(): Promise<TempDb> {
   const SqlJs = await sqlJs();
   const dir = mkdtempSync(path.join(os.tmpdir(), "budget-c2-test-"));

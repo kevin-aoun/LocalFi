@@ -46,7 +46,7 @@ import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 type SnapshotSummary = {
-  /** 'YYYY-MM-DD' local calendar day. */
+
   date: string;
   currency: string;
   netWorthCents: number;
@@ -56,11 +56,10 @@ type AccountsClientProps = {
   accounts: AccountWithBalance[];
   netWorth: NetWorthView;
   latestSnapshot: SnapshotSummary | null;
-  /** Transactions with no account at all — the bucket that needs repairing. */
+
   orphanCount: number;
 };
 
-/** A DateKey rendered in the user's locale, never through UTC. */
 function formatDateKey(key: string): string {
   return isDateKey(key) ? fromDateKey(key).toLocaleDateString() : key;
 }
@@ -108,9 +107,9 @@ export default function AccountsClient({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<AccountRow | null>(null);
   const [accountToDelete, setAccountToDelete] = useState<AccountRow | null>(null);
-  /** Why the last delete was refused; null when there is nothing to report. */
+
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  /** Why the last archive/snapshot failed; null when there is nothing to report. */
+
   const [actionError, setActionError] = useState<string | null>(null);
   const [snapshotNote, setSnapshotNote] = useState<string | null>(null);
   const [snapshotting, setSnapshotting] = useState(false);
@@ -135,8 +134,7 @@ export default function AccountsClient({
   const handleToggleArchived = async (account: AccountRow) => {
     setActionError(null);
     const result = await setAccountArchived(account.id, !account.archived);
-    // The action reports failure by RETURNING { error }; ignoring it is how a
-    // refused write used to look like a successful one.
+
     if (result && "error" in result) {
       setActionError(result.error || "Failed to archive the account.");
       return;
@@ -147,8 +145,7 @@ export default function AccountsClient({
   const handleDelete = async () => {
     if (!accountToDelete) return;
     const result = await deleteAccount(accountToDelete.id);
-    // `deleteAccount` REFUSES while any transaction still references the account,
-    // rather than orphaning real financial history. Surface that refusal.
+
     if (result && "error" in result) {
       setDeleteError(result.error || "Failed to delete the account.");
       return;
@@ -216,8 +213,7 @@ export default function AccountsClient({
         </div>
       )}
 
-      {/* Net-worth summary. The figures come from deriveNetWorth — this page
-          formats them and never re-subtracts them. */}
+      {}
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardContent className="p-6">
@@ -278,9 +274,7 @@ export default function AccountsClient({
         {mixed && (
           <Tooltip>
             <TooltipTrigger asChild>
-              {/* `tabIndex` because a paragraph is not focusable and Radix opens
-                  on hover or focus only. The warning itself is already visible
-                  prose — this tooltip only restates why. */}
+              {}
               <p
                 tabIndex={0}
                 className="flex items-start gap-2 rounded-sm text-amber-700 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:text-amber-400"
@@ -422,7 +416,7 @@ export default function AccountsClient({
             )}
             <AlertDialogAction
               onClick={(event) => {
-                // Keep the dialog open so a refusal can be read.
+
                 event.preventDefault();
                 void handleDelete();
               }}

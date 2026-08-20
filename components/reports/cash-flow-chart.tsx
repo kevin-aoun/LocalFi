@@ -1,16 +1,5 @@
 "use client";
 
-/**
- * Income vs expense per period, with the net line on top.
- *
- * Money out is plotted as a NEGATIVE bar. Two positive bars side by side invite the
- * reader to add them, which is not a quantity; up/down reads as a flow and puts the
- * net line where it belongs — the zero axis is the break-even line.
- *
- * The bar values are decimals (recharts needs plain numbers), converted once in
- * `toCashFlowChartRows`. The tooltip reads the CENTS carried alongside them and
- * formats with `formatMoney`, so nothing the user reads has been through a float.
- */
 import {
   Bar,
   BarChart,
@@ -104,8 +93,7 @@ export function CashFlowChart({ rows, currency }: CashFlowChartProps) {
           tickMargin={8}
           tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
           tickFormatter={(value) => {
-            // Ticks arrive as decimals from the chart scale; render them as money
-            // rather than hand-rolling a `$${x.toFixed(2)}`.
+
             const cents = tryParseAmount(Number(value));
             return cents === null ? "" : formatMoney(cents, currency);
           }}
@@ -130,10 +118,6 @@ export function CashFlowChart({ rows, currency }: CashFlowChartProps) {
   );
 }
 
-/**
- * The whole range as a single income-vs-expense pair — no time axis, just the two
- * quantities next to each other, which is the one comparison people actually make.
- */
 export function IncomeVsExpenseChart({
   incomeCents,
   expenseCents,
@@ -143,7 +127,7 @@ export function IncomeVsExpenseChart({
   expenseCents: Cents;
   currency: string;
 }) {
-  // Charting boundary: `centsToDecimal` is the only sanctioned cents -> float.
+
   const data = [
     { name: "Money in", value: centsToDecimal(incomeCents), cents: incomeCents, fill: "hsl(142 71% 45%)" },
     { name: "Money out", value: centsToDecimal(expenseCents), cents: expenseCents, fill: "hsl(0 72% 51%)" },

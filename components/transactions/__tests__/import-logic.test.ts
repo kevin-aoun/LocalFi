@@ -1,9 +1,4 @@
-/**
- * Regression tests for the Excel import (items 2, 3 and the dedupe half of 4).
- *
- * The date tests must pass under `bun run test:tz` (UTC+14 and UTC-11), so they
- * parse a real .xlsx fixture and assert on the resulting calendar day.
- */
+
 import { describe, expect, it } from "vitest";
 import {
   assertImportFileSize,
@@ -32,7 +27,6 @@ const CATEGORIES: ImportCategory[] = [
   { id: 3, name: "Brokerage", type: "Investment" },
 ];
 
-/** Real OOXML workbook: headers plus date-formatted, text-date and amount cells. */
 const XLSX_FIXTURE_BASE64 =
   "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";
 
@@ -41,24 +35,13 @@ function xlsxFixture(): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-/**
- * The Excel serial for a calendar day, computed in UTC so the FIXTURE is not
- * itself timezone-dependent.
- *
- * This keeps the direct serial fixtures independent of the process timezone.
- */
 function excelSerial(year: number, month1: number, day: number): number {
   return (Date.UTC(year, month1 - 1, day) - Date.UTC(1899, 11, 30)) / 86_400_000;
 }
 
-// ---------------------------------------------------------------------------
-// Item 2: signed exports must not invert the direction of the transaction
-// ---------------------------------------------------------------------------
-
 describe("the sign rule", () => {
   it("stores a magnitude, so a bank export's -45.00 expense still reduces cash", () => {
-    // THE BUG: the dialog stored -4500 while the direction came from
-    // category.type === "Expense", so cash went UP by $45.
+
     const resolved = resolveAmount("-45.00");
     expect(resolved.amountCents).toBe(4500);
     expect(resolved.sign).toBe(-1);
@@ -107,13 +90,13 @@ describe("the sign rule", () => {
     });
     expect(expense.suggestedType).toBe("Expense");
     expect(income.suggestedType).toBe("Income");
-    // Neither is importable: no category means no direction.
+
     expect(isImportable(expense)).toBe(false);
     expect(isImportable(income)).toBe(false);
   });
 
   it("prefers the matched category's type over the sign", () => {
-    // An Income category with a negative amount is still Income.
+
     const [row] = parseImportRows(
       [{ Date: "2026-07-01", Category: "Salary", Amount: "-5000", Type: "Expense" }],
       CATEGORIES,
@@ -143,10 +126,6 @@ describe("the sign rule", () => {
     expect(isImportable(row)).toBe(false);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Item 3: dates
-// ---------------------------------------------------------------------------
 
 describe("dates survive the spreadsheet round trip in every timezone", () => {
   it("reads a real xlsx date cell with the maintained parser", async () => {

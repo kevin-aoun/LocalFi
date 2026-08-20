@@ -21,7 +21,7 @@ async function verify() {
   console.log(`  Settings: ${stngs.length}`);
   console.log(`  Quick Commands: ${cmds.length}\n`);
 
-  // Check categories by type
+
   const incomeCategories = cats.filter(c => c.type === "Income");
   const expenseCategories = cats.filter(c => c.type === "Expense");
   const investmentCategories = cats.filter(c => c.type === "Investment");
@@ -31,20 +31,20 @@ async function verify() {
   console.log(`  Expense: ${expenseCategories.length}`);
   console.log(`  Investment: ${investmentCategories.length}\n`);
 
-  // Check Cash asset
+
   const cashAsset = assts.find(a => a.category === "Cash");
   console.log(
     `Cash Asset: ${cashAsset ? formatMoney(cashAsset.currentValueCents, cashAsset.currency) : "N/A"}`,
   );
 
-  // Check commodity asset
+
   const commodityAsset = assts.find(a => a.category === "Commodities");
   if (commodityAsset) {
     console.log(`Commodity Asset: ${commodityAsset.quantity}${commodityAsset.unit} ${commodityAsset.commodityType} = ${formatMoney(commodityAsset.currentValueCents, commodityAsset.currency)}`);
     console.log(`  Live Price: ${commodityAsset.useLivePrice ? "Enabled" : "Disabled"}\n`);
   }
 
-  // Check settings
+
   if (stngs.length > 0) {
     console.log("Settings:");
     console.log(`  User Name: ${stngs[0].userName}`);
@@ -52,7 +52,7 @@ async function verify() {
     console.log(`  Theme: ${stngs[0].theme}\n`);
   }
 
-  // Check quick commands
+
   if (cmds.length > 0) {
     console.log("Quick Commands:");
     cmds.forEach(cmd => {
@@ -61,13 +61,13 @@ async function verify() {
     console.log();
   }
 
-  // Calculate cash from transactions (verify auto-sync logic).
-  //
-  // NOTE: this deliberately keeps its original semantics of counting EVERY
-  // transaction, including pending ones, whereas `syncCashAsset` counts only
-  // confirmed rows — so "Match: NO" is expected whenever a pending transaction
-  // exists. That pre-existing discrepancy is not this refactor's to fix; only
-  // the arithmetic changed, from float to exact cents.
+
+
+
+
+
+
+
   const calculatedCashCents = deriveCashBalanceCents(
     txs.map(tx => ({ categoryId: tx.categoryId, amountCents: tx.amountCents, pending: false })),
     cats,

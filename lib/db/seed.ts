@@ -2,16 +2,11 @@ import { getDb, saveDb } from "./client";
 import { categories } from "./schema";
 import { parseAmount } from "@/lib/money";
 
-/**
- * Monthly limits are written as the dollar strings a human would type and
- * converted once, through `parseAmount`, so the seed cannot introduce a float.
- */
 const defaultCategories = [
-  // Income
+
   { name: "Salary", type: "Income" as const, icon: "Wallet", color: "#10b981", monthlyLimitCents: null },
   { name: "Allowance", type: "Income" as const, icon: "Coins", color: "#34d399", monthlyLimitCents: null },
 
-  // Expenses
   { name: "Rent", type: "Expense" as const, icon: "Home", color: "#ef4444", monthlyLimitCents: null },
   { name: "Groceries", type: "Expense" as const, icon: "ShoppingCart", color: "#f59e0b", monthlyLimitCents: parseAmount("100.00") },
   { name: "Dining", type: "Expense" as const, icon: "UtensilsCrossed", color: "#f97316", monthlyLimitCents: parseAmount("70.00") },
@@ -24,7 +19,6 @@ const defaultCategories = [
   { name: "Subscriptions", type: "Expense" as const, icon: "CreditCard", color: "#6366f1", monthlyLimitCents: parseAmount("40.00") },
   { name: "Travel", type: "Expense" as const, icon: "Plane", color: "#14b8a6", monthlyLimitCents: null },
 
-  // Investments
   { name: "Savings", type: "Investment" as const, icon: "PiggyBank", color: "#22c55e", monthlyLimitCents: parseAmount("100.00") },
   { name: "Startups", type: "Investment" as const, icon: "Rocket", color: "#0ea5e9", monthlyLimitCents: parseAmount("100.00") },
 ];
@@ -34,7 +28,6 @@ async function seed() {
 
   const db = await getDb();
 
-  // Insert default categories
   for (const category of defaultCategories) {
     await db.insert(categories).values(category).onConflictDoNothing();
   }

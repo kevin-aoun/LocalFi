@@ -1,16 +1,4 @@
-/**
- * Migration 0004 — priced holdings (`assets.price_symbol`, `assets.priced_at`) —
- * exercised two ways, exactly like 0003:
- *
- *   1. replayed from empty (what lib/db/init.ts does for a fresh install);
- *   2. applied by lib/db/migrate-to-priced-holdings.ts to a database SHAPED LIKE
- *      THE LIVE ONE (14 categories, a 1.1376 oz live-priced gold holding, a
- *      hand-valued "BTC + ETH" row, one asset_history row, derived cash balance
- *      exactly 449618 cents).
- *
- * Everything runs in memory or in a mkdtemp directory. data/budget.db is never
- * opened, and no db:init / db:seed script is ever run.
- */
+
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -48,7 +36,6 @@ function execScript(db: Database, sql: string) {
   }
 }
 
-/** Replay the journal up to and including `throughIdx` (mirrors lib/db/init.ts). */
 function replay(throughIdx = Infinity): Database {
   const db = new SQL.Database();
   for (const entry of [...journal.entries].sort((a, b) => a.idx - b.idx)) {

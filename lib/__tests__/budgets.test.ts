@@ -1,14 +1,4 @@
-/**
- * Budget periods, spend-vs-budget, rollover and historical performance.
- *
- * What must not break:
- *   - a period is a calendar period in the USER'S timezone, so a transaction on
- *     the 1st never lands in the previous month's budget;
- *   - transfers and pending rows are not spend;
- *   - an Income category may have a target (the old schema made that impossible);
- *   - rollover carries a SURPLUS forward and never carries a deficit forward;
- *   - history is queryable for any past period, not just the current month.
- */
+
 import { describe, expect, it } from "vitest";
 import {
   budgetInForce,
@@ -63,7 +53,7 @@ describe("periodContaining", () => {
   });
 
   it("resolves a weekly period as Monday..Sunday", () => {
-    // 2026-07-28 is a Tuesday.
+
     expect(periodContaining("weekly", "2026-07-28")).toEqual({
       key: "2026-07-27",
       startKey: "2026-07-27",
@@ -481,7 +471,7 @@ describe("budgetPerformance — rollover", () => {
   });
 
   it("accrues carry-over from the budget's start even when the query window starts later", () => {
-    // Jan and Feb are outside the requested window but must still build the carry.
+
     const results = budgetPerformance({
       budgets: [rolling],
       transactions: [tx("2026-01-10", 10_000), tx("2026-02-10", 10_000)],

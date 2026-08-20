@@ -27,7 +27,7 @@ export const travelCities = sqliteTable(
     cityName: text("city_name").notNull(),
     latitude: real("latitude").notNull(),
     longitude: real("longitude").notNull(),
-    // DECISION: DEC-001 — Route meaning comes from an explicit origin, never row order.
+
     originCityId: integer("origin_city_id").references((): AnySQLiteColumn => travelCities.id, {
       onDelete: "set null",
     }),

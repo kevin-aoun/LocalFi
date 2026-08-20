@@ -1,33 +1,4 @@
-/**
- * Reconstruct historical net worth and (only if asked) write it.
- *
- *   node node_modules/tsx/dist/cli.mjs scripts/backfill-history.ts --db /tmp/copy.db
- *   ... --db /tmp/copy.db --all-days
- *   ... --db /tmp/copy.db --migrate            # apply migration 0005 (backed up + verified)
- *   ... --db /tmp/copy.db --apply              # WRITE the reconstructed rows
- *
- * DRY RUN IS THE DEFAULT. With no flags this prints the whole series and writes
- * nothing at all, so the figures can be eyeballed before they become rows.
- * Writing needs `--apply`; writing to the app's own data/budget.db needs
- * `--apply --live` on top, because that file is the owner's real financial
- * history and lib/db/client.ts is a SINGLE WRITER — the Docker stack points at
- * ./data and flushes the database wholesale, so it must be stopped first.
- *
- * Flags:
- *   --db <path>        database to read (sets BUDGET_DB_PATH). Default: data/budget.db
- *   --from <YYYY-MM-DD> first day. Default: the earliest transaction
- *   --to <YYYY-MM-DD>   last day. Default: today (a future day is clamped to today)
- *   --today <YYYY-MM-DD> override "today" (tests and reproducible runs)
- *   --days <n>         price window to request, capped at 365 (the keyless ceiling)
- *   --carry-unpriced   for a holding whose price cannot be known, carry its stored
- *                      value and say so on every affected day (off by default)
- *   --all-days         print every day instead of the head/tail/month-end digest
- *   --migrate          apply migration 0005 to the target first (backup + verify)
- *   --dry-run          the default; stated explicitly it overrides --apply
- *   --apply            write the rows
- *   --live             required alongside --apply/--migrate for data/budget.db
- *   --json             emit the plan as JSON instead of a table
- */
+
 import path from "node:path";
 
 function flag(argv: string[], name: string): boolean {
@@ -48,12 +19,9 @@ async function main() {
   const argv = process.argv.slice(2);
   const dbPath = path.resolve(value(argv, "db") ?? process.env.BUDGET_DB_PATH ?? path.join("data", "budget.db"));
   const isLiveFile = dbPath === path.resolve(path.join("data", "budget.db"));
-  // Dry run is the default, and an explicit --dry-run BEATS --apply: if both are
-  // present the safe reading of the intent is the one that writes nothing.
   const apply = flag(argv, "apply") && !flag(argv, "dry-run");
   const dryRun = !apply;
 
-  // Every database access below — the migration included — goes through this.
   process.env.BUDGET_DB_PATH = dbPath;
 
   console.log("Historical net-worth reconstruction");
@@ -70,17 +38,11 @@ async function main() {
     );
   }
 
-  // Imported lazily and in this order so BUDGET_DB_PATH is set before any module
-  // resolves a database path.
   const { migrateDatabaseTo0005, format0005Report } = await import("@/lib/history/migrate-0005");
   const { runNetWorthReconstruction } = await import("@/lib/history/run");
   const { renderPlan, renderWriteReport } = await import("@/lib/history/format");
 
   if (flag(argv, "migrate")) {
-    // `--migrate` IS the explicit flag for the schema change, so it applies for
-    // real (backed up, verified, restored on any failure, idempotent) even during
-    // a dry run of the reconstruction itself — there is nothing to preview about
-    // two ADD COLUMNs, and the rows cannot be planned without them.
     if (isLiveFile && !flag(argv, "live")) {
       throw new Error(
         `Refusing to migrate ${dbPath} without --live. Stop the Docker stack first ` +
@@ -133,7 +95,6 @@ async function main() {
   }
 }
 
-// Only run when invoked directly, never on import.
 if (/backfill-history\.[cm]?ts$/.test(process.argv[1] ?? "")) {
   main().catch((error) => {
     console.error("");

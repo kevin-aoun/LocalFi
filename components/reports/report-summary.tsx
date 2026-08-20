@@ -1,13 +1,5 @@
 "use client";
 
-/**
- * The four headline figures of a report: money in, money out, what is left, and
- * the savings rate.
- *
- * Every number arrives as integer cents and is rendered with `formatMoney`; the
- * rates arrive as `number | null` and are rendered with `formatSavingsRate`, which
- * prints an em dash rather than `NaN%` when there was no income to divide by.
- */
 import { ArrowDownRight, ArrowUpRight, PiggyBank, Scale } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -54,9 +46,7 @@ export function ReportSummary({ totals, currency }: ReportSummaryProps) {
           <div className="mt-2 text-2xl font-bold tabular-nums">
             {formatMoney(totals.expenseCents, currency)}
           </div>
-          {/* Investment rows subtract from cash in this app, so they ARE money out —
-              but calling a brokerage top-up an "expense" without saying so is how a
-              savings rate reads wrong. Both parts are shown. */}
+          {}
           <p className="mt-1 text-xs text-muted-foreground">
             {formatMoney(totals.consumptionCents, currency)} spent
             {totals.investmentCents !== 0 && (

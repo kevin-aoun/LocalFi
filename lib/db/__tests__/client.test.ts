@@ -1,9 +1,4 @@
-/**
- * Behavioural tests for lib/db/client.ts.
- *
- * Every test runs against its own throwaway directory via the BUDGET_DB_PATH
- * override. The real database (data/budget.db) is never opened by this file.
- */
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   chmodSync,
@@ -37,7 +32,6 @@ async function sqlJs() {
 let tmpDir: string;
 let dbPath: string;
 
-/** Build a standalone sql.js image (never goes through the client under test). */
 async function makeImage(setup: (db: Database) => void): Promise<Buffer> {
   const S = await sqlJs();
   const db = new S.Database();
@@ -47,7 +41,6 @@ async function makeImage(setup: (db: Database) => void): Promise<Buffer> {
   return buf;
 }
 
-/** Read rows out of an image on disk without using the client under test. */
 async function readNames(file: string, table = "items"): Promise<string[]> {
   const S = await sqlJs();
   const db = new S.Database(readFileSync(file));

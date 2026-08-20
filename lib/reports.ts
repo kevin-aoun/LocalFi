@@ -1,46 +1,4 @@
-/**
- * Report arithmetic: cash flow, income vs expense, savings rate, period-over-
- * period and year-over-year comparison, category breakdown — plus the pure
- * serializers behind the CSV export.
- *
- * ## Why this module exists at all
- *
- * The app had no reports. Adding them is dangerous in a specific way: a report is
- * a SECOND OPINION about the user's money, and a second opinion that disagrees
- * with the dashboard is worse than no report. So nothing here re-implements the
- * ledger rule:
- *
- *   - `isTransfer` / `isSpendable` (lib/cash-balance.ts) decide what counts;
- *   - `transactionCashDirection` (lib/cash-balance.ts) decides the stored
- *     DIRECTION, with category metadata used only for legacy in-memory rows;
- *   - `periodContaining` / `periodsBetween` (lib/budgets.ts) decide where a
- *     period starts and ends, so a report month and a budget month are the same
- *     month;
- *   - every calendar day is a 'YYYY-MM-DD' `DateKey` from lib/dates.ts.
- *
- * `reports.test.ts` asserts `flowInRange(...).netCents === deriveCashBalanceCents(...)`
- * over the same rows, so the reports page cannot drift away from the dashboard.
- *
- * ## The conventions, restated because reports are where they get broken
- *
- *   - Money is integer cents. `incomeCents` and `expenseCents` are POSITIVE
- *     MAGNITUDES; `netCents = incomeCents − expenseCents` is signed.
- *   - An Investment category is money OUT (that is the app-wide rule), so it is
- *     part of `expenseCents`. It is also reported on its own as
- *     `investmentCents`, and `consumptionCents = expenseCents − investmentCents`,
- *     because "expenses" that silently include your brokerage transfers makes the
- *     savings rate read low. Both savings-rate measures are offered and labelled.
- *   - PENDING rows are excluded, exactly as they are from the balance. They are
- *     counted and subtotalled (`pendingCount`, `pendingIncomeCents`,
- *     `pendingExpenseCents`) so the UI can say what it left out instead of
- *     quietly dropping it.
- *   - TRANSFERS are never income or expense, anywhere.
- *   - Ratios (savings rate, % change) are the only floats. They are `number | null`
- *     and `null` whenever the denominator is zero — never `NaN`, never `Infinity`.
- *   - There is NO FX in this app. `currencyScope` reports which currencies a range
- *     spans; a mixed range is shown one currency at a time with a caveat, never
- *     added together under a "$".
- */
+
 import {
   isSpendable,
   isTransfer,
@@ -52,48 +10,40 @@ import { periodContaining, periodsBetween, type BudgetPeriod, type PeriodRange }
 import { fromDateKey, isDateKey, toDateKey, type DateKey } from "./dates";
 import { assertCents, negateCents, sumCents, type Cents } from "./money";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-/** A transaction as the report engine sees it: a ledger row on a calendar day. */
 export type ReportTransaction = CashLedgerTransaction & {
   dateKey: DateKey;
-  /** CONTRACT-012 journal fact; positive consumption and negative income. */
+
   categoryMovementCents?: Cents;
 };
 
-/** A category as the report engine sees it. `name` is for labels only. */
 export type ReportCategory = CashLedgerCategory & { name?: string | null };
 
-/** An account as the report engine sees it: an id and a currency. */
 export type ReportAccount = { id: number; name?: string | null; currency?: string | null };
 
-/** The report period lengths — the same set budgets use, deliberately. */
 export type ReportPeriod = BudgetPeriod;
 
 export type FlowTotals = {
-  /** Money in, positive magnitude. Income categories only. */
+
   incomeCents: Cents;
-  /** Money out, positive magnitude. Expense AND Investment categories. */
+
   expenseCents: Cents;
-  /** The Investment slice of `expenseCents` — money out, but arguably saved. */
+
   investmentCents: Cents;
-  /** `expenseCents − investmentCents`: money out that is genuinely spent. */
+
   consumptionCents: Cents;
-  /** `incomeCents − expenseCents`. Equals the cash-balance delta for the range. */
+
   netCents: Cents;
-  /** Rows that contributed to a total. */
+
   countedCount: number;
-  /** Spendable rows whose category is missing/unknown: counted nowhere. */
+
   uncategorizedCount: number;
-  /** Transfer rows seen in the range. Excluded from every total. */
+
   transferCount: number;
-  /** Pending rows seen in the range. Excluded from every total. */
+
   pendingCount: number;
-  /** What the pending rows WOULD have added to income, had they cleared. */
+
   pendingIncomeCents: Cents;
-  /** What the pending rows WOULD have taken out, had they cleared. */
+
   pendingExpenseCents: Cents;
 };
 
@@ -113,10 +63,6 @@ export function emptyFlowTotals(): FlowTotals {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Small local helpers
-// ---------------------------------------------------------------------------
-
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
@@ -134,7 +80,7 @@ function categoryTypeIndex(categories: readonly ReportCategory[]): Map<number, s
   return new Map(categories.map((c) => [c.id, c.type]));
 }
 
-/** "Income" | "Expense" | "Investment", or undefined when the category is unknown. */
+
 function knownType(
   tx: CashLedgerTransaction,
   typeOf: Map<number, string>,
@@ -144,16 +90,11 @@ function knownType(
   return type === "Income" || type === "Expense" || type === "Investment" ? type : undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Cash flow / income vs expense
-// ---------------------------------------------------------------------------
 
-/**
- * Income, expense and net over `[startKey, endKey]`, both ends INCLUSIVE.
- *
- * Every amount is asserted to be integer cents, including on the rows that are
- * excluded, so a leaked float fails loudly instead of quietly skewing a chart.
- */
+
+
+
+
 export function flowInRange(
   transactions: readonly ReportTransaction[],
   categories: readonly ReportCategory[],
@@ -193,7 +134,7 @@ export function flowInRange(
       continue;
     }
 
-    // Order matters: a pending transfer is a TRANSFER, not pending income.
+
     if (isTransfer(tx)) {
       transferCount += 1;
       continue;
@@ -203,7 +144,7 @@ export function flowInRange(
     const direction = transactionCashDirection(tx, type);
 
     if (!isSpendable(tx)) {
-      // The only remaining reason is `pending` (transfers left above).
+
       pendingCount += 1;
       if (direction === "inflow") pendingIncome.push(tx.amountCents);
       else if (direction === "outflow") pendingExpense.push(tx.amountCents);
@@ -211,8 +152,8 @@ export function flowInRange(
     }
 
     if (direction === "none") {
-      // Only a legacy fixture with neither stored direction nor usable category
-      // metadata reaches this branch. Surface it rather than inventing meaning.
+
+
       uncategorizedCount += 1;
       continue;
     }
@@ -245,7 +186,7 @@ export function flowInRange(
 
 export type CashFlowRow = PeriodRange &
   FlowTotals & {
-    /** (income − expenses) / income, or null when the period had no income. */
+
     savingsRate: number | null;
   };
 
@@ -257,42 +198,26 @@ export type CashFlowInput = {
   toKey: DateKey;
 };
 
-/**
- * One row per period overlapping `[fromKey, toKey]`, in calendar order.
- *
- * A period with no activity gets a ZERO row rather than being skipped: a gap in a
- * cash-flow chart reads as "no data available", but "we earned and spent nothing
- * in April" is a fact worth showing.
- *
- * The periods themselves come from `lib/budgets.ts`, so a report month is exactly
- * a budget month (and a report week is Monday..Sunday, like a budget week).
- */
+
 export function cashFlowByPeriod(input: CashFlowInput): CashFlowRow[] {
   const { transactions, categories, period } = input;
   const fromKey = assertKey(input.fromKey, "from date key");
   const toKey = assertKey(input.toKey, "to date key");
   if (fromKey > toKey) return [];
 
-  // `periodsBetween` throws rather than enumerate an absurd number of periods
-  // (a weekly report anchored in 1970); that guard belongs to lib/budgets.ts.
+
+
   return periodsBetween(period, fromKey, toKey).map((range) => {
     const totals = flowInRange(transactions, categories, range.startKey, range.endKey);
     return { ...range, ...totals, savingsRate: savingsRate(totals) };
   });
 }
 
-// ---------------------------------------------------------------------------
-// Ratios: savings rate and percentage change
-// ---------------------------------------------------------------------------
 
-/**
- * Savings rate as a FRACTION: `(income − expenses) / income`.
- *
- * `null` when there was no income at all. That is not a rounding decision: with
- * zero income the expression is 0/0 or −x/0, and "−Infinity%" or "NaN%" on a
- * finance dashboard is worse than an honest em dash. Negative rates are real and
- * are returned as-is (spending more than you earned).
- */
+
+
+
+
 export function savingsRate(totals: Pick<FlowTotals, "incomeCents" | "expenseCents">): number | null {
   assertCents(totals.incomeCents, "incomeCents");
   assertCents(totals.expenseCents, "expenseCents");
@@ -301,14 +226,7 @@ export function savingsRate(totals: Pick<FlowTotals, "incomeCents" | "expenseCen
   return net / totals.incomeCents;
 }
 
-/**
- * Savings rate counting money moved into Investment categories as SAVED rather
- * than spent: `(income − consumption) / income`.
- *
- * Both measures are shown on the page, labelled, because the app books an
- * Investment row as money out (so the cash balance falls) while most people would
- * call that saving. Picking one silently would misinform either way.
- */
+
 export function savingsRateExcludingInvestments(
   totals: Pick<FlowTotals, "incomeCents" | "consumptionCents">,
 ): number | null {
@@ -319,37 +237,27 @@ export function savingsRateExcludingInvestments(
   return net / totals.incomeCents;
 }
 
-/**
- * A fraction as a percentage string, or "—" when there is no number to state.
- * The em dash covers null, NaN and ±Infinity: none of those may ever reach a
- * screen that is telling someone about their money.
- */
+
 export function formatPercent(value: number | null | undefined, digits = 1): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return `${(value * 100).toFixed(digits)}%`;
 }
 
-/** `formatPercent`, named for the place it is used most. */
+
 export function formatSavingsRate(rate: number | null | undefined): string {
   return formatPercent(rate);
 }
 
-// ---------------------------------------------------------------------------
-// Period-over-period and year-over-year
-// ---------------------------------------------------------------------------
 
-/** Days in `month1` (1-12) of `year`, from local components only. */
+
+
+
+
 function daysInMonth(year: number, month1: number): number {
   return new Date(year, month1, 0).getDate();
 }
 
-/**
- * Shift a calendar day by whole years, CLAMPING to the last day of the month.
- *
- * 2024-02-29 minus one year is 2023-02-28, not 2023-03-01 — which is what
- * `new Date(y - 1, m, d)` silently produces, and exactly the kind of
- * wrong-but-plausible date this codebase has been bitten by before.
- */
+
 export function shiftYears(key: DateKey, years: number): DateKey {
   assertKey(key, "date key");
   if (!Number.isInteger(years)) throw new Error(`shiftYears expects whole years, got ${years}`);
@@ -359,7 +267,7 @@ export function shiftYears(key: DateKey, years: number): DateKey {
   return `${year}-${pad2(month)}-${pad2(day)}`;
 }
 
-/** The calendar day before `key`, built from local components. */
+
 export function dayBefore(key: DateKey): DateKey {
   const d = fromDateKey(assertKey(key, "date key"));
   return toDateKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1));
@@ -367,7 +275,7 @@ export function dayBefore(key: DateKey): DateKey {
 
 export type KeyRange = { startKey: DateKey; endKey: DateKey };
 
-/** The period of the same length immediately before `range`. */
+
 export function previousPeriodRange(
   period: ReportPeriod,
   range: PeriodRange | KeyRange,
@@ -375,7 +283,7 @@ export function previousPeriodRange(
   return periodContaining(period, dayBefore(assertKey(range.startKey, "start date key")));
 }
 
-/** The same calendar range one year earlier, with leap days clamped. */
+
 export function sameRangeLastYear(range: KeyRange): KeyRange {
   return {
     startKey: shiftYears(range.startKey, -1),
@@ -384,12 +292,9 @@ export function sameRangeLastYear(range: KeyRange): KeyRange {
 }
 
 export type PeriodDelta = {
-  /** current − previous, in exact cents. */
+
   absoluteCents: Cents;
-  /**
-   * Relative change against the MAGNITUDE of the baseline, as a fraction.
-   * `null` when the baseline is zero — "up from nothing" has no percentage.
-   */
+
   ratio: number | null;
 };
 
@@ -397,12 +302,9 @@ export type FlowComparison = {
   income: PeriodDelta;
   expense: PeriodDelta;
   net: PeriodDelta;
-  /** Change in savings rate, in percentage POINTS. Null if either rate is null. */
+
   savingsRatePoints: number | null;
-  /**
-   * False when the baseline period holds no counted row at all. The UI must say
-   * "no data for the comparison period" rather than imply a 100% improvement.
-   */
+
   previousHasData: boolean;
 };
 
@@ -414,7 +316,7 @@ function delta(currentCents: Cents, previousCents: Cents): PeriodDelta {
   };
 }
 
-/** Current vs baseline. Use with `previousPeriodRange` or `sameRangeLastYear`. */
+
 export function compareFlows(current: FlowTotals, previous: FlowTotals): FlowComparison {
   const currentRate = savingsRate(current);
   const previousRate = savingsRate(previous);
@@ -428,27 +330,24 @@ export function compareFlows(current: FlowTotals, previous: FlowTotals): FlowCom
   };
 }
 
-// ---------------------------------------------------------------------------
-// Category breakdown
-// ---------------------------------------------------------------------------
+
+
+
 
 export type BreakdownDirection = "income" | "expense" | "all";
 
 export type CategoryBreakdownRow = {
-  /** The category id, or the unknown id a row still points at. */
+
   categoryId: number | null;
   name: string;
-  /** "Income" | "Expense" | "Investment", or "Uncategorized". */
+
   type: string;
-  /** Positive magnitude of money in (income) or out (expense/investment). */
+
   totalCents: Cents;
   count: number;
-  /**
-   * Share of the total for this row's DIRECTION, as a fraction. Null when the
-   * direction total is zero, or when the row counts towards no direction.
-   */
+
   share: number | null;
-  /** True when the category is missing or was deleted: it counts towards nothing. */
+
   uncategorized: boolean;
 };
 
@@ -457,18 +356,11 @@ export type CategoryBreakdownInput = {
   categories: readonly ReportCategory[];
   startKey: DateKey;
   endKey: DateKey;
-  /** Default "expense" — the question people actually ask of a breakdown. */
+
   direction?: BreakdownDirection;
 };
 
-/**
- * Where the money went (or came from) over an arbitrary range, largest first.
- *
- * Transfers and pending rows are excluded, exactly as everywhere else. A row
- * whose category was deleted is reported as an explicit "Uncategorized" line
- * rather than dropped, because the money is real even though the label is gone —
- * this has already happened to the live database (see app/actions/categories.ts).
- */
+
 export function categoryBreakdown(input: CategoryBreakdownInput): CategoryBreakdownRow[] {
   const { transactions, categories } = input;
   const direction = input.direction ?? "expense";
@@ -514,7 +406,7 @@ export function categoryBreakdown(input: CategoryBreakdownInput): CategoryBreakd
       buckets.set(key, bucket);
       continue;
     }
-    if (!isSpendable(tx)) continue; // transfers and pending rows, one rule
+    if (!isSpendable(tx)) continue;
 
     const currentType = knownType(tx, typeOf);
     const cashDirection = transactionCashDirection(tx, currentType);
@@ -522,8 +414,8 @@ export function categoryBreakdown(input: CategoryBreakdownInput): CategoryBreakd
     const isOut = cashDirection === "outflow";
 
     if (cashDirection === "none") {
-      // A legacy row with no direction and no usable category appears only in
-      // the "all" view; assigning it a direction here would invent history.
+
+
       if (direction !== "all") continue;
     } else if (direction === "income" && !isIncome) {
       continue;
@@ -567,8 +459,8 @@ export function categoryBreakdown(input: CategoryBreakdownInput): CategoryBreakd
     uncategorized: bucket.uncategorized,
   }));
 
-  // Shares are computed WITHIN a direction: an expense is a share of money out,
-  // never a share of (income + expense), which is not a quantity.
+
+
   const totalIn = sumCents(rows.filter((r) => r.type === "Income").map((r) => r.totalCents));
   const totalOut = sumCents(
     rows.filter((r) => r.type === "Expense" || r.type === "Investment").map((r) => r.totalCents),
@@ -584,9 +476,9 @@ export function categoryBreakdown(input: CategoryBreakdownInput): CategoryBreakd
   );
 }
 
-// ---------------------------------------------------------------------------
-// Currency scope — there is no FX in this app, and none is invented here
-// ---------------------------------------------------------------------------
+
+
+
 
 export function normalizeCurrencyCode(value: unknown): string {
   const code = typeof value === "string" ? value.trim().toUpperCase() : "";
@@ -594,22 +486,16 @@ export function normalizeCurrencyCode(value: unknown): string {
 }
 
 export type ReportCurrencyScope = {
-  /** Every currency the counted rows touch, sorted. */
+
   currencies: string[];
-  /** The currency to show first: most counted rows, ties broken alphabetically. */
+
   primary: string;
   mixed: boolean;
-  /** Counted rows with no account, and therefore no currency of their own. */
+
   unassignedCount: number;
 };
 
-/**
- * Which currencies a set of counted rows spans.
- *
- * A transaction's stored currency is historical truth. Account currency is used
- * only for pre-0009 in-memory rows that do not carry it. Pending rows and
- * transfers are ignored because they are not part of report totals.
- */
+
 export function currencyScope(
   transactions: readonly ReportTransaction[],
   accounts: readonly ReportAccount[],
@@ -644,13 +530,7 @@ export function currencyScope(
   return { currencies, primary, mixed: currencies.length > 1, unassignedCount };
 }
 
-/**
- * Only the rows denominated in `currency`.
- *
- * A row with no account belongs to no currency; `includeUnassigned` decides
- * whether it joins the view being rendered (true only for the primary currency,
- * so it is never counted twice).
- */
+
 export function filterByCurrency<T extends ReportTransaction>(
   transactions: readonly T[],
   accounts: readonly ReportAccount[],
@@ -675,21 +555,17 @@ export function filterByCurrency<T extends ReportTransaction>(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Stored Date -> calendar day
-// ---------------------------------------------------------------------------
+
+
+
 
 export type WithDateKey<T> = Omit<T, "date"> & { dateKey: DateKey };
 
-/**
- * A stored timestamp is turned into a calendar day HERE and nowhere else, using
- * local components (`toDateKey`). Never `toISOString()`: east of UTC that reads
- * back the previous day, which put month-boundary spend in the wrong month.
- */
+
 function asDate(value: Date | string | number): Date {
   if (value instanceof Date) return value;
   if (typeof value === "number") return new Date(value);
-  // A string here is a stored DateKey, never an argument for `new Date(string)`.
+
   if (isDateKey(value)) return fromDateKey(value);
   throw new Error(`Unsupported transaction date: ${JSON.stringify(value)}`);
 }
@@ -703,31 +579,18 @@ export function toReportTransactions<
   });
 }
 
-// ---------------------------------------------------------------------------
-// Export serializers (pure — the action in app/actions/export.ts only feeds them)
-// ---------------------------------------------------------------------------
 
-/**
- * Integer cents -> an exact two-decimal string, with NO float arithmetic at all.
- *
- * `centsToDecimal` exists for chart axes and returns a float; a file the user
- * opens in a spreadsheet deserves better than `45.50000000000001`, so the digits
- * are assembled from the integer directly. `parseAmount(centsToDecimalString(c))
- * === c` is asserted for a spread of values, including the classic float traps.
- */
+
+
+
+
 export function centsToDecimalString(cents: Cents): string {
   assertCents(cents, "cents");
   const abs = Math.abs(cents);
   return `${cents < 0 ? "-" : ""}${Math.floor(abs / 100)}.${pad2(abs % 100)}`;
 }
 
-/**
- * The header row, in this order. The first four names are exactly what
- * `components/transactions/import-logic.ts` looks for (`Date`, `Category`,
- * `Amount`, `Description`), so the app can read its own export back — see
- * lib/__tests__/reports-csv-roundtrip.test.ts. `Type` is recognised too. The
- * rest are context the importer ignores.
- */
+
 export const CSV_HEADERS = [
   "Date",
   "Category",
@@ -740,13 +603,10 @@ export const CSV_HEADERS = [
   "Currency",
 ] as const;
 
-/**
- * A UTF-8 BOM. Without it Excel mis-decodes non-ASCII descriptions; SheetJS
- * strips it on read, so it costs the round-trip nothing.
- */
+
 export const CSV_BOM = "\uFEFF";
 
-/** RFC 4180: quote a field containing a comma, a quote, CR or LF; double the quotes. */
+
 export function toCsvField(value: string | null | undefined): string {
   const s = value == null ? "" : String(value);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -756,24 +616,16 @@ export type CsvTransactionRow = {
   dateKey: DateKey;
   categoryName: string;
   categoryType: string;
-  /** Stored magnitude in integer cents. Direction is carried by `categoryType`. */
+
   amountCents: Cents;
   description: string | null | undefined;
   accountName: string | null | undefined;
   pending: boolean;
-  /** Set only for a transfer. Such a row has no category and cannot be re-imported. */
+
   transferAccountName: string | null | undefined;
   currency: string;
 };
 
-/**
- * A CSV of transactions, CRLF-terminated, that the app's own importer can read.
- *
- * The `Amount` column is the stored MAGNITUDE, not a signed figure: the importer
- * takes `absCents` of whatever it finds and derives the direction from the
- * category (see the sign rule in import-logic.ts), so a magnitude plus a category
- * is the only combination that round-trips exactly.
- */
 export function buildTransactionsCsv(rows: readonly CsvTransactionRow[]): string {
   const lines = [CSV_HEADERS.join(",")];
   for (const row of rows) {

@@ -1,17 +1,5 @@
 "use client";
 
-/**
- * The Reports page.
- *
- * Everything on screen is derived by `lib/reports.ts` from the ledger the server
- * handed over, which in turn composes `lib/cash-balance.ts` (what counts as income
- * and expense), `lib/budgets.ts` (where a period starts and ends) and
- * `lib/dates.ts` (calendar days). Nothing is re-derived here — that is what keeps
- * this page from contradicting the dashboard and the budgets page.
- *
- * The arithmetic lives in tested pure functions; this file only chooses ranges,
- * catches a bad custom date, and lays the results out.
- */
 import { useMemo, useState } from "react";
 import {
   AlertTriangle,
@@ -112,13 +100,13 @@ export default function ReportsClient({
     rangeForPreset("year-to-date", todayKey)?.startKey ?? todayKey,
   );
   const [customTo, setCustomTo] = useState<string>(todayKey);
-  /** null = follow the range's own suggestion. */
+
   const [periodOverride, setPeriodOverride] = useState<ReportPeriod | null>(null);
   const [comparison, setComparison] = useState<ComparisonMode>("year-over-year");
   const [direction, setDirection] = useState<BreakdownDirection>("expense");
-  /** Bar table or pie — the same rows, drawn two ways. Not persisted. */
+
   const [categoryView, setCategoryView] = useState<CategoryView>("bar");
-  /** null = the dominant currency of the range. */
+
   const [currencyOverride, setCurrencyOverride] = useState<string | null>(null);
 
   const colors = useMemo(
@@ -141,8 +129,6 @@ export default function ReportsClient({
 
       const period = periodOverride ?? suggestPeriod(range);
 
-      // Which currencies this range actually touches. There is NO FX in this app,
-      // so a mixed range is reported one currency at a time rather than summed.
       const inRange = transactions.filter(
         (tx) => tx.dateKey >= range.startKey && tx.dateKey <= range.endKey,
       );
@@ -150,8 +136,7 @@ export default function ReportsClient({
       const currency = currencyOverride ?? scope.primary;
       const scoped = scope.mixed
         ? filterByCurrency(transactions, accounts, currency, {
-            // Account-less rows have no currency; they join the dominant view only,
-            // so they are never counted in two currencies at once.
+
             includeUnassigned: currency === scope.primary,
           })
         : transactions;
@@ -210,10 +195,6 @@ export default function ReportsClient({
     transactions,
   ]);
 
-  // Derived from the SAME `report.breakdown` the table renders, so the two views
-  // cannot disagree about a figure. Computed unconditionally (hooks may not be
-  // called behind a branch); an unreadable range yields an empty pie that is
-  // never rendered, because the error state replaces the card entirely.
   const categoryPie = useMemo(
     () => buildCategoryPie(report.ok ? report.breakdown : [], colors),
     [report, colors],
@@ -243,7 +224,7 @@ export default function ReportsClient({
         </TabsList>
       </Tabs>
 
-      {/* Controls ---------------------------------------------------------- */}
+      {}
       <Card>
         <CardContent className="flex flex-wrap items-end gap-4 p-5">
           <div className="space-y-1.5">
@@ -354,7 +335,7 @@ export default function ReportsClient({
         <InvestmentPerformance rows={investmentHistory} range={report.range} />
       ) : (
         <>
-          {/* No FX, stated rather than fudged. */}
+          {}
           {describeCurrencyCaveat(report.scope) && (
             <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -367,7 +348,7 @@ export default function ReportsClient({
 
           <ReportSummary totals={report.totals} currency={report.currency} />
 
-          {/* What was left out, said out loud. */}
+          {}
           {(describeExclusions(report.totals).length > 0 || describeUnassigned(report.scope)) && (
             <div className="space-y-1 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
               {describeExclusions(report.totals).map((note) => (
@@ -435,12 +416,7 @@ export default function ReportsClient({
 
           <Card>
             <CardHeader className="flex flex-row items-start justify-between gap-4">
-              {/*
-                `space-y-1.5` is on CardHeader, but overriding `flex-col` with
-                `flex-row` above turns it into horizontal spacing between this
-                block and the tabs — so the title/description pair loses the gap
-                every other card has. Restate it here rather than on the header.
-              */}
+              {}
               <div className="space-y-1.5">
                 <CardTitle>Comparison</CardTitle>
                 <CardDescription>
@@ -471,7 +447,7 @@ export default function ReportsClient({
 
           <Card>
             <CardHeader className="flex flex-row items-start justify-between gap-4">
-              {/* Same flex-row/space-y-1.5 interaction as the Comparison card above. */}
+              {}
               <div className="space-y-1.5">
                 <CardTitle>By category</CardTitle>
                 <CardDescription>{formatRangeLabel(report.range)}</CardDescription>
@@ -486,10 +462,7 @@ export default function ReportsClient({
                     ))}
                   </TabsList>
                 </Tabs>
-                {/*
-                  Bar vs pie is a presentation choice over identical numbers, so
-                  it is view state only — nothing here reaches a server action.
-                */}
+                {}
                 <Tabs
                   value={categoryView}
                   onValueChange={(v) => isCategoryView(v) && setCategoryView(v)}

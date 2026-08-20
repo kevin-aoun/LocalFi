@@ -58,14 +58,13 @@ type ImportDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   categories: Category[];
-  /** Accounts the imported rows can be filed against. Empty is fine. */
+
   accounts?: AccountOption[];
-  /** `getDefaultAccountId()` — pre-selected target account. */
+
   defaultAccountId?: number | null;
   onSuccess: () => void;
 };
 
-/** What the user chose for ambiguous `d/m/y` values. "auto" = trust the file. */
 type DateOrder = "auto" | "day-first" | "month-first";
 
 export function ImportDialog({
@@ -80,33 +79,25 @@ export function ImportDialog({
   const [step, setStep] = useState<"upload" | "review">("upload");
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
-  /** Which account the batch is filed against. "" = leave them unassigned. */
+
   const [accountId, setAccountId] = useState<string>(
     defaultAccountId == null ? "" : String(defaultAccountId),
   );
-  /** Name of the file being reviewed, so the review step says what it is reading. */
+
   const [fileName, setFileName] = useState<string>("");
 
-  /** Raw sheet rows are kept so changing the date order can RE-PARSE the file. */
   const [rawRows, setRawRows] = useState<SpreadsheetRow[]>([]);
   const [detection, setDetection] = useState<DateOrderDetection | null>(null);
   const [dateOrder, setDateOrder] = useState<DateOrder>("auto");
-  /** Row numbers the user removed in the review table. */
+
   const [removed, setRemoved] = useState<Set<number>>(new Set());
-  /** Category overrides keyed by row number. */
+
   const [overrides, setOverrides] = useState<Record<number, number>>({});
   const [showMissingDialog, setShowMissingDialog] = useState(false);
   const [localCategories, setLocalCategories] = useState<Category[]>(categories);
 
   const effectiveCategories = localCategories.length > 0 ? localCategories : categories;
 
-  /**
-   * `dayFirst` is NEVER a silent default. It comes from unambiguous evidence in
-   * the file (`detectDateOrder`) unless the user overrides it with the toggle.
-   * When the file gives no evidence we fall back to month-first ONLY because
-   * something must be chosen — and the toggle is shown prominently so the user
-   * can correct it before anything is written.
-   */
   const dayFirst =
     dateOrder === "day-first" ? true : dateOrder === "month-first" ? false : detection?.dayFirst ?? false;
 
@@ -115,7 +106,6 @@ export function ImportDialog({
     [rawRows, effectiveCategories, dayFirst],
   );
 
-  /** Apply the review table's edits on top of the parsed rows. */
   const reviewRows: ParsedImportRow[] = useMemo(
     () =>
       parsedRows
@@ -153,7 +143,7 @@ export function ImportDialog({
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-selecting the same file
+    e.target.value = "";
     if (!file) return;
 
     setError(null);
@@ -165,8 +155,6 @@ export function ImportDialog({
       }
       assertImportFileSize(file.size);
 
-      // The maintained xlsx reader and bounded CSV reader converge on the same
-      // review/dedupe pipeline before any row is sent to the server.
       const rows = isCsvFilename(file.name)
         ? readCsvRows(await file.text())
         : await readSpreadsheetRows(file);
@@ -213,7 +201,7 @@ export function ImportDialog({
 
         const result = await createCategory(formData);
         if ("error" in result && result.error) {
-          // Surface it: a rejected category means those rows cannot import.
+
           setError(`Could not create category "${missing.name}": ${result.error}`);
           return;
         }
@@ -235,16 +223,16 @@ export function ImportDialog({
     setSummary(null);
 
     try {
-      // ONE server action, ONE database write, all-or-nothing.
+
       const result = await importTransactions(
         plan.toImport.map((row) => ({
           date: row.date as string,
           categoryId: row.categoryId,
-          // Decimal string; the action parses it back with tryParseAmount.
+
           amount: centsToDecimal(row.amountCents).toString(),
           comment: row.comment,
         })),
-        // "" means "leave them unassigned" — the explicit bucket, not a guess.
+
         { accountId: accountId === "" ? null : Number(accountId) },
       );
 

@@ -48,11 +48,6 @@ export type InvestmentHistoryRow = {
   label: string;
 };
 
-/**
- * Holding values written alongside the daily net-worth ledger, oldest first.
- * Only investable categories are exposed here; houses, vehicles, and cash stay
- * in net worth without pretending they are market investments.
- */
 export async function getInvestmentHistory(): Promise<InvestmentHistoryRow[]> {
   const rows = await readDb((_db, raw) => readPositionHistory(raw));
 
@@ -83,11 +78,11 @@ type AssetFields = {
   currency: string;
   notes: string | null;
   commodityType: "Gold" | "Silver" | "Platinum" | "Palladium" | null;
-  /** Physical weight; NOT money, so a real. `null` means "not provided". */
+
   quantity: number | null;
   unit: "oz" | "grams" | null;
   useLivePrice: boolean;
-  /** Raw form value for the manual Current Value field. */
+
   rawCurrentValue: string | null;
 };
 
@@ -130,8 +125,8 @@ function readFields(formData: FormData): AssetFields {
     commodityType: formData.get("commodityType")
       ? (formData.get("commodityType") as "Gold" | "Silver" | "Platinum" | "Palladium")
       : null,
-    // EXPLICIT null check: `quantity ? …` treated a quantity of 0 as "absent",
-    // which silently turned live pricing off and fell back to the typed value.
+
+
     quantity: quantityText === "" ? null : Number(quantityText),
     unit: formData.get("unit") ? (formData.get("unit") as "oz" | "grams") : null,
     useLivePrice: formData.get("useLivePrice") === "true",
@@ -141,7 +136,7 @@ function readFields(formData: FormData): AssetFields {
   };
 }
 
-/** Resolve a real value or explicit error before any database write. */
+
 async function resolveCurrentValue(
   fields: AssetFields,
 ): Promise<{ valueCents: Cents } | { error: string }> {
@@ -189,7 +184,7 @@ export async function createAsset(formData: FormData) {
   try {
     const fields = readFields(formData);
 
-    // Prevent manual creation of the derived Cash asset.
+
     if (fields.category === "Cash") {
       return { error: "Cash is calculated from your transactions and cannot be added by hand." };
     }
@@ -197,13 +192,13 @@ export async function createAsset(formData: FormData) {
     const resolved = await resolveCurrentValue(fields);
     if ("error" in resolved) return resolved;
 
-    // DECISION: DEC-004 — a provider quote is USD. A caller cannot relabel it.
+
     const currency =
       fields.category === "Commodities" && fields.useLivePrice ? "USD" : fields.currency;
 
     const asset = await withDb(async (db, raw) => {
-      // DECISION: DEC-013 — every current asset row is an instrument projection;
-      // hand-valued assets keep a unique valuation identity.
+
+
       const liveSymbol =
         fields.category === "Commodities" && fields.useLivePrice
           ? priceSymbolForCommodityType(fields.commodityType)
@@ -269,8 +264,8 @@ export async function createAsset(formData: FormData) {
       return projected;
     });
 
-    // A standalone asset counts towards net worth, so /accounts moves too.
-    // `revalidate` never turns a committed write into a reported failure.
+
+
     revalidate("/", "/accounts");
     return { success: true, data: asset };
   } catch (error) {
@@ -299,7 +294,7 @@ export async function updateAsset(id: number, formData: FormData) {
     const resolved = await resolveCurrentValue(fields);
     if ("error" in resolved) return resolved;
 
-    // DECISION: DEC-004 — a provider quote is USD. A caller cannot relabel it.
+
     const currency =
       fields.category === "Commodities" && fields.useLivePrice ? "USD" : fields.currency;
 
@@ -386,8 +381,8 @@ export async function updateAsset(id: number, formData: FormData) {
       return projected;
     });
 
-    // A standalone asset counts towards net worth, so /accounts moves too.
-    // `revalidate` never turns a committed write into a reported failure.
+
+
     revalidate("/", "/accounts");
     return { success: true, data: asset };
   } catch (error) {
@@ -396,7 +391,7 @@ export async function updateAsset(id: number, formData: FormData) {
   }
 }
 
-/** Archive or restore a holding without touching any of its daily history. */
+
 export async function setAssetArchived(id: number, archived: boolean) {
   try {
     const outcome = await withDb(async (db) => {
@@ -423,7 +418,7 @@ export async function setAssetArchived(id: number, archived: boolean) {
   }
 }
 
-/** Permanent erasure. Callers must pass an explicit confirmation. */
+
 export async function deleteAsset(id: number, options?: { confirmed?: boolean }) {
   try {
     const outcome = await withDb(async (db, raw) => {
@@ -455,8 +450,8 @@ export async function deleteAsset(id: number, options?: { confirmed?: boolean })
     });
 
     if ("error" in outcome) return outcome;
-    // A standalone asset counts towards net worth, so /accounts moves too.
-    // `revalidate` never turns a committed write into a reported failure.
+
+
     revalidate("/", "/accounts");
     return outcome;
   } catch (error) {

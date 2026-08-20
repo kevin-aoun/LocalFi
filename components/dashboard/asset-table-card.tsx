@@ -1,7 +1,5 @@
 "use client";
 
-/** Expandable asset-category rows. Grouping and filter arithmetic live in asset-table.ts. */
-
 import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import { Archive, ChevronDown, ChevronRight, Eye, EyeOff, Pencil, Trash2 } from "lucide-react";
@@ -23,7 +21,6 @@ import {
   type AssetTableView,
 } from "./asset-table";
 
-/** The 10-segment weight meter, rounded from the row's own share. */
 function WeightMeter({ percentage }: { percentage: number | null }) {
   const filled = Math.round(barWidth(percentage) / 10);
   return (
@@ -38,11 +35,6 @@ function WeightMeter({ percentage }: { percentage: number | null }) {
   );
 }
 
-/**
- * A category's share. One line per currency: a category spanning USD and EUR has
- * two shares — of two different totals — and averaging them would be inventing an
- * exchange rate.
- */
 function CategoryWeight({
   entries,
   showCurrency,
@@ -65,11 +57,6 @@ function CategoryWeight({
   );
 }
 
-/**
- * The eye. Removes a row from every figure on this screen, so its label says so
- * rather than just "Hide" — the owner should not have to discover that hiding
- * moved his total.
- */
 function HideButton({ label, onHide }: { label: string; onHide: () => void }) {
   return (
     <Tooltip>
@@ -88,14 +75,7 @@ function HideButton({ label, onHide }: { label: string; onHide: () => void }) {
   );
 }
 
-/**
- * Per-holding controls.
- *
- * An ACCOUNT line has no `assets` row behind it: Edit and Delete here would act on
- * nothing, or — worse — on an unrelated asset with a colliding id. It gets a link
- * to the page that owns it instead. The discriminated union in ./asset-table.ts
- * makes this a compile-time choice, not a convention.
- */
+
 function HoldingActions<T extends SidebarAssetRow>({
   holding,
   onEdit,
@@ -200,9 +180,9 @@ function CategoryRows<T extends SidebarAssetRow>({
                 </span>
               </button>
             ) : (
-              // Exactly one holding: no disclosure triangle, and the holding's own
-              // detail sits on the category row rather than one click below a
-              // number it would only repeat.
+
+
+
               <div className="flex items-start gap-2 p-1">
                 <span className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: assetCategoryColor(category.name) }} />
                 <div>
@@ -228,11 +208,7 @@ function CategoryRows<T extends SidebarAssetRow>({
           />
         </td>
 
-        {/* The `title` here was conditional, so the tooltip is too: an unmixed
-            total gets no trigger at all rather than an empty one. The trigger is
-            the inner div, not the `<td>` — Radix would put button semantics and
-            event handlers on a table cell otherwise — and it takes `tabIndex` so
-            the currency list is reachable without a mouse. */}
+        {}
         <td className="px-6 py-4 text-right font-medium">
           {category.mixed ? (
             <Tooltip>
@@ -258,9 +234,9 @@ function CategoryRows<T extends SidebarAssetRow>({
 
         <td className="px-6 py-4">
           {inline === null ? (
-            // A collapsible category has no single record to act on, so Edit and
-            // Delete belong to the holdings inside it — but the eye still works at
-            // the category level: it hides every holding underneath it at once.
+
+
+
             <div className="flex items-center justify-end gap-2">
               {!expanded && (
                 <span className="text-xs text-muted-foreground">Expand to edit</span>
@@ -314,17 +290,7 @@ function CategoryRows<T extends SidebarAssetRow>({
   );
 }
 
-/**
- * THE WARNING. Rendered by the page between the heading total and the allocation
- * bar — the two things the filter changes — whenever `filter.active`.
- *
- * It is deliberately a banner and not a badge: the owner asked for hiding to
- * change the figures, and a control that changes money on screen must announce
- * itself in words. `filter.notice` names how many holdings are excluded, what
- * they are worth, and the real unfiltered total, so the number beside it cannot
- * be mistaken for his actual position. The wording is built and tested in
- * ./asset-table.ts.
- */
+
 export function AssetFilterNotice<T extends SidebarAssetRow>({
   filter,
   onShow,
@@ -356,8 +322,7 @@ export function AssetFilterNotice<T extends SidebarAssetRow>({
         </Button>
       </div>
 
-      {/* Every hidden holding, by name and value, each restorable on its own — so
-          the owner can see exactly what he removed rather than a bare count. */}
+      {}
       <div className="mt-3 flex flex-wrap gap-2 pl-8">
         {filter.hidden.map((holding) => (
           <Tooltip key={holding.key}>
@@ -393,13 +358,13 @@ export function AssetTable<T extends SidebarAssetRow>({
   onEdit: (asset: T) => void;
   onArchive: (assetId: number) => void;
   onDelete: (assetId: number) => void;
-  /** Hide these holding keys. View state only — never written anywhere. */
+
   onHide: (keys: string[]) => void;
   onShowAll: () => void;
 }) {
-  // Seeded once from the pure rule in ./asset-table.ts, then owned by the user.
-  // Keyed on the category keys so a reload with a new category does not reset a
-  // deliberate collapse, but a genuinely different portfolio re-seeds.
+
+
+
   const seed = useMemo(() => defaultExpandedKeys(view), [view]);
   const [overrides, setOverrides] = useState<Map<string, boolean>>(new Map());
 
@@ -432,9 +397,7 @@ export function AssetTable<T extends SidebarAssetRow>({
             </tr>
           </thead>
           <tbody>
-            {/* Everything hidden. NOT the "no assets yet" empty state: the owner
-                has assets, he has filtered them all out, and the difference
-                matters — so the row says so and offers the way back. */}
+            {}
             {view.filter.allHidden ? (
               <tr>
                 <td colSpan={4} className="px-6 py-10 text-center">

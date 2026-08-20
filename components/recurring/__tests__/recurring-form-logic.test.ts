@@ -1,12 +1,4 @@
-/**
- * Unit tests for the pure logic behind the Recurring Transactions UI.
- *
- * There is no jsdom/RTL harness in this repo, so everything the dialog and the
- * list decide — form -> FormData mapping, validation, frequency wording, the
- * "what will post" preview and the generation report copy — lives in
- * `recurring-form-logic.ts` where it can be asserted directly, including under
- * the extreme timezones `bun run test:tz` runs at.
- */
+
 import { describe, expect, it } from "vitest";
 
 import { fromDateKey } from "@/lib/dates";
@@ -48,10 +40,6 @@ function state(overrides: Partial<RecurringFormState> = {}): RecurringFormState 
   };
 }
 
-// ---------------------------------------------------------------------------
-// A 0 amount is a real value, not "absent"
-// ---------------------------------------------------------------------------
-
 describe("a zero amount", () => {
   it("is valid", () => {
     expect(validateRecurringForm(state({ amount: "0" }))).toBeNull();
@@ -81,10 +69,6 @@ describe("a zero amount", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The month-end trap: a monthly template anchored on the 31st
-// ---------------------------------------------------------------------------
-
 describe("a monthly template starting on the 31st", () => {
   const rule: RecurrenceRule = {
     frequency: "monthly",
@@ -103,7 +87,7 @@ describe("a monthly template starting on the 31st", () => {
       "2026-04-30",
       "2026-05-31",
     ]);
-    // The anchor day is never mutated: the 31st comes back in every long month.
+
     expect(preview.exhausted).toBe(false);
     expect(preview.nextDue).toBe("2026-01-31");
   });
@@ -126,7 +110,7 @@ describe("a monthly template starting on the 31st", () => {
   it("says nothing for an anchor day that exists in every month", () => {
     expect(monthEndNote({ ...rule, startDate: "2026-01-15" })).toBeNull();
     expect(monthEndNote({ ...rule, startDate: "2026-01-28" })).toBeNull();
-    // Daily/weekly rules have no month-end behaviour to explain.
+
     expect(monthEndNote({ ...rule, frequency: "weekly", startDate: "2026-01-31" })).toBeNull();
   });
 
@@ -150,16 +134,12 @@ describe("a monthly template starting on the 31st", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// An end date that lands before the next due occurrence
-// ---------------------------------------------------------------------------
-
 describe("an end date before the next due date", () => {
   const rule: RecurrenceRule = {
     frequency: "monthly",
     interval: 1,
     startDate: "2026-01-31",
-    // Feb 28 is the next occurrence, so this end date kills the rule.
+
     endDate: "2026-02-15",
   };
 
@@ -189,7 +169,7 @@ describe("an end date before the next due date", () => {
       state({ startDate: fromDateKey("2026-03-01"), endDate: fromDateKey("2026-02-01") }),
     );
     expect(bad).toMatch(/end date/i);
-    // Same day is fine: a one-off occurrence.
+
     expect(
       validateRecurringForm(
         state({ startDate: fromDateKey("2026-03-01"), endDate: fromDateKey("2026-03-01") }),
@@ -197,10 +177,6 @@ describe("an end date before the next due date", () => {
     ).toBeNull();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Frequency wording, especially interval > 1
-// ---------------------------------------------------------------------------
 
 describe("frequencyLabel", () => {
   it("drops the count when the interval is 1", () => {
@@ -237,10 +213,6 @@ describe("parseInterval", () => {
     expect(validateRecurringForm(state({ interval: "1.5" }))).toMatch(/interval/i);
   });
 });
-
-// ---------------------------------------------------------------------------
-// form -> FormData mapping
-// ---------------------------------------------------------------------------
 
 describe("buildRecurringFormValues", () => {
   it("serialises calendar days with toDateKey, never toISOString", () => {
@@ -295,20 +267,16 @@ describe("validateRecurringForm", () => {
     expect(validateRecurringForm(state({ accountId: "1", transferAccountId: "1" }))).toMatch(
       /different/i,
     );
-    // A transfer with a category is rejected by the server; catch it in the dialog.
+
     expect(
       validateRecurringForm(state({ accountId: "1", transferAccountId: "2", categoryId: "5" })),
-    ).toBeNull(); // the builder drops the category, so this is not an error
+    ).toBeNull();
   });
 
   it("accepts a valid template", () => {
     expect(validateRecurringForm(state())).toBeNull();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Presentation of dates and status
-// ---------------------------------------------------------------------------
 
 describe("formatDateKey", () => {
   it("formats a key without going through UTC", () => {
@@ -357,10 +325,6 @@ describe("upcomingThroughKey", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Upcoming preview
-// ---------------------------------------------------------------------------
-
 describe("upcoming preview", () => {
   const items = [
     {
@@ -391,7 +355,7 @@ describe("upcoming preview", () => {
     const days = groupUpcomingByDate(items);
     expect(days.map((d) => d.key)).toEqual(["2026-08-01", "2026-09-01"]);
     expect(days[0].entries.map((e) => e.name)).toEqual(["Rent", "Netflix"]);
-    // A 0-amount occurrence is a real occurrence and must appear.
+
     expect(days[0].entries[1].amountCents).toBe(0);
     expect(days[0].totalCents).toBe(120_000);
   });
@@ -401,16 +365,11 @@ describe("upcoming preview", () => {
     expect(totals.occurrences).toBe(3);
     expect(totals.dueNow).toBe(2);
     expect(totals.later).toBe(1);
-    // Every OCCURRENCE counts, not every template: rent posts twice.
-    // The broken template contributes nothing because it has no due days.
+
     expect(totals.totalCents).toBe(240_000);
     expect(totals.errors).toEqual(["Broken: Invalid recurrence interval"]);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Generation report copy — both numbers, always
-// ---------------------------------------------------------------------------
 
 describe("summarizeGenerationReport", () => {
   function report(overrides: Partial<GenerationReportLike> = {}): GenerationReportLike {

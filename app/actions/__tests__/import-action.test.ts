@@ -1,17 +1,4 @@
-/**
- * Regression tests for the batch import action (item 4).
- *
- * The old import called the single-row `createTransaction` once per spreadsheet
- * line. Each of those did a full database read + a full-ledger cash
- * re-derivation + a full atomic file write, with no transaction and no
- * de-duplication, so:
- *   - an n-row import performed n complete database rewrites;
- *   - a failure on row k left rows 1..k-1 committed with no way back;
- *   - re-importing the same file doubled every row.
- *
- * Each of those three is asserted below. Every test runs against its own
- * throwaway database via BUDGET_DB_PATH; data/budget.db is never touched.
- */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_IMPORT_ROWS } from "@/components/transactions/import-logic";
 import { verifyLedger } from "@/lib/ledger";
@@ -20,7 +7,6 @@ import { createTempDb, execOn, seedCategory, seedTransaction, type TempDb } from
 const revalidatePathMock = vi.hoisted(() => vi.fn());
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 
-/** Counts how many times the whole import takes the database lock and flushes. */
 let withDbCalls = 0;
 vi.mock("@/lib/db/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/db/client")>();

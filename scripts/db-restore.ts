@@ -63,7 +63,7 @@ export async function runDbRestore(args = process.argv.slice(2)) {
     return null;
   }
 
-  // DECISION: DEC-005 -- even a restore preview must refuse a live writer.
+
   const lease = await acquireWriterLease(options.dbPath);
   try {
     const result = await restoreDatabase({ ...options, lease });

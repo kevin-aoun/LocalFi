@@ -1,19 +1,4 @@
-/**
- * End-to-end wiring for the dashboard headline and its net-worth chart.
- *
- * The bug this defends against spanned two files that each looked right on their
- * own: the home page printed `deriveCashBalanceCents(...)` (the ledger counted
- * from zero, no opening balances, no liabilities) while /accounts printed
- * `getNetWorth()`. The two pages showed different numbers for the same database.
- *
- * These tests therefore run the REAL actions against a throwaway database and
- * assert that what `snapshotNetWorth()` writes is exactly what the chart plots,
- * and that the chart's last point is the figure the headline prints. The pure
- * series logic is unit-tested separately in net-worth-series.test.ts.
- *
- * data/budget.db (the user's real financial history) is never opened: the fixture
- * creates its own file under mkdtemp and points BUDGET_DB_PATH at it.
- */
+
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -67,7 +52,6 @@ describe("record-today entry points", () => {
   });
 });
 
-/** Last day of the month before `now` — always before the 1st of this month. */
 function endOfLastMonthKey(now = new Date()): string {
   return toDateKey(endOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1)));
 }
@@ -110,7 +94,6 @@ describe("the chart plots what the headline prints", () => {
     const live = await getNetWorth();
     const series = buildNetWorthSeries(await getNetWorthHistory());
 
-    // $5,000 cash + $300,000 house − $250,000 mortgage.
     expect(live.totalAssetsCents).toBe(30_500_000);
     expect(live.totalLiabilitiesCents).toBe(25_000_000);
     expect(live.netWorthCents).toBe(5_500_000);
@@ -118,7 +101,7 @@ describe("the chart plots what the headline prints", () => {
     expect(series.latest?.netWorthCents).toBe(live.netWorthCents);
     expect(series.latest?.totalAssetsCents).toBe(live.totalAssetsCents);
     expect(series.latest?.totalLiabilitiesCents).toBe(live.totalLiabilitiesCents);
-    // Same input, no contradiction to disclose.
+
     expect(describeSnapshotDrift(live.netWorthCents, series.latest)).toBeNull();
   });
 
@@ -136,7 +119,7 @@ describe("the chart plots what the headline prints", () => {
 
     expect(listed.map((row) => row.name)).toEqual(["Mortgage"]);
     expect(listed[0].owedCents).toBe(25_000_000);
-    // Gross assets would have read +$5,000; net worth is −$245,000.
+
     expect(live.netWorthCents).toBe(-24_500_000);
     expect(live.netWorthCents).toBeLessThan(live.totalAssetsCents);
   });
@@ -146,7 +129,7 @@ describe("the chart plots what the headline prints", () => {
       { name: "Checking", kind: "asset", type: "Checking", openingBalanceCents: 100_000 },
       "2000-01-01",
     );
-    // What `syncCashAsset` writes: the ledger, mirrored into the assets table.
+
     seedAsset(temp, { category: "Cash", currentValueCents: 100_000 });
     seedAsset(temp, { category: "Savings", currentValueCents: 25_000 });
 
@@ -166,7 +149,6 @@ describe("the chart plots what the headline prints", () => {
     );
     await snapshotNetWorth({ dateKey: endOfLastMonthKey() });
 
-    // A new account appears after that snapshot: net worth has moved since.
     seedAccount(temp, { name: "Savings", kind: "asset", type: "Savings", openingBalanceCents: 50_000 });
 
     const live = await getNetWorth();
@@ -208,8 +190,7 @@ describe("history accrues into a plottable trend", () => {
     await snapshotNetWorth();
 
     const series = buildNetWorthSeries(await getNetWorthHistory());
-    // Three recordings on one day are ONE point; otherwise the chart would show a
-    // vertical stack of identical points and imply movement.
+
     expect(series.points).toHaveLength(1);
     expect(series.status).toBe("single");
   });

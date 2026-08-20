@@ -1,29 +1,5 @@
 "use server";
 
-/**
- * Recurring transactions: templates for rent, salary and subscriptions, plus the
- * materialiser that turns them into real ledger rows.
- *
- * ## Why this is the most dangerous action in the app
- *
- * A generator that posts one occurrence too many silently invents money; one that
- * posts one too few silently loses it; and either mistake compounds every month.
- * So idempotency here rests on THREE independent things, in order of strength:
- *
- *   1. A partial UNIQUE index on `transactions(recurring_id, recurring_occurrence)`
- *      — the database itself rejects a second row for the same (template, day).
- *   2. An explicit existence check before each insert, so a re-run reports
- *      `skipped` instead of raising a constraint error.
- *   3. The `last_generated` cursor, which makes the common case cheap.
- *
- * Occurrence dates come from lib/recurrence.ts, which computes them from the
- * template's ANCHOR (`start_date`) by index — so "the 31st" clamps to Feb 28 for
- * February only and returns to the 31st in March, instead of drifting to the 28th
- * forever.
- *
- * Generation runs inside ONE `withDb` call, so either every due occurrence and
- * the advanced cursors are persisted, or nothing is.
- */
 import { and, asc, eq } from "drizzle-orm";
 import type { Database } from "sql.js";
 import { revalidate } from "@/lib/revalidate";
@@ -58,13 +34,12 @@ import {
 
 export type ActionResult<T> = { success: true; data: T } | { error: string };
 
-/** What `generateDueTransactions` did, per template and in total. */
 export type GenerationReport = {
-  /** The day generation ran through, inclusive. */
+
   throughKey: DateKey;
-  /** Transactions actually inserted. */
+
   posted: number;
-  /** Due occurrences that were already on the ledger (a repeat run). */
+
   skipped: number;
   templates: Array<{
     id: number;
@@ -73,7 +48,7 @@ export type GenerationReport = {
     skipped: DateKey[];
     lastGenerated: DateKey | null;
     nextDue: DateKey | null;
-    /** Set when this template was skipped entirely, with the reason. */
+
     error?: string;
   }>;
 };
@@ -123,7 +98,7 @@ function recurringMovements(raw: Database, row: Transaction) {
   return buildProjectedTransactionMovements(raw, row);
 }
 
-/** DECISION: DEC-011 — templates stay mutable; only confirmed occurrences post events. */
+
 function postRecurringProjection(raw: Database, row: Transaction, templateName: string): void {
   const movements = recurringMovements(raw, row);
   const event = postLedgerEventRaw(raw, {
@@ -189,7 +164,7 @@ async function assertTemplateTransferCurrency(
   }
 }
 
-/** The recurrence rule of a stored template. */
+
 function ruleOf(template: RecurringTransaction): RecurrenceRule {
   return {
     frequency: template.frequency,
@@ -199,11 +174,11 @@ function ruleOf(template: RecurringTransaction): RecurrenceRule {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Queries
-// ---------------------------------------------------------------------------
 
-/** Every template, oldest first. Archived templates are excluded by default. */
+
+
+
+
 export async function getRecurringTransactions(options?: {
   includeArchived?: boolean;
 }): Promise<RecurringTransaction[]> {
@@ -218,11 +193,7 @@ export async function getRecurringTransactions(options?: {
   });
 }
 
-/**
- * What each active template will post between now and `throughKey`, WITHOUT
- * writing anything. This is the preview a "Due soon" panel renders, and it is
- * also how a caller can see what `generateDueTransactions` is about to do.
- */
+
 export async function getUpcomingRecurring(options?: { throughKey?: DateKey }) {
   const throughKey = options?.throughKey ?? todayKey();
   if (!isDateKey(throughKey)) throw new Error(`Invalid throughKey: ${String(throughKey)}`);
@@ -255,20 +226,11 @@ export async function getUpcomingRecurring(options?: { throughKey?: DateKey }) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Mutations
-// ---------------------------------------------------------------------------
 
-/**
- * Create a template.
- *
- * Fields: name, amount, frequency, startDate ('YYYY-MM-DD'), interval,
- * accountId, transferAccountId (makes each occurrence a transfer), categoryId,
- * comment, endDate.
- *
- * `next_due` is computed here so the "what is coming up" query never has to
- * re-derive it.
- */
+
+
+
+
 export async function createRecurringTransaction(
   formData: FormData,
 ): Promise<ActionResult<RecurringTransaction>> {
@@ -333,12 +295,7 @@ export async function createRecurringTransaction(
   }
 }
 
-/**
- * Update a template. Only the fields present in `formData` change.
- *
- * Changing the rule recomputes `next_due` from `last_generated`, so an edit never
- * re-posts an occurrence that has already been materialised.
- */
+
 export async function updateRecurringTransaction(
   id: number,
   formData: FormData,
@@ -397,7 +354,7 @@ export async function updateRecurringTransaction(
           interval,
           startDate,
           endDate,
-          // Recomputed, never carried over blindly: the rule may have moved.
+
           nextDue: nextOccurrenceAfter(rule, existing.lastGenerated),
           archived: formData.has("archived")
             ? formData.get("archived") === "true"
@@ -417,7 +374,7 @@ export async function updateRecurringTransaction(
   }
 }
 
-/** Pause or resume a template. Paused templates generate nothing. */
+
 export async function setRecurringArchived(
   id: number,
   archived: boolean,
@@ -440,11 +397,7 @@ export async function setRecurringArchived(
   }
 }
 
-/**
- * Delete a template. Transactions it already generated are KEPT — their
- * `recurring_id` is set to NULL by the foreign key — because they are real
- * spending that happened.
- */
+
 export async function deleteRecurringTransaction(id: number): Promise<ActionResult<{ id: number }>> {
   try {
     await withDb(async (db, raw) => {
@@ -468,17 +421,7 @@ export async function deleteRecurringTransaction(id: number): Promise<ActionResu
   }
 }
 
-/**
- * Materialise every occurrence that is due on or before `throughKey` (today by
- * default) into real transactions.
- *
- * IDEMPOTENT: running it twice in one day posts nothing the second time. Catch-up
- * across several missed months posts each missed occurrence exactly once, on its
- * own calendar day — not all lumped onto today.
- *
- * A template with an unusable rule is reported in `templates[].error` and skipped;
- * one bad template never blocks the others.
- */
+
 export async function generateDueTransactions(options?: {
   throughKey?: DateKey;
 }): Promise<ActionResult<GenerationReport>> {
@@ -553,8 +496,8 @@ export async function generateDueTransactions(options?: {
         }
 
         for (const occurrence of due) {
-          // Belt to the partial UNIQUE index's braces: report a repeat run as
-          // "skipped" rather than letting it raise a constraint error.
+
+
           const existing = await db
             .select({ id: transactions.id })
             .from(transactions)
@@ -571,8 +514,8 @@ export async function generateDueTransactions(options?: {
           }
 
           const [projected] = await db.insert(transactions).values({
-            // Local midnight of the occurrence day: the row belongs to the day it
-            // is due, so it lands in the right budget period.
+
+
             date: fromDateKey(occurrence),
             categoryId: template.categoryId,
             accountId: template.accountId,
@@ -590,14 +533,14 @@ export async function generateDueTransactions(options?: {
           result.posted++;
         }
 
-        // The cursor advances over everything that is now on the ledger, whether
-        // this run posted it or a previous one did.
-        //
-        // Take the MAXIMUM rather than the last element: `posted` and `skipped`
-        // are each ascending, but concatenating them is not sorted in general, so
-        // indexing the tail could move the cursor BACKWARDS and re-post an
-        // occurrence. In practice a re-run skips a prefix and posts a suffix, so
-        // the tail happens to be correct — this makes it true by construction.
+
+
+
+
+
+
+
+
         const settled = [...entry.posted, ...entry.skipped];
         const lastGenerated = settled.length
           ? settled.reduce((max, key) => (key > max ? key : max))
@@ -616,7 +559,7 @@ export async function generateDueTransactions(options?: {
         result.templates.push(entry);
       }
 
-      // The derived Cash asset must not drift behind the rows we just posted.
+
       if (result.posted > 0) await syncCashAssetWithin(db);
 
       return result;
@@ -632,10 +575,7 @@ export async function generateDueTransactions(options?: {
   }
 }
 
-/**
- * Names of the accounts and categories a template can point at — a convenience
- * for building the template form without a second round trip.
- */
+
 export async function getRecurringFormOptions() {
   return readDb(async (db) => ({
     accounts: await db

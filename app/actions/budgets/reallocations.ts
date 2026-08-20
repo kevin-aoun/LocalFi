@@ -19,7 +19,7 @@ function requireMonth(value: string | null): string {
   return value;
 }
 
-/** Parse a percentage to basis points without float arithmetic (50.25 -> 5025). */
+
 function parsePercentageBasisPoints(value: string | null): number {
   const raw = value?.trim().replace(/%$/, "") ?? "";
   const match = /^(\d{1,3})(?:\.(\d{1,2}))?$/.exec(raw);
@@ -50,7 +50,7 @@ function monthlyBudgetFor(
   };
 }
 
-/** Reallocations, oldest first, optionally restricted to one calendar month. */
+
 export async function getBudgetReallocations(options?: {
   month?: string;
 }): Promise<BudgetReallocationView[]> {
@@ -73,12 +73,7 @@ export async function getBudgetReallocations(options?: {
   });
 }
 
-/**
- * Move part of one monthly budget to another for exactly one month.
- * Percentage entry is resolved against the source category's current allocation
- * for that month, after any earlier reallocations.
- * The resulting cents are stored, so later budget edits cannot rewrite history.
- */
+
 export async function createBudgetReallocation(
   formData: FormData,
 ): Promise<ActionResult<BudgetReallocation>> {

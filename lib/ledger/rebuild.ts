@@ -48,7 +48,6 @@ function insertTransaction(raw: Database, eventId: string, transaction: Record<s
   });
 }
 
-/** Repair only the provenance-marked Cash row; documented extras stay untouched. */
 export function rebuildCashAssetProjectionRaw(raw: Database): void {
   const cash = deriveCashAssetProjectionFromJournal(raw);
   if (cash.kind === "invalid-marker") {
@@ -86,7 +85,7 @@ export function rebuildCashAssetProjectionRaw(raw: Database): void {
   }
 }
 
-/** CONTRACT-014: raw projection rebuild used by the leased command and migration tests. */
+
 export function rebuildLedgerProjectionsRaw(raw: Database): LedgerRebuildResult {
     const before = verifyLedgerRaw(raw);
     if (before.failures.some((item) => item.invariant === "projection.cash_marker")) {
@@ -170,7 +169,7 @@ export function rebuildLedgerProjectionsRaw(raw: Database): LedgerRebuildResult 
     return result;
 }
 
-/** CONTRACT-014: rebuilds projections only; journal tables are never mutated. */
+
 export async function rebuildLedgerProjections(): Promise<LedgerRebuildResult> {
   return withDb((_db, raw) => rebuildLedgerProjectionsRaw(raw));
 }

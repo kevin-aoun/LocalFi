@@ -43,7 +43,7 @@ export function sha256Hex(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-/** DECISION: DEC-014 — hash the versioned payload including ordered movements and previous hash. */
+
 export function hashLedgerEvent(payload: LedgerCanonicalPayload): string {
   return sha256Hex(canonicalStringify(payload));
 }

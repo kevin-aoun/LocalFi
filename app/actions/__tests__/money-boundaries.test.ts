@@ -1,12 +1,4 @@
-/**
- * Boundary tests: money crossing into and out of the app must go through
- * lib/money, never through Number()/parseFloat()/toFixed().
- *
- * These tests read the source of the server actions and the money-bearing
- * components as text. That is deliberate: the point of the refactor is that no
- * float ever touches a money value, and the cheapest durable guard against a
- * regression is to assert the forbidden idioms are absent from these files.
- */
+
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -29,8 +21,7 @@ describe("input boundary uses parseAmount", () => {
   });
 
   it("round-trips cents -> form field string -> cents without drift", () => {
-    // This is how the dialogs pre-fill a money input and how the import dialog
-    // hands an amount to the server action.
+
     const values = [0, 1, 5, 10, 70, 4500, 4550, 12050, 123456, 500000, 532371, -4500, 449618];
     for (const cents of values) {
       const formValue = centsToDecimal(cents).toString();

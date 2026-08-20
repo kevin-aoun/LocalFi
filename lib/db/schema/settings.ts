@@ -20,7 +20,7 @@ export const quickCommands = sqliteTable("quick_commands", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   command: text("command").notNull(),
   categoryName: text("category_name").notNull(),
-  /** Pre-filled transaction amount in integer cents. Never a float. */
+
   amountCents: integer("amount_cents").notNull().$type<Cents>(),
   comment: text("comment").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" })

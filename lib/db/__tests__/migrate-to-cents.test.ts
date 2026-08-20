@@ -1,10 +1,4 @@
-/**
- * Tests for the float -> integer-cents conversion of the money columns.
- *
- * Every test builds its OWN fixture database in a fresh temp directory by
- * replaying migrations 0000 and 0001 (the pre-cents schema) and inserting float
- * rows. The real database at data/budget.db is never opened here.
- */
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -48,7 +42,6 @@ function execScript(db: Database, sql: string) {
   }
 }
 
-/** A pre-cents (float) database with the given float rows written to `file`. */
 function buildFixture(
   file: string,
   rows: {

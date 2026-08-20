@@ -1,26 +1,5 @@
 "use client";
 
-/**
- * Create/edit one BUDGET — a limit for a category over a real period, with
- * effective dates and rollover.
- *
- * This is not the category dialog (that is `budget-dialog.tsx`, which still owns
- * name/type/icon/colour and the legacy `monthly_limit_cents`). What was missing
- * before is everything this dialog adds:
- *   - a period other than "calendar month";
- *   - an effective window, so last quarter's limit stays true for last quarter;
- *   - rollover of an unused surplus.
- *
- * INCOME CATEGORIES ARE NOT OFFERED. A budget is a spending limit, so it makes
- * no sense on a paycheque; the dropdown lists `budgetableCategories` only and
- * `createBudget` / `updateBudget` refuse one regardless of the caller.
- *
- * All money crosses to the server as a DECIMAL STRING (the house transport
- * convention) and is parsed with `parseAmount` there; a limit of "0" is a real
- * ceiling and is always sent. Calendar controls exchange DateKeys directly.
- * DECISION: DEC-008, DEC-009.
- */
-
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 
@@ -66,9 +45,9 @@ type BudgetRuleDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   categories: CategoryOption[];
-  /** The budget being edited, or null to create a new one. */
+
   budget?: EditableBudget | null;
-  /** Pre-selected category when creating from a category's "Add budget" button. */
+
   defaultCategoryId?: number;
   onSuccess: () => void;
 };
@@ -82,7 +61,7 @@ export function BudgetRuleDialog({
   onSuccess,
 }: BudgetRuleDialogProps) {
   const [loading, setLoading] = useState(false);
-  /** Server-side failure to show the user; null when there is nothing wrong. */
+
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<BudgetRuleFormState>(() =>
     budgetFormStateFrom(null, todayKey(), { categoryId: defaultCategoryId }),
@@ -94,16 +73,12 @@ export function BudgetRuleDialog({
     setFormData(budgetFormStateFrom(budget ?? null, todayKey(), { categoryId: defaultCategoryId }));
   }, [budget, defaultCategoryId, open]);
 
-  /** Everything except Income: a budget is a spending limit. */
   const selectableCategories = useMemo(() => budgetableCategories(categories), [categories]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
 
-    // Validated here so an unusable value never reaches the action; "0" passes.
-    // `categories` (not `selectableCategories`) so a category that is Income is
-    // named in the refusal instead of reading as "unknown category".
     const invalid = validateBudgetForm(formData, categories);
     if (invalid) {
       setError(invalid);
@@ -115,8 +90,6 @@ export function BudgetRuleDialog({
       const payload = toBudgetFormData(formData);
       const result = budget ? await updateBudget(budget.id, payload) : await createBudget(payload);
 
-      // The action reports failure by RETURNING { error }; the dialog stays open
-      // so the message can be read.
       if (result && "error" in result && result.error) {
         setError(result.error);
         return;
@@ -189,7 +162,7 @@ export function BudgetRuleDialog({
                   setFormData((prev) =>
                     budget
                       ? { ...prev, period: value as BudgetPeriod }
-                      : // Creating: snap the start date to the new period's start.
+                      :
                         withPeriod(prev, value as BudgetPeriod),
                   )
                 }

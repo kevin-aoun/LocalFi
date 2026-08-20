@@ -1,12 +1,4 @@
-/**
- * A malformed date must never reach the database.
- *
- * `new Date(<garbage>)` produces an Invalid Date, and the driver stores that as a
- * NaN timestamp — the row lands on the ledger permanently undated, counts toward
- * balances, and cannot be filed into any month. `createTransfer` already guarded
- * against this; `createTransaction` and `updateTransaction` did not, which is the
- * inconsistency these tests pin.
- */
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -53,7 +45,7 @@ describe("createTransaction date validation", () => {
     );
 
     expect(result).toMatchObject({ error: expect.any(String) });
-    // The important half: nothing was written.
+
     expect(await getTransactions()).toHaveLength(0);
   });
 
@@ -64,9 +56,9 @@ describe("createTransaction date validation", () => {
     expect(result).toMatchObject({ success: true });
 
     const [row] = await getTransactions();
-    // Local calendar components — never a UTC-shifted day.
+
     expect(row.date.getFullYear()).toBe(2026);
-    expect(row.date.getMonth()).toBe(6); // July
+    expect(row.date.getMonth()).toBe(6);
     expect(row.date.getDate()).toBe(4);
     expect(row.direction).toBe("outflow");
     expect(row.currency).toBe("USD");
@@ -150,7 +142,7 @@ describe("updateTransaction date validation", () => {
 
     const [row] = await getTransactions();
     expect(Number.isNaN(row.date.getTime())).toBe(false);
-    expect(row.date.getDate()).toBe(1); // still 2026-07-01
+    expect(row.date.getDate()).toBe(1);
   });
 
   it("rejects a negative edit and preserves the stored amount and semantics", async () => {

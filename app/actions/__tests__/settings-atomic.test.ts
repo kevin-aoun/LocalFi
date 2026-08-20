@@ -1,12 +1,4 @@
-/**
- * Regression test for item 11: `updateSettings` could lose every quick command.
- *
- * The old implementation ran, in order: `getDb()`, `delete(quickCommands)`, one
- * `insert` per command, then `saveDb()`. With no transaction, a throw in the
- * middle of the loop left the in-memory database holding the deletion plus a
- * partial re-insert — and the next `saveDb()` from any other action would flush
- * that. Saving settings once could permanently destroy the user's shortcuts.
- */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTempDb, seedQuickCommand, type TempDb } from "./support/temp-db";
 
@@ -66,8 +58,7 @@ describe("updateSettings is atomic", () => {
       ...base,
       quickCommands: [
         { id: 1, command: "coffee", categoryName: "Coffee", amountCents: 350, comment: "Latte" },
-        // A float instead of integer cents: exactly the failure that used to
-        // fire AFTER the delete and after the first insert.
+
         { id: 2, command: "broken", categoryName: "Rent", amountCents: 12.5, comment: "Rent" },
         { id: 3, command: "salary", categoryName: "Salary", amountCents: 500000, comment: "Monthly" },
       ],
@@ -75,7 +66,6 @@ describe("updateSettings is atomic", () => {
 
     expect(result).toMatchObject({ error: expect.stringContaining("integer number of cents") });
 
-    // Nothing was deleted and nothing was half-written.
     expect(storedCommands()).toEqual([
       { command: "coffee", category_name: "Coffee", amount_cents: 350, comment: "Latte" },
       { command: "rent", category_name: "Rent", amount_cents: 120000, comment: "Rent" },
@@ -91,8 +81,6 @@ describe("updateSettings is atomic", () => {
       quickCommands: [{ id: 1, command: "broken", categoryName: "X", amountCents: 0.5, comment: "" }],
     });
 
-    // This is the second half of the old bug: an unrelated save flushing the
-    // wreckage left in the shared in-memory image.
     await saveDb();
 
     expect(storedCommands()).toEqual([
@@ -110,7 +98,6 @@ describe("updateSettings is atomic", () => {
       quickCommands: [{ id: 1, command: "broken", categoryName: "X", amountCents: 1.5, comment: "" }],
     });
 
-    // Even the settings row is untouched: the whole call is one unit.
     const settings = await getSettings();
     expect(settings.userName).toBe("");
     expect(settings.quickCommands.map((c) => c.command)).toEqual(["coffee"]);

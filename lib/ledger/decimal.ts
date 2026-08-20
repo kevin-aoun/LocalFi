@@ -1,4 +1,4 @@
-/** Expand a finite decimal input and return its unique non-exponent form. */
+
 export function canonicalDecimal(input: string | number): string {
   let value = typeof input === "number" ? String(input) : input;
   if (typeof input === "number" && !Number.isFinite(input)) {

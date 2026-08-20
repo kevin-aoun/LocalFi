@@ -1,13 +1,4 @@
-/**
- * `db:init` must be targetable at a temp file.
- *
- * It used to hard-code `<cwd>/data/budget.db`, which meant every script and test
- * that wanted a throwaway database either hand-rolled the journal replay or
- * risked pointing the initialiser at the user's real financial history. Honouring
- * BUDGET_DB_PATH (the same variable lib/db/client.ts reads) removes that hazard.
- *
- * This test drives the script as a subprocess, because that is how it is used.
- */
+
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -69,7 +60,7 @@ describe("lib/db/init.ts", () => {
     writeFileSync(dbPath, "not really a database but definitely not empty");
 
     expect(() => runInit(dbPath)).toThrow();
-    // The file must be exactly as it was.
+
     expect(statSync(dbPath).size).toBe("not really a database but definitely not empty".length);
   }, 60_000);
 
@@ -81,8 +72,7 @@ describe("lib/db/init.ts", () => {
   }, 60_000);
 
   it("still defaults to data/budget.db when the variable is unset", () => {
-    // Only the resolver is checked here — actually running it would target the
-    // user's real database.
+
     const previous = process.env.BUDGET_DB_PATH;
     process.env.BUDGET_DB_PATH = "";
     try {

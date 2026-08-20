@@ -69,11 +69,7 @@ type ChainEvent = {
   amendsEventId: string | null;
 };
 
-/**
- * DECISION: DEC-011 — operational state is the sum of one complete amendment
- * chain, dated by its latest snapshot. Individual delta events remain available
- * only through the raw journal tables for audit and verification.
- */
+
 export function readCurrentMovements(
   raw: Database,
   options: { fromKey?: DateKey; toKey?: DateKey } = {},
@@ -201,12 +197,12 @@ export type SignedCategoryMovement = {
   position: number;
   dateKey: DateKey;
   categoryId: number;
-  /** CONTRACT-012: positive is consumption; negative is income. */
+
   movementCents: number;
   currency: string;
 };
 
-/** Migration-only compatibility bucket for confirmed rows that had no real account. */
+
 export function readUnassignedAccountMovements(
   raw: Database,
   options: {
@@ -243,7 +239,7 @@ function readTargetMovements(
     .filter((movement) => movement.targetType === targetType);
 }
 
-/** Journal-native real-account movements, including openings and amendment deltas. */
+
 export function readAccountMovements(
   raw: Database,
   options: { fromKey?: DateKey; toKey?: DateKey } = {},
@@ -260,7 +256,7 @@ export function readAccountMovements(
   }));
 }
 
-/** Journal-native category facts. Shared categories remain shared by target id. */
+
 export function readCategoryMovements(
   raw: Database,
   options: { fromKey?: DateKey; toKey?: DateKey } = {},
@@ -285,7 +281,7 @@ export type LedgerAccountBalance = {
   activityCents: number;
 };
 
-/** Sum signed real-account legs. Account kind never participates in arithmetic. */
+
 export function readAccountBalances(
   raw: Database,
   options: {
@@ -343,7 +339,7 @@ export type ExactPositionState = {
   bookAmountMinor: number;
 };
 
-/** Replay exact quantity and money legs; never infer a lot or quantity from price. */
+
 export function readPositionStates(
   raw: Database,
   asOfKey?: DateKey,
@@ -385,7 +381,7 @@ export type PositionValuation = ExactPositionState & {
   valueMinor: number;
 };
 
-/** Value replayed positions only from timestamped observations at or before the day. */
+
 export function readPositionValuations(
   raw: Database,
   asOfKey: DateKey,
@@ -441,7 +437,7 @@ export function readPositionValuations(
 
 export type PositionHistoryPoint = PositionValuation & { dateKey: DateKey };
 
-/** Sparse exact history: position-change and observation days only, with no invented prices. */
+
 export function readPositionHistory(raw: Database): PositionHistoryPoint[] {
   const days = [...new Set([
     ...readCurrentMovements(raw)

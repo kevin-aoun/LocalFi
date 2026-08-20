@@ -1,25 +1,13 @@
-/**
- * Renders a reconstruction plan for a human to EYEBALL BEFORE ANYTHING IS
- * WRITTEN. Pure string building — no clock, no database, no network — so the
- * dry-run output is reproducible and testable.
- *
- * What it must make obvious, in this order:
- *   1. which half of each figure is exact (accounts) and which is estimated (holdings);
- *   2. when each holding started existing, and how that date was determined;
- *   3. whether the purchase day is continuous — the model's defining property;
- *   4. every reason a row would be labelled `reconstructed` rather than `recorded`;
- *   5. what a write would actually do, including how many real snapshots it would
- *      refuse to touch.
- */
+
 import { formatMoney, negateCents, sumCents, type Cents } from "@/lib/money";
 import type { DateKey } from "@/lib/dates";
 
 import type { ReconstructionPlan, WriteReport } from "./run";
 
 export type RenderOptions = {
-  /** Print every single day instead of the head/tail/month-end digest. */
+
   allDays?: boolean;
-  /** How many days to show at each end of the digest. */
+
   edge?: number;
 };
 
@@ -40,11 +28,6 @@ function isMonthEnd(dateKey: DateKey, next: DateKey | undefined): boolean {
   return dateKey.slice(0, 7) !== next.slice(0, 7);
 }
 
-/**
- * Which days to print. A year is 405 rows; showing all of them by default buries
- * the parts that matter, so the digest keeps both ends in full and one row per
- * month in between. `--all-days` prints the lot.
- */
 function selectDays(plan: ReconstructionPlan, options: RenderOptions): Array<{ index: number; elided: number }> {
   const { days } = plan;
   const edge = options.edge ?? 10;
@@ -58,7 +41,7 @@ function selectDays(plan: ReconstructionPlan, options: RenderOptions): Array<{ i
   for (let i = 0; i < days.length; i++) {
     if (isMonthEnd(days[i].dateKey, days[i + 1]?.dateKey)) wanted.add(i);
   }
-  // Acquisition days: the whole point of the model is what happens on them.
+
   for (const holding of plan.holdings) {
     const at = days.findIndex((d) => d.dateKey === holding.acquiredOn);
     if (at >= 0) {

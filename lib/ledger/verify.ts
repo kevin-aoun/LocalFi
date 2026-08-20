@@ -171,7 +171,7 @@ export type DerivedCashAssetProjection =
       marker: string | null;
     });
 
-/** CONTRACT-014 Cash is derived from canonical current transaction snapshots. */
+
 export function deriveCashAssetProjectionFromJournal(
   raw: Database,
 ): DerivedCashAssetProjection {
@@ -238,7 +238,7 @@ const REQUIRED_GUARDS = [
   "instruments_protect_ledger_update",
 ];
 
-/** CONTRACT-014: structured, private-data-safe verification. */
+
 export function verifyLedgerRaw(raw: Database): LedgerVerificationResult {
   const failures: LedgerFailure[] = [];
   const triggers = new Set(

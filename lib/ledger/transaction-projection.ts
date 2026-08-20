@@ -28,7 +28,6 @@ export function projectionEpochSeconds(value: Date | number): number {
   return seconds;
 }
 
-/** Canonical current transaction snapshot shared by every confirmed producer. */
 export function buildTransactionProjection(
   row: TransactionProjectionSource,
   allocations: readonly TransactionProjectionAllocation[] = [],

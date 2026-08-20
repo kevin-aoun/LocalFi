@@ -1,19 +1,4 @@
-/**
- * Recurring-transaction materialisation, tested hard.
- *
- * This is the action most likely to silently corrupt a ledger: one occurrence too
- * many invents money, one too few loses it, and either mistake compounds monthly.
- * The cases below are the ones that actually go wrong in the wild:
- *
- *   - running the generator twice in one day (must post nothing the second time);
- *   - catching up across several missed months (each month once, on its own day);
- *   - a month-end anchor like the 31st passing through February;
- *   - an end date that falls part-way through a catch-up run;
- *   - a template deleted after it has generated rows (history must survive).
- *
- * Every test runs against its own mkdtemp database via BUDGET_DB_PATH.
- * data/budget.db is never opened.
- */
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { verifyLedger } from "@/lib/ledger";
 
@@ -40,8 +25,7 @@ let temp: DomainDb;
 
 beforeEach(async () => {
   temp = await createDomainDb();
-  // The 0003 migration seeds account 1 ("Main"); add a savings account and the
-  // two categories the templates below use.
+
   seedAccount(temp, { id: 2, name: "Savings", kind: "asset", type: "Savings" });
   seedCategory(temp, { id: 1, name: "Rent", type: "Expense" });
   seedCategory(temp, { id: 2, name: "Salary", type: "Income" });
@@ -51,7 +35,6 @@ afterEach(async () => {
   await temp.cleanup();
 });
 
-/** Rows this template has materialised, in occurrence order. */
 function generated(templateId: number) {
   return temp.query(
     `SELECT recurring_occurrence, amount_cents, direction, currency, category_id, account_id, transfer_account_id, date,

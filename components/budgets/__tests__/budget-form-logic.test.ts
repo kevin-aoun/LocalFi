@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-// Vitest's repository include glob currently names only *.test.ts. Import the
-// owned TSX component suite so normal `bun run test` executes it as part of this file.
 import "./budget-goals.test.tsx";
 
 import {

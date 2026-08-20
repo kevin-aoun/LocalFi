@@ -14,7 +14,6 @@ import {
   todayKey,
 } from "@/lib/dates";
 
-/** Local-component key, computed independently of the implementation. */
 function localKey(d: Date): string {
   const y = d.getFullYear();
   const m = d.getMonth() + 1;

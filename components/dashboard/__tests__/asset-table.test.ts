@@ -1,43 +1,4 @@
-/**
- * Tests for the home page's assets table.
- *
- * What these exist to prevent:
- *
- *  1. **The original bug.** The table rendered one row per HOLDING, so two crypto
- *     holdings printed two rows both labelled "Crypto", each with its own
- *     percentage — while the allocation bar directly above them had already merged
- *     them into a single Crypto slice.
- *
- *  2. **A third grouping implementation.** The strongest test here is
- *     "the table and the bar are the same objects": every figure a category row
- *     prints must be an element of the `allocationRows()` array the bar renders,
- *     by identity — not a recomputation that happens to agree today. It must hold
- *     while filtered too.
- *
- *  3. **Double-counted cash.** Cash is now a LINE ITEM rather than a footnote, but
- *     it is sourced from the account balances, and the auto-derived `Cash` asset
- *     row — which mirrors the same ledger — is still dropped. `deriveNetWorth`'s
- *     figure must come out identical, to the cent, from the rows the table lists.
- *     That is the "net worth did not change" proof, and it is the point of the
- *     `net worth is untouched` block below.
- *
- *  4. **A believed filtered number.** Hiding a holding EXCLUDES it from the
- *     totals and the percentages, by the owner's explicit choice. So the filtered
- *     figure must always arrive with a warning that names the count, the excluded
- *     value and the real total — and the arithmetic behind net worth must not
- *     notice the filter at all.
- *
- *  5. **A cross-currency sum.** There is no FX source. A category — or a set of
- *     hidden holdings — spanning USD and EUR keeps one entry per currency and must
- *     never collapse into one "$".
- *
- *  6. **Falsy zero.** A holding worth exactly 0 is a real holding and is listed; a
- *     category totalling exactly 0 renders, and a currency totalling 0 yields "—",
- *     never "NaN%" or "Infinity%".
- *
- * The component is not tested here — there is no jsdom in this repo, which is
- * exactly why every decision lives in ../asset-table.ts.
- */
+
 import { describe, expect, it } from "vitest";
 
 import type { AccountRow } from "@/components/accounts/account-form-logic";
@@ -70,10 +31,6 @@ import {
   withHidden,
   type AssetTableInput,
 } from "../asset-table";
-
-// ---------------------------------------------------------------------------
-// Builders
-// ---------------------------------------------------------------------------
 
 let nextId = 1;
 
@@ -111,18 +68,10 @@ function account(values: Partial<AccountRow> & { name: string }): AccountRow {
   };
 }
 
-/** No accounts at all — the shape most of the older assertions were written for. */
 function noAccounts(): AccountRow[] {
   return [];
 }
 
-/**
- * The owner's actual portfolio: two priced crypto holdings, one priced metal, one
- * `Main` account, plus the Cash row `syncCashAsset` maintains from the ledger.
- *
- * The derived Cash row and the `Main` balance are the SAME money seen two ways —
- * which is the whole reason only one of them may be listed.
- */
 const OWNER_CASH_CENTS = 4_496_18;
 
 function ownerAssets(): SidebarAssetRow[] {
@@ -164,10 +113,6 @@ function ownerPortfolio(): AssetTableInput<SidebarAssetRow> {
   return { assets: ownerAssets(), accounts: ownerAccounts() };
 }
 
-// ---------------------------------------------------------------------------
-// Cash is a line item
-// ---------------------------------------------------------------------------
-
 describe("cash is a row in the table, not a footnote", () => {
   it("lists a Cash category built from the account balances", () => {
     const view = buildAssetTable(ownerPortfolio());
@@ -193,8 +138,7 @@ describe("cash is a row in the table, not a footnote", () => {
     const holding = cash.holdings[0];
 
     expect(holding.source).toBe("account");
-    // The discriminated union is what stops the Delete control from being wired
-    // to an `assets` row that does not exist.
+
     expect(holding.asset).toBeNull();
     expect(holding.source === "account" && holding.account.id).toBe(1);
     expect(holding.key).toBe("account-1");
@@ -255,7 +199,7 @@ describe("cash is a row in the table, not a footnote", () => {
       "Crypto holding",
     ]);
     expect(view.visibleTotalsLabel).toBe("$500.00");
-    // The debt appears nowhere as a positive number.
+
     expect(view.visibleTotalsLabel).not.toContain("300,000");
   });
 
@@ -285,14 +229,10 @@ describe("cash is a row in the table, not a footnote", () => {
     const view = buildAssetTable({ assets: ownerAssets(), accounts: noAccounts() });
     expect(view.categories.map((category) => category.name)).not.toContain(CASH_CATEGORY);
     expect(view.cashAccountCount).toBe(0);
-    // ...and the derived row is still reported, so the UI can explain the gap.
+
     expect(view.derivedCashLabel).toBe("$4,496.18");
   });
 });
-
-// ---------------------------------------------------------------------------
-// The derived Cash asset row is still not double-counted
-// ---------------------------------------------------------------------------
 
 describe("the derived Cash asset row", () => {
   it("is never listed — the Cash category is always account-sourced", () => {
@@ -305,9 +245,7 @@ describe("the derived Cash asset row", () => {
   });
 
   it("is not counted twice: the Cash row is the account's figure, not the asset's", () => {
-    // The two disagree on purpose here — the derived asset row is the ledger from
-    // zero, the account balance includes an opening balance. Reading the wrong one
-    // would be visible immediately.
+
     const view = buildAssetTable({
       assets: [
         asset({ id: 1, category: DERIVED_CASH_CATEGORY, currentValueCents: 812_34 }),
@@ -319,7 +257,7 @@ describe("the derived Cash asset row", () => {
     const cash = view.categories.find((category) => category.name === CASH_CATEGORY)!;
     expect(cash.totalLabel).toBe("$5,000.00");
     expect(cash.count).toBe(1);
-    // Neither the sum of the two (5,812.34) nor the asset row alone (812.34).
+
     expect(view.visibleTotalsLabel).toBe("$5,100.00");
     expect(view.visibleTotalsLabel).not.toContain("812");
     expect(view.visibleTotalsLabel).not.toContain("5,912");
@@ -348,21 +286,13 @@ describe("the derived Cash asset row", () => {
     });
     expect(view.isEmpty).toBe(true);
     expect(view.categories).toEqual([]);
-    // ...but the user is still told where their cash went.
+
     expect(view.derivedCashLabel).toBe("$812.34");
   });
 });
 
-// ---------------------------------------------------------------------------
-// NET WORTH IS UNTOUCHED
-// ---------------------------------------------------------------------------
-
 describe("net worth is untouched by moving cash into the list", () => {
-  /**
-   * A ledger with everything that could go wrong in it: an opening balance (so
-   * the account balance and the derived Cash row DISAGREE), a pending row, a
-   * transfer, an unassigned row and a mortgage.
-   */
+
   const categories: CashLedgerCategory[] = [
     { id: 1, type: "Income" },
     { id: 2, type: "Expense" },
@@ -382,7 +312,7 @@ describe("net worth is untouched by moving cash into the list", () => {
   ];
 
   const standaloneAssets: SidebarAssetRow[] = [
-    // The derived Cash row: the ledger from zero, ignoring the opening balance.
+
     asset({ id: 1, category: DERIVED_CASH_CATEGORY, currentValueCents: 2_000_00 - 503_82 }),
     asset({ id: 2, category: "Crypto", currentValueCents: 99_62 }),
     asset({ id: 3, category: "Crypto", currentValueCents: 299_72 }),
@@ -396,7 +326,6 @@ describe("net worth is untouched by moving cash into the list", () => {
     standaloneAssets,
   });
 
-  /** The same balances `getAccountBalances()` would hand the page. */
   function accountsFromLedger(): AccountRow[] {
     return netWorth.accounts
       .filter((row) => row.accountId !== null)
@@ -433,7 +362,7 @@ describe("net worth is untouched by moving cash into the list", () => {
     const view = buildAssetTable(input);
     const cash = view.categories.find((category) => category.name === CASH_CATEGORY)!;
     expect(cash.entries[0].totalCents).toBe(audit.cashCents);
-    // And it is NOT the derived Cash asset row, which reads $1,496.18 here.
+
     expect(cash.entries[0].totalCents).toBe(4_396_18);
     expect(view.derivedCashLabel).toBe("$1,496.18");
   });
@@ -463,8 +392,7 @@ describe("net worth is untouched by moving cash into the list", () => {
       standaloneAssets,
       includeCashAsset: true,
     });
-    // 1,496.18 of double-counted cash. The test above proves the table does not
-    // do this; this one proves the test above is capable of failing.
+
     expect(doubled.netWorthCents - netWorth.netWorthCents).toBe(1_496_18);
   });
 
@@ -491,17 +419,12 @@ describe("net worth is untouched by moving cash into the list", () => {
     });
     const withCashListed = buildAssetTable(ownerPortfolio());
 
-    // What the old table showed, unchanged...
     expect(withoutCashListed.visibleTotalsLabel).toBe("$699.34");
-    // ...plus the cash it used to relegate to a footnote, and nothing else.
+
     expect(withCashListed.visibleTotalsLabel).toBe("$5,195.52");
     expect(300_00 + 99_62 + 299_72 + OWNER_CASH_CENTS).toBe(5_195_52);
   });
 });
-
-// ---------------------------------------------------------------------------
-// The eye toggle
-// ---------------------------------------------------------------------------
 
 describe("hiding a holding excludes it from the figures", () => {
   it("reduces the visible total by EXACTLY that holding's value", () => {
@@ -536,8 +459,7 @@ describe("hiding a holding excludes it from the figures", () => {
         "The total and percentages below leave it out; your full assets total is $5,195.52.",
     );
     expect(view.filter.badgeLabel).toBe("1 hidden · $99.62 excluded");
-    // The honest figure is in the sentence itself, so the filtered total beside
-    // it can never be read as the owner's position.
+
     expect(view.filter.notice).toContain(view.filter.unfilteredTotalsLabel);
     expect(view.filter.notice).not.toBe(view.visibleTotalsLabel);
   });
@@ -570,7 +492,6 @@ describe("hiding a holding excludes it from the figures", () => {
       hidden: ["asset-11"],
     });
 
-    // 50 of 50, not 50 of 100.
     expect(view.allocations).toHaveLength(1);
     expect(formatShare(view.allocations[0].percentage)).toBe("100.00%");
     expect(view.visibleTotalsLabel).toBe("$50.00");
@@ -605,8 +526,7 @@ describe("hiding a holding excludes it from the figures", () => {
       accounts: noAccounts(),
       hidden: ["asset-10"],
     });
-    // Hiding it changes no total — and the warning still appears, because the row
-    // count on screen changed and a silent filter is the thing being avoided.
+
     expect(view.filter.active).toBe(true);
     expect(view.filter.hiddenCount).toBe(1);
     expect(view.filter.hiddenTotalsLabel).toBe("$0.00");
@@ -638,7 +558,7 @@ describe("hiding everything", () => {
     ]) {
       expect(label).not.toMatch(/NaN|Infinity|undefined/);
     }
-    // And the renderer's own guards agree.
+
     expect(formatShare(null)).toBe("—");
   });
 
@@ -721,7 +641,7 @@ describe("a hidden holding still cannot be summed across currencies", () => {
     const view = buildAssetTable({ ...input, hidden: ["asset-10", "asset-11"] });
 
     expect(view.filter.hiddenTotalsLabel).toBe("$120.00 + €30.00");
-    // $150.00 is the lie: there is no exchange rate in this app.
+
     expect(view.filter.hiddenTotalsLabel).not.toContain("150");
     expect(view.filter.notice).toContain("$120.00 + €30.00");
   });
@@ -737,15 +657,11 @@ describe("a hidden holding still cannot be summed across currencies", () => {
     expect(view.mixed).toBe(false);
     expect(view.currencyTotals.map((total) => total.currency)).toEqual(["USD"]);
     expect(view.visibleTotalsLabel).toBe("$200.00");
-    // ...and the warning still shows the currency that left.
+
     expect(view.filter.hiddenTotalsLabel).toBe("€30.00");
     expect(view.filter.unfilteredTotalsLabel).toBe("$200.00 + €30.00");
   });
 });
-
-// ---------------------------------------------------------------------------
-// The bug: two Crypto holdings, one Crypto row
-// ---------------------------------------------------------------------------
 
 describe("grouping (the original bug)", () => {
   it("collapses two Crypto holdings into ONE category row", () => {

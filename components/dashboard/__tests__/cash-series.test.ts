@@ -1,17 +1,4 @@
-/**
- * Regression tests for items 8 and 9.
- *
- * 8. The candlestick series skipped `Investment` transactions while the
- *    `cashBalance` on the same card subtracted them, so the chart's close could
- *    never match the label above it. The key test here derives the whole series
- *    and asserts its final close IS `deriveCashBalanceCents(...)`.
- *
- * 9. `growth` / `growthAmount` were hardcoded `0`, i.e. the "vs. last month"
- *    block was decoration.
- *
- * The grouping tests must also pass under `bun run test:tz` (UTC+14 / UTC-11):
- * the old `getGroupKey` used `toISOString()`.
- */
+
 import { describe, expect, it } from "vitest";
 import { deriveCashBalanceCents } from "@/lib/cash-balance";
 import { sumCents } from "@/lib/money";
@@ -64,8 +51,8 @@ describe("the chart and the headline use ONE rule", () => {
       tx({ categoryId: 1, amountCents: 500000, date: new Date(2026, 5, 1) }),
       tx({ categoryId: 2, amountCents: 4500, date: new Date(2026, 5, 3) }),
       tx({ categoryId: 3, amountCents: 100000, date: new Date(2026, 6, 2) }),
-      tx({ categoryId: 99, amountCents: 777, date: new Date(2026, 6, 3) }), // unknown category
-      tx({ categoryId: null, amountCents: 888, date: new Date(2026, 6, 4) }), // no category
+      tx({ categoryId: 99, amountCents: 777, date: new Date(2026, 6, 3) }),
+      tx({ categoryId: null, amountCents: 888, date: new Date(2026, 6, 4) }),
       tx({ categoryId: 2, amountCents: 1200, date: new Date(2026, 6, 5), pending: true }),
     ];
 
@@ -80,8 +67,7 @@ describe("the chart and the headline use ONE rule", () => {
     const ledger = [
       tx({ categoryId: 1, amountCents: 500000, date: new Date(2026, 5, 1) }),
       tx({ categoryId: 2, amountCents: 4500, date: new Date(2026, 5, 3) }),
-      // THE BUG: this Investment row was skipped by the chart but subtracted by
-      // the headline, so the two disagreed by exactly $1,000.
+
       tx({ categoryId: 3, amountCents: 100000, date: new Date(2026, 6, 2) }),
     ];
 
@@ -194,15 +180,15 @@ describe("the chart and the headline use ONE rule", () => {
 
 describe("bucket keys use the LOCAL calendar day", () => {
   it("keeps a local-midnight transaction in its own day and month", () => {
-    const date = new Date(2026, 6, 1); // 1 July, local midnight
+    const date = new Date(2026, 6, 1);
     expect(groupKey(date, "daily")).toBe("2026-07-01");
     expect(groupKey(date, "monthly")).toBe("2026-07");
-    // THE BUG: east of UTC, toISOString() put this in 2026-06-30 / 2026-06.
+
     expect(groupKey(date, "daily")).not.toBe("2026-06-30");
   });
 
   it("groups a week onto its local Sunday", () => {
-    // 2026-07-15 is a Wednesday; the Sunday before is 2026-07-12.
+
     expect(groupKey(new Date(2026, 6, 15), "weekly")).toBe("2026-07-12");
     expect(groupKey(new Date(2026, 6, 12), "weekly")).toBe("2026-07-12");
   });
@@ -227,13 +213,13 @@ describe("bucket keys use the LOCAL calendar day", () => {
 });
 
 describe("computeCashGrowth replaces the hardcoded zero", () => {
-  const now = new Date(2026, 6, 20); // 20 July 2026
+  const now = new Date(2026, 6, 20);
 
   it("measures the change since the end of last month", () => {
     const ledger = [
-      tx({ categoryId: 1, amountCents: 100000, date: new Date(2026, 5, 1) }), // June: +1000
-      tx({ categoryId: 1, amountCents: 50000, date: new Date(2026, 6, 5) }), // July: +500
-      tx({ categoryId: 2, amountCents: 20000, date: new Date(2026, 6, 10) }), // July: -200
+      tx({ categoryId: 1, amountCents: 100000, date: new Date(2026, 5, 1) }),
+      tx({ categoryId: 1, amountCents: 50000, date: new Date(2026, 6, 5) }),
+      tx({ categoryId: 2, amountCents: 20000, date: new Date(2026, 6, 10) }),
     ];
 
     const growth = computeCashGrowth(ledger, CATEGORIES, now);
@@ -294,7 +280,7 @@ describe("computeCashGrowth replaces the hardcoded zero", () => {
       CATEGORIES,
       now,
     );
-    // The old month-boundary bug would have filed this into June.
+
     expect(growth.baselineCents).toBe(0);
     expect(growth.growthAmountCents).toBe(5000);
   });

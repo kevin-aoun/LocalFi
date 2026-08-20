@@ -35,15 +35,6 @@ import {
 } from "@/lib/investments";
 import { describePriceError, fetchPriceQuote, pricedHolding } from "@/lib/prices";
 
-/**
- * Which account a new transaction belongs to.
- *
- * Read from the form when the caller supplies it; otherwise fall back to the
- * oldest non-archived asset account (the "Main" account the 0003 migration
- * seeds). Returns null only when the database has no accounts at all, in which
- * case the row lands in the "unassigned" bucket rather than being rejected —
- * `deriveAccountBalances` still counts it, so no money disappears.
- */
 async function resolveAccountId(db: BudgetDb, formData: FormData): Promise<number | null> {
   const raw = formData.get("accountId");
   if (typeof raw === "string" && raw.trim() !== "") {
@@ -111,7 +102,7 @@ export async function getTransactions(categoryId?: number) {
   });
 }
 
-/** Canonical report/budget facts; mutable transaction rows are UI projections only. */
+
 export async function getLedgerReportMovements() {
   return readDb((_db, raw) =>
     readCategoryMovements(raw).map((movement) => ({
@@ -128,7 +119,7 @@ export async function getLedgerReportMovements() {
   );
 }
 
-/** Only the transfer rows, newest first — for a transfers view. */
+
 export async function getTransfers() {
   return readDb(async (db) => {
     const rows = await db.select().from(transactions).where(eq(transactions.direction, "transfer"));
@@ -154,19 +145,13 @@ export async function syncCashAssetManually() {
   }
 }
 
-/**
- * Validate a date coming off a form.
- *
- * Calendar inputs must name a real day. `new Date("2026-02-30")` silently rolls
- * into March, and date-only strings are interpreted as UTC, so neither behavior
- * is suitable for a local calendar-day ledger.
- */
+
 function requireCalendarDate(raw: FormDataEntryValue | null, label = "date"): Date {
   if (raw === null || raw === "") return new Date();
   if (typeof raw !== "string") throw new Error(`Invalid ${label}: expected a calendar day`);
 
-  // Current dialogs send local midnight; API/legacy callers may send the bare
-  // key. Ignore the optional local time because this field represents a day.
+
+
   const match = /^(\d{4}-\d{2}-\d{2})(?:T00:00:00(?:\.0{1,3})?)?$/.exec(raw);
   const dateKey = match?.[1];
   if (!isDateKey(dateKey)) {
@@ -212,7 +197,7 @@ async function loadAllocations(db: BudgetDb, transactionId: number): Promise<All
   return rows;
 }
 
-/** DECISION: DEC-012 — transfer fees/interest are expense-category effects only. */
+
 async function validateExpenseAllocations(
   db: BudgetDb,
   allocations: AllocationInput[],
@@ -347,7 +332,7 @@ function postFirstTransactionEvent(
   });
 }
 
-/** Read-only provider preview. The returned quantity is editable until the confirmed write freezes it. */
+
 export async function previewInvestmentPurchase(symbol: string, paidAmount: string) {
   try {
     const spec = pricedHolding(symbol);
@@ -404,7 +389,7 @@ export async function createTransaction(formData: FormData) {
         updatedAt: now,
       }).returning();
 
-      // DECISION: DEC-011 — a draft is mutable and deliberately has no event.
+
       if (isPending) return row;
 
       const event = postFirstTransactionEvent(raw, row, []);
@@ -431,8 +416,8 @@ export async function updateTransaction(id: number, formData: FormData) {
     const pendingValue = formData.get("pending");
     const requestedPending = pendingValue === null ? null : pendingValue === "true";
 
-    // An account is only reassigned when the form actually carries one, so an
-    // edit through a form that predates accounts cannot silently move the row.
+
+
     const accountRaw = formData.get("accountId");
     const accountId =
       typeof accountRaw === "string" && accountRaw.trim() !== ""
@@ -572,7 +557,7 @@ export async function updateTransaction(id: number, formData: FormData) {
   }
 }
 
-// DECISION: DEC-009 — accept a DateKey from date controls; retain Date for legacy callers.
+
 export async function confirmTransaction(id: number, date: Date | DateKey) {
   try {
     const confirmationDate =
@@ -658,11 +643,11 @@ export async function deleteTransaction(id: number) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Transfers
-// ---------------------------------------------------------------------------
 
-/** A transfer posts signed real-account legs and no category unless it has a split fee. */
+
+
+
+
 export async function createTransfer(formData: FormData) {
   try {
     const fromAccountId = Number(formData.get("fromAccountId"));
@@ -699,7 +684,7 @@ export async function createTransfer(formData: FormData) {
         .insert(transactions)
         .values({
           date,
-          categoryId: null, // a transfer is never income or expense
+          categoryId: null,
           accountId: fromAccountId,
           transferAccountId: toAccountId,
           amountCents,
@@ -714,7 +699,7 @@ export async function createTransfer(formData: FormData) {
         .returning();
       await replaceAllocations(db, row.id, split.allocations);
 
-      // DECISION: DEC-011 — pending transfers remain mutable eventless drafts.
+
       if (isPending) return row;
 
       const event = postFirstTransactionEvent(raw, row, split.allocations);
@@ -728,8 +713,8 @@ export async function createTransfer(formData: FormData) {
     });
 
     revalidate("/transactions", "/");
-    // `as const` keeps this a discriminated union: without it TS widens `true`
-    // to `boolean` and callers cannot narrow on `success`.
+
+
     return { success: true as const, data: transfer };
   } catch (error) {
     console.error("Failed to create transfer:", error);
@@ -737,7 +722,7 @@ export async function createTransfer(formData: FormData) {
   }
 }
 
-/** Edit an existing transfer. Both accounts, the amount, the date and the comment. */
+
 export async function updateTransfer(id: number, formData: FormData) {
   try {
     const transfer = await withDb(async (db, raw) => {
@@ -887,8 +872,8 @@ export async function updateTransfer(id: number, formData: FormData) {
     });
 
     revalidate("/transactions", "/");
-    // `as const` keeps this a discriminated union: without it TS widens `true`
-    // to `boolean` and callers cannot narrow on `success`.
+
+
     return { success: true as const, data: transfer };
   } catch (error) {
     console.error("Failed to update transfer:", error);

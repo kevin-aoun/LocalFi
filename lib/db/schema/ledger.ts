@@ -12,7 +12,6 @@ import {
 
 import { instruments } from "./instruments";
 
-/** DECISION: DEC-010 — all movement destinations use one registered abstraction. */
 export const ledgerAccountTargetTypes = [
   "real_account",
   "category",
@@ -56,7 +55,7 @@ export const ledgerAccounts = sqliteTable(
   }),
 );
 
-/** DECISION: DEC-014 — the UUID is the event identity; sequence is chain order only. */
+
 export const ledgerEvents = sqliteTable(
   "ledger_events",
   {
@@ -103,7 +102,7 @@ export const ledgerEvents = sqliteTable(
   }),
 );
 
-/** A movement is identified only by its owning event UUID and ordered position. */
+
 export const ledgerMovements = sqliteTable(
   "ledger_movements",
   {
@@ -116,7 +115,7 @@ export const ledgerMovements = sqliteTable(
       .references(() => ledgerAccounts.id, { onDelete: "restrict" }),
     amountMinor: integer("amount_minor").notNull(),
     currency: text("currency").notNull(),
-    /** Exact canonical decimal text; never a binary floating-point quantity. */
+
     quantityDelta: text("quantity_delta"),
   },
   (table) => ({

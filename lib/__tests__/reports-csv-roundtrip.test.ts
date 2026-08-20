@@ -1,17 +1,4 @@
-/**
- * CSV export -> the app's OWN importer -> back to transactions.
- *
- * WHY THIS TEST IS THE POINT OF THE EXPORT: an export that the app cannot read
- * back is not a backup, it is a screenshot. So this does not check the CSV
- * against a hand-written expectation — it feeds the exported bytes through
- * `components/transactions/import-logic.ts` (the real import path, SheetJS and
- * all) and asserts that the DATE, the CATEGORY and the AMOUNT come back exactly.
- *
- * Timezone safety: every date is a literal 'YYYY-MM-DD' key on both sides, and
- * SheetJS's date cells go through `parseFlexibleDate` / `parseExcelSerial`, which
- * build local dates. Nothing here touches `toISOString()`, so this passes at
- * UTC+14 and UTC-11.
- */
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -38,7 +25,6 @@ const CATEGORIES: ImportCategory[] = [
   { id: 4, name: "Brokerage", type: "Investment" },
 ];
 
-/** Deliberately awkward amounts: sub-cent boundaries, grouping, a big number. */
 const EXPORTED: CsvTransactionRow[] = [
   {
     dateKey: "2026-01-31",
@@ -97,16 +83,10 @@ const EXPORTED: CsvTransactionRow[] = [
   },
 ];
 
-/**
- * The EXACT path the import dialog takes for a `.csv` file: `readCsvRows` on the
- * decoded text (which strips our BOM), then the same `parseImportRows` every
- * other format goes through.
- */
 function importBack(csv: string) {
   const rows = readCsvRows(csv);
   const detection = detectDateOrder(collectDateValues(rows));
-  // Exported dates are ISO, i.e. never ambiguous — so the importer has nothing to
-  // guess and `dayFirst` cannot change the outcome. Asserted below.
+
   return { rows, detection, parsed: parseImportRows(rows, CATEGORIES, { dayFirst: false }) };
 }
 
@@ -151,7 +131,7 @@ describe("CSV export -> import round-trip", () => {
   it("exports unambiguous dates, so the importer never has to guess D/M vs M/D", () => {
     const { detection, parsed } = importBack(csv);
     expect(detection.evidence).not.toBe("conflict");
-    // Flipping the toggle must not move a single day.
+
     const dayFirst = parseImportRows(readCsvRows(csv), CATEGORIES, { dayFirst: true });
     expect(dayFirst.map((r) => r.date)).toEqual(parsed.map((r) => r.date));
   });
@@ -174,7 +154,7 @@ describe("CSV export -> import round-trip", () => {
     for (const row of EXPORTED) {
       expect(parseAmount(centsToDecimalString(row.amountCents))).toBe(row.amountCents);
     }
-    // The classic float traps, both directions.
+
     for (const cents of [1, 5, 10, 267, 268, 4_550, 100_500, 999_999_999]) {
       expect(parseAmount(centsToDecimalString(cents))).toBe(cents);
     }

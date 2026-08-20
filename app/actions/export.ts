@@ -1,52 +1,5 @@
 "use server";
 
-/**
- * Getting your data OUT.
- *
- * ## Why this file exists
- *
- * The whole pitch of this app is "it is your file, on your disk". Until now there
- * was no way to act on that from inside the app: no export, no backup, not even a
- * line of text telling you where the file is. A local-first app without an export
- * button is just a database you cannot read.
- *
- * Three ways out, in increasing fidelity:
- *
- * 1. **CSV of transactions** over a chosen range. The header row is the one
- *    `components/transactions/import-logic.ts` recognises, so the app can read its
- *    own export back — asserted end-to-end in
- *    `lib/__tests__/reports-csv-roundtrip.test.ts`, through the real importer.
- * 2. **JSON backup** of every table. Human-readable, and lossless: money is an
- *    exact two-decimal string that `parseAmount` reads back to the same integer
- *    cents.
- * 3. **The SQLite file itself** — `data/budget.db`. The real backup.
- *
- * ## Reading budget.db safely
- *
- * `saveDb()` rewrites the WHOLE file (temp file -> fsync -> rename), so a naive
- * read could in principle catch a half-written file. Two things make that
- * impossible here:
- *
- *   - the read runs inside `readDb(...)`, which queues on the same process-wide
- *     FIFO lock every writer uses, so no flush can be in flight while we read;
- *   - the flush is atomic anyway (`renameSync` within one filesystem), so the path
- *     always names a COMPLETE generation — either the old one or the new one,
- *     never a torn one.
- *
- * The SQLite header is then verified before the bytes are handed over, so a
- * corrupt file is refused rather than downloaded as a "backup".
- *
- * The one honest caveat, surfaced in the UI: a deprecated `getDb()`/`saveDb()`
- * caller mutates in memory first and flushes second, so a download taken in that
- * narrow window is the LAST SAVED generation, not the in-memory one. It is never
- * partial, and `savedAt` tells the user exactly which generation they got.
- *
- * Note also: `raw.export()` is deliberately NOT used to serialise the in-memory
- * image. sql.js implements it by closing and re-opening the connection, which
- * silently resets `PRAGMA foreign_keys` to OFF on the shared handle — a read has
- * no business doing that to the running app. See `flush` in lib/db/client.ts,
- * which re-applies the pragmas for exactly this reason.
- */
 import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
@@ -76,7 +29,6 @@ import {
 
 export type ExportResult<T> = { success: true; data: T } | { error: string };
 
-/** First 16 bytes of every valid SQLite file. */
 const SQLITE_MAGIC = "SQLite format 3\0";
 
 function assertRangeKeys(fromKey: string, toKey: string): { fromKey: DateKey; toKey: DateKey } {
@@ -86,79 +38,50 @@ function assertRangeKeys(fromKey: string, toKey: string): { fromKey: DateKey; to
   return { fromKey, toKey };
 }
 
-/**
- * A money column as an exact decimal string. ONE conversion, at the file
- * boundary, done with integer arithmetic — see `centsToDecimalString`. Null stays
- * null (a category with no budget is not a budget of 0.00).
- */
+
 function money(cents: Cents | null | undefined): string | null {
   return cents === null || cents === undefined ? null : centsToDecimalString(cents);
 }
 
-/**
- * An INSTANT (`created_at`/`updated_at`, stored as unixepoch) as ISO-8601 UTC.
- *
- * This is the one place `toISOString()` is correct: these columns are moments in
- * time, not calendar days. The house rule — never `toISOString()` on a calendar
- * date — applies to `transactions.date`, which is exported through `toDateKey`
- * below precisely because it IS a calendar day.
- */
+
 function instant(value: Date | null | undefined): string | null {
   return value instanceof Date && !Number.isNaN(value.getTime()) ? value.toISOString() : null;
 }
 
-/** A stored transaction timestamp as the LOCAL calendar day the user entered. */
+
 function dayOf(value: Date): DateKey {
   return toDateKey(value);
 }
 
-// ---------------------------------------------------------------------------
-// CSV export
-// ---------------------------------------------------------------------------
+
+
+
 
 export type CsvExportOptions = {
-  /** Inclusive 'YYYY-MM-DD'. */
+
   fromKey: string;
-  /** Inclusive 'YYYY-MM-DD'. */
+
   toKey: string;
-  /**
-   * Pending rows are excluded by default, matching how every balance and report
-   * in this app treats them.
-   */
+
   includePending?: boolean;
-  /**
-   * Transfers are excluded by default: a transfer has NO category, so the
-   * importer would reject the row. Include them for a complete record and accept
-   * that those lines will not re-import.
-   */
+
   includeTransfers?: boolean;
-  /**
-   * Restrict to accounts denominated in this currency. There is no FX in this
-   * app, so a mixed-currency file has an `Amount` column in several units — the
-   * `Currency` column says which, but exporting one currency at a time is safer.
-   */
+
   currency?: string;
 };
 
 export type CsvExportData = {
   fileName: string;
-  /** The complete file contents, UTF-8 with a BOM. */
+
   csv: string;
   rowCount: number;
-  /** Rows in range that were left out, and why. */
+
   skipped: { pending: number; transfers: number; otherCurrency: number };
-  /** Every currency that made it into the file. More than one = no FX applied. */
+
   currencies: string[];
 };
 
-/**
- * Transactions over a date range as a CSV the app's own importer can read back.
- *
- * `Amount` is the stored MAGNITUDE, not a signed figure: the importer takes the
- * absolute value and derives the direction from the category (that is the sign
- * rule in import-logic.ts), so magnitude + category is the only pairing that
- * round-trips exactly.
- */
+
 export async function exportTransactionsCsv(
   options: CsvExportOptions,
 ): Promise<ExportResult<CsvExportData>> {
@@ -181,7 +104,7 @@ export async function exportTransactionsCsv(
     const currencies = new Set<string>();
     const rows: CsvTransactionRow[] = [];
 
-    // Chronological, then by id, so two exports of the same range are identical.
+
     const sorted = [...txRows].sort((a, b) => {
       const left = dayOf(a.date);
       const right = dayOf(b.date);
@@ -241,31 +164,20 @@ export async function exportTransactionsCsv(
   }
 }
 
-// ---------------------------------------------------------------------------
-// JSON backup
-// ---------------------------------------------------------------------------
+
+
+
 
 export type JsonBackupData = {
   fileName: string;
-  /** The complete file contents. */
+
   json: string;
   byteLength: number;
-  /** Row count per table, so the UI can show what was actually captured. */
+
   counts: Record<string, number>;
 };
 
-/**
- * Every table, as readable JSON.
- *
- * Money is an exact two-decimal STRING (`"45.50"`), not raw cents, so the file
- * opens in any editor and reads like money — and `parseAmount` turns each one back
- * into the identical integer. Calendar days are 'YYYY-MM-DD'; `createdAt` /
- * `updatedAt` are instants and therefore ISO-8601 UTC.
- *
- * All tables are read inside ONE `readDb` call, i.e. under one hold of the
- * database lock, so the backup is a single consistent snapshot rather than eleven
- * queries that could straddle a write.
- */
+
 export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> {
   try {
     const raw = await readDb(async (db) => ({
@@ -289,13 +201,7 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
         kind: "full-backup",
         formatVersion: 1,
         exportedAt: new Date().toISOString(),
-        /**
-         * Read this before trusting any number in the file:
-         *  - money is a decimal string in the row's own `currency`, and NO
-         *    exchange rate has been applied to anything;
-         *  - `date` fields are local calendar days;
-         *  - `createdAt`/`updatedAt` are instants (ISO-8601 UTC).
-         */
+
         conventions: {
           money: "exact decimal string, e.g. \"45.50\" (parse with lib/money parseAmount)",
           calendarDays: "YYYY-MM-DD, local calendar day",
@@ -311,7 +217,7 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
         name: row.name,
         kind: row.kind,
         type: row.type,
-        // A magnitude: for a liability this is what is OWED. See lib/cash-balance.ts.
+
         openingBalance: money(row.openingBalanceCents),
         currency: row.currency,
         archived: row.archived,
@@ -378,7 +284,7 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
         currency: row.currency,
         notes: row.notes,
         commodityType: row.commodityType,
-        // A physical weight, NOT money: it stays a number.
+
         quantity: row.quantity,
         unit: row.unit,
         linkedTransactionIds: row.linkedTransactionIds,
@@ -455,25 +361,22 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
   }
 }
 
-// ---------------------------------------------------------------------------
-// The database file itself
-// ---------------------------------------------------------------------------
+
+
+
 
 export type DatabaseLocation = {
-  /** Absolute path to the live database. */
+
   path: string;
-  /** Previous generation, kept by every atomic save in lib/db/client.ts. */
+
   backupPath: string;
   exists: boolean;
   byteLength: number;
-  /** When the file was last written, as an instant. Null when it does not exist. */
+
   savedAt: string | null;
 };
 
-/**
- * Where the user's data actually lives — so the answer to "how do I back this up?"
- * is a path they can copy, not a support thread.
- */
+
 export async function describeDatabaseLocation(): Promise<ExportResult<DatabaseLocation>> {
   try {
     const path = resolveDbPath();
@@ -501,22 +404,15 @@ export async function describeDatabaseLocation(): Promise<ExportResult<DatabaseL
 
 export type DatabaseFileData = {
   fileName: string;
-  /** The complete file, base64-encoded for transport through a server action. */
+
   base64: string;
   byteLength: number;
   path: string;
-  /** Which generation this is — see the note about the last-saved caveat. */
+
   savedAt: string | null;
 };
 
-/**
- * The live `budget.db`, in full, as a download.
- *
- * Read under the database lock so no flush can be in flight, then header-checked
- * before it is handed over: a file that is not a SQLite database is refused rather
- * than delivered as a "backup" the user would only discover was junk on the day
- * they needed it.
- */
+
 export async function exportDatabaseFile(): Promise<ExportResult<DatabaseFileData>> {
   try {
     const result = await readDb(async () => {

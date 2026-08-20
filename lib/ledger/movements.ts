@@ -22,7 +22,6 @@ function currencyCode(value: string): string {
   return currency;
 }
 
-/** CONTRACT-010/012: ordinary finance always has its category counter-movement. */
 export function buildTransactionMovements(facts: TransactionMovementFacts): LedgerMovementInput[] {
   if (facts.pending) throw new Error("pending drafts cannot produce ledger movements");
   assertCents(facts.amountMinor);
@@ -79,7 +78,7 @@ function key(movement: LedgerMovementInput): string {
   return `${movement.currency}\u0000${movement.ledgerAccountId}`;
 }
 
-/** DECISION: DEC-011 — corrections store only replacement-minus-current deltas. */
+
 export function buildMovementDelta(
   before: LedgerMovementInput[],
   after: LedgerMovementInput[],

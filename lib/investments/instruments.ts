@@ -7,7 +7,6 @@ import { pricedHolding, type PriceSymbol } from "@/lib/prices";
 
 import { firstRow, type SqlRow } from "./sql";
 
-/** DECISION: DEC-013 — metadata is stable; quantities and values live elsewhere. */
 export type InvestmentInstrument = {
   id: string;
   kind: InstrumentKind;
@@ -46,7 +45,6 @@ export function findInstrument(raw: Database, instrumentId: string): InvestmentI
   return row ? instrumentFromRow(row) : null;
 }
 
-/** Resolve a supported provider symbol into one canonical instrument identity. */
 export function discoverInstrument(symbol: string): InstrumentDiscovery {
   const spec = pricedHolding(symbol);
   if (!spec) throw new Error(`Unsupported investment instrument: ${JSON.stringify(symbol)}`);
@@ -63,7 +61,7 @@ export function discoverInstrument(symbol: string): InstrumentDiscovery {
   };
 }
 
-/** Find by the discovery contract's exact stable ID, creating only if absent. */
+
 export function ensureInstrument(
   raw: Database,
   discovery: InstrumentDiscovery,
@@ -114,7 +112,7 @@ export function ensurePricedInstrument(
   return ensureInstrument(raw, discoverInstrument(symbol), createdAt);
 }
 
-/** Each hand-valued asset owns a distinct instrument and valuation series. */
+
 export function createManualInstrument(
   raw: Database,
   input: { label: string; category: string; currency: string; createdAt?: number },

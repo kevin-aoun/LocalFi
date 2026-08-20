@@ -1,18 +1,4 @@
-/**
- * Recurrence math for recurring transactions — pure, timezone-safe, anchored.
- *
- * WHY THIS IS ANCHORED AND NOT INCREMENTAL: the obvious implementation advances
- * the previous occurrence by one month. That is wrong. "Rent on the 31st" then
- * becomes Jan 31 -> Feb 28 -> Mar 28 -> Apr 28 and the user's rent day silently
- * drifts to the 28th forever. Every occurrence here is computed from the ANCHOR
- * (`startDate`) by index, so a short month is clamped for that month only and the
- * next long month restores the anchor day. The same rule recovers Feb 29 on the
- * following leap year for a yearly rule.
- *
- * Everything in and out is a `DateKey` ('YYYY-MM-DD'), which compares
- * lexicographically in calendar order, so no Date instance ever crosses this
- * module's boundary and `toISOString()` is never involved.
- */
+
 import { fromDateKey, isDateKey, toDateKey, type DateKey } from "./dates";
 
 export const frequencies = ["daily", "weekly", "monthly", "yearly"] as const;
@@ -20,19 +6,14 @@ export type Frequency = (typeof frequencies)[number];
 
 export type RecurrenceRule = {
   frequency: Frequency;
-  /** Every `interval` days/weeks/months/years. Integer >= 1. */
+
   interval: number;
-  /** The FIRST occurrence, and the anchor every later one is derived from. */
+
   startDate: DateKey;
-  /** Inclusive last day an occurrence may fall on. null/undefined = open-ended. */
+
   endDate?: DateKey | null;
 };
 
-/**
- * Hard ceiling on how many occurrences a single walk will enumerate. A daily
- * rule anchored in 1970 would otherwise spin for ~20k iterations per call; past
- * this we throw rather than hang or post nonsense.
- */
 const MAX_OCCURRENCES = 20_000;
 
 function daysInMonth(year: number, month0: number): number {
@@ -60,13 +41,7 @@ function assertRule(rule: RecurrenceRule) {
   }
 }
 
-/**
- * The `index`-th (0-based) occurrence of `rule`, as a DateKey.
- *
- * Month/year steps clamp to the last day of the target month when the anchor day
- * does not exist there (Jan 31 -> Feb 28/29), but the anchor day itself is never
- * mutated, so the sequence returns to it in the next long month.
- */
+
 export function occurrenceAt(rule: RecurrenceRule, index: number): DateKey {
   assertRule(rule);
   if (!Number.isInteger(index) || index < 0) {
@@ -100,22 +75,13 @@ export function occurrenceAt(rule: RecurrenceRule, index: number): DateKey {
 }
 
 export type OccurrenceWalkOptions = {
-  /**
-   * Skip every occurrence up to AND INCLUDING this day. This is the catch-up
-   * cursor: pass the template's `last_generated`, or null/undefined for "never
-   * generated". Occurrences are emitted strictly after it.
-   */
+
   afterKey?: DateKey | null;
-  /** Stop after this many occurrences. Defaults to MAX_OCCURRENCES. */
+
   limit?: number;
 };
 
-/**
- * Every occurrence in `(afterKey, throughKey]`, also bounded by `rule.endDate`.
- *
- * Strictly increasing, never duplicated — the two properties a materialiser
- * needs so that "catch up on six missed months" posts each month exactly once.
- */
+
 export function occurrencesThrough(
   rule: RecurrenceRule,
   throughKey: DateKey,
@@ -135,7 +101,7 @@ export function occurrencesThrough(
     throw new Error(`Invalid limit: expected an integer >= 0, received ${String(limit)}`);
   }
 
-  // The end date can only shorten the window, never extend it.
+
   const ceiling = rule.endDate != null && rule.endDate < throughKey ? rule.endDate : throughKey;
 
   const out: DateKey[] = [];
@@ -152,11 +118,7 @@ export function occurrencesThrough(
   );
 }
 
-/**
- * The first occurrence strictly after `afterKey` (or the anchor when `afterKey`
- * is null), or null when the rule has no further occurrences because its end
- * date has passed. `afterKey` need not itself be an occurrence.
- */
+
 export function nextOccurrenceAfter(rule: RecurrenceRule, afterKey: DateKey | null): DateKey | null {
   assertRule(rule);
   if (afterKey != null && !isDateKey(afterKey)) {

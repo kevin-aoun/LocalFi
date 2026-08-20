@@ -1,11 +1,8 @@
 "use server";
 
-/** Compatibility wrapper for manual asset actions that still submit a metal name. */
-
 import { fetchHoldingValueCents, priceSymbolForCommodityType } from "@/lib/prices";
 import { type Cents } from "@/lib/money";
 
-/** Value a metal in cents; null means unavailable and must never be saved as zero. */
 export async function calculateCommodityValue(
   commodityType: string,
   quantity: number,
