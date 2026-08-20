@@ -1,16 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   AlertTriangle,
-  ArrowDown,
   Check,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   Clipboard,
   Loader2,
+  PencilLine,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -30,6 +29,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import type { DateKey } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
@@ -64,61 +64,35 @@ type EventPayloadState =
   | { status: "loaded"; data: LedgerEventPayload }
   | { status: "error"; error: string };
 
-type LedgerToggleMountWatcher = {
-  observe: (container: HTMLElement, onMutation: () => void) => () => void;
-  schedule: (callback: () => void, delay: number) => number;
-  cancel: (handle: number) => void;
+export type LedgerEventGroup = {
+  id: string;
+  events: LedgerExplorerEvent[];
 };
 
-const defaultLedgerToggleMountWatcher: LedgerToggleMountWatcher = {
-  observe: (container, onMutation) => {
-    if (typeof MutationObserver === "undefined") return () => {};
-    const observer = new MutationObserver(onMutation);
-    observer.observe(container, { childList: true, subtree: true });
-    return () => observer.disconnect();
-  },
-  schedule: (callback, delay) => window.setTimeout(callback, delay),
-  cancel: (handle) => window.clearTimeout(handle),
-};
+export function groupLedgerEvents(events: LedgerExplorerEvent[]): LedgerEventGroup[] {
+  const byId = new Map(events.map((event) => [event.eventId, event]));
+  const groups = new Map<string, LedgerExplorerEvent[]>();
 
-export function watchLedgerToggleMount(
-  container: HTMLElement,
-  eventId: string,
-  onFocus: (target: HTMLButtonElement) => void,
-  onTimeout: () => void,
-  watcher: LedgerToggleMountWatcher = defaultLedgerToggleMountWatcher,
-): () => void {
-  let finished = false;
-  let stopObserving = () => {};
-  let timeoutHandle: number | null = null;
+  for (const event of events) {
+    let root = event;
+    const visited = new Set([event.eventId]);
+    while (root.amendsEventId) {
+      const parent = byId.get(root.amendsEventId);
+      if (!parent || visited.has(parent.eventId)) break;
+      visited.add(parent.eventId);
+      root = parent;
+    }
+    const group = groups.get(root.eventId) ?? [];
+    group.push(event);
+    groups.set(root.eventId, group);
+  }
 
-  const cleanup = () => {
-    stopObserving();
-    if (timeoutHandle !== null) watcher.cancel(timeoutHandle);
-    timeoutHandle = null;
-  };
-
-  const finish = (callback: () => void) => {
-    if (finished) return;
-    finished = true;
-    cleanup();
-    callback();
-  };
-
-  const check = () => {
-    const target = container.querySelector<HTMLButtonElement>(
-      `#ledger-event-toggle-${eventId}`,
-    );
-    if (target?.tagName === "BUTTON") finish(() => onFocus(target));
-  };
-
-  stopObserving = watcher.observe(container, check);
-  timeoutHandle = watcher.schedule(() => finish(onTimeout), 2000);
-  check();
-  return () => {
-    finished = true;
-    cleanup();
-  };
+  return [...groups.entries()]
+    .map(([id, groupEvents]) => ({
+      id,
+      events: groupEvents.sort((left, right) => right.sequence - left.sequence),
+    }))
+    .sort((left, right) => right.events[0].sequence - left.events[0].sequence);
 }
 
 function signedMoney(amountMinor: number, currency: string): string {
@@ -132,6 +106,34 @@ function signedQuantity(quantity: string): string {
 
 function privateValue(value: string, privacyEnabled: boolean): string {
   return privacyEnabled ? PRIVACY_MASK_TOKEN : value;
+}
+
+function eventFactLabel(event: LedgerExplorerEvent): string {
+  return event.amendsEventId
+    ? event.eventFact.replace(/\s+correction$/i, "")
+    : event.eventFact;
+}
+
+function EventTypeBadges({
+  event,
+  className,
+}: {
+  event: LedgerExplorerEvent;
+  className?: string;
+}) {
+  return (
+    <span className={cn("flex flex-col items-start gap-1", className)}>
+      {event.amendsEventId && (
+        <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-300" data-privacy-exempt>
+          <PencilLine className="mr-1 h-3 w-3" aria-hidden="true" />
+          Correction
+        </Badge>
+      )}
+      <Badge variant="outline" data-privacy-exempt className="max-w-full font-normal">
+        {eventFactLabel(event)}
+      </Badge>
+    </span>
+  );
 }
 
 function recordedDate(iso: string): string {
@@ -171,239 +173,178 @@ function HashField({
   );
 }
 
-function EventCard({
+function EventRow({
   event,
-  expanded,
+  onOpen,
+}: {
+  event: LedgerExplorerEvent;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      id={`ledger-event-${event.eventId}`}
+      type="button"
+      onClick={onOpen}
+      className="group relative grid min-w-0 w-full gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/50 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring xl:grid-cols-[minmax(14rem,24rem)_minmax(8rem,auto)_7.5rem_minmax(8rem,1fr)_5.5rem_1.25rem] xl:items-center xl:gap-3"
+      aria-label={`View ledger event ${event.eventId}`}
+    >
+      <span className="min-w-0">
+        <span className="flex min-w-0 items-center gap-2">
+          <code id={`ledger-event-title-${event.eventId}`} data-privacy-exempt className="min-w-0 truncate text-xs font-semibold">
+            {event.eventId}
+          </code>
+        </span>
+        <span data-privacy-exempt className="mt-0.5 block truncate text-xs text-muted-foreground">
+          {event.description || "Journal event"}
+        </span>
+        <EventTypeBadges event={event} className="mt-1.5 xl:hidden" />
+      </span>
+      <EventTypeBadges event={event} className="hidden xl:flex" />
+      <span data-privacy-exempt className="text-xs text-muted-foreground">
+        <span className="xl:hidden">Effective </span>{event.effectiveDate}
+      </span>
+      <span data-privacy-exempt className="min-w-0 truncate text-xs text-muted-foreground">
+        <span className="xl:hidden">Recorded </span>{recordedDate(event.recordedAt)}
+      </span>
+      <span className="whitespace-nowrap text-xs text-muted-foreground">
+        {event.movements.length} movement{event.movements.length === 1 ? "" : "s"}
+      </span>
+      <ChevronRight className="absolute right-4 top-4 h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 xl:static" aria-hidden="true" />
+    </button>
+  );
+}
+
+function EventDetails({
+  event,
   privacyEnabled,
   payloadState,
   navigationPending,
   copiedLabel,
-  onToggle,
   onNavigateToAmended,
   onRetryPayload,
   onCopy,
 }: {
   event: LedgerExplorerEvent;
-  expanded: boolean;
   privacyEnabled: boolean;
   payloadState: EventPayloadState | undefined;
   navigationPending: boolean;
   copiedLabel: string | null;
-  onToggle: () => void;
   onNavigateToAmended: () => void;
   onRetryPayload: () => void;
   onCopy: (value: string, label: string) => void;
 }) {
   return (
-    <article
-      id={`ledger-event-${event.eventId}`}
-      aria-labelledby={`ledger-event-title-${event.eventId}`}
-      className="relative ml-10 rounded-xl border bg-card shadow-sm transition-shadow hover:shadow-md"
-    >
-      <button
-        id={`ledger-event-toggle-${event.eventId}`}
-        type="button"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        aria-controls={`ledger-event-details-${event.eventId}`}
-        className="flex w-full items-start gap-3 rounded-t-xl p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-      >
-        <span className="mt-0.5 rounded-md border bg-muted p-1.5 text-muted-foreground">
-          {expanded ? (
-            <ChevronDown className="h-4 w-4" aria-hidden="true" />
-          ) : (
-            <ChevronRight className="h-4 w-4" aria-hidden="true" />
-          )}
-        </span>
-        <span className="min-w-0 flex-1 space-y-2">
-          <span className="flex flex-wrap items-center gap-2">
-            <Badge data-privacy-exempt variant="secondary">Sequence {event.sequence}</Badge>
-            <Badge variant="outline" data-privacy-exempt>{event.eventFact}</Badge>
-            {event.amendsSequence !== null && (
-              <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-300" data-privacy-exempt>
-                Correction of sequence {event.amendsSequence}
-              </Badge>
-            )}
-          </span>
-          <span
-            id={`ledger-event-title-${event.eventId}`}
-            data-privacy-exempt
-            className="block text-base font-semibold leading-snug"
-          >
-            {event.description || "Journal event"}
-          </span>
-          <span className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
-            <span data-privacy-exempt>Effective {event.effectiveDate}</span>
-            <span data-privacy-exempt>Recorded {recordedDate(event.recordedAt)}</span>
-            <span>{event.movements.length} movements</span>
-          </span>
-        </span>
-      </button>
-
-      {expanded && (
-        <div id={`ledger-event-details-${event.eventId}`} className="space-y-5 border-t p-4">
-          {event.amendsEventId && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
-              <p className="font-medium text-amber-800 dark:text-amber-200">Append-only correction</p>
-              <p className="mt-1 text-muted-foreground">
-                This event points back to{" "}
-                <button
-                  type="button"
-                  data-privacy-exempt
-                  className="font-medium text-foreground underline underline-offset-4"
-                  onClick={onNavigateToAmended}
-                  disabled={navigationPending}
-                  aria-label={`Open amended event sequence ${event.amendsSequence ?? "unknown"}`}
-                >
-                  {navigationPending && (
-                    <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                  )}
-                  sequence {event.amendsSequence ?? "unknown"} · {event.amendsEventId}
-                </button>
-                . The earlier event remains unchanged.
-              </p>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Event UUID
-              </span>
-              <code data-privacy-exempt className="break-all rounded bg-muted px-2 py-1 text-[11px]">
-                {event.eventId}
-              </code>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 justify-self-start px-2"
-                onClick={() => onCopy(event.eventId, "event UUID")}
-                aria-label="Copy event UUID"
-              >
-                <Clipboard className="h-3.5 w-3.5" aria-hidden="true" />
-              </Button>
-            </div>
-            <HashField label="Hash" value={event.hash} onCopy={onCopy} />
-            <HashField label="Predecessor" value={event.previousHash} onCopy={onCopy} />
-            {copiedLabel && (
-              <p role="status" className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-                <Check className="h-3.5 w-3.5" aria-hidden="true" /> Copied {copiedLabel}
-              </p>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">Ordered movements</h3>
-              <div className="flex flex-wrap gap-2">
-                {event.balances.map((balance) => (
-                  <Badge key={balance.currency} variant="outline" aria-label="Per-currency balance">
-                    <span data-privacy-exempt>{balance.currency}</span>{" "}
-                    <span data-ledger-private-value>
-                      {privateValue(formatMoney(balance.amountMinor, balance.currency), privacyEnabled)}
-                    </span>
-                  </Badge>
-                ))}
-              </div>
-            </div>
-            <ol className="divide-y overflow-hidden rounded-lg border">
-              {event.movements.map((movement) => (
-                <li
-                  key={`${event.eventId}:${movement.position}`}
-                  className="grid gap-3 bg-background/40 p-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center"
-                >
-                  <span data-privacy-exempt className="flex h-7 w-7 items-center justify-center rounded-full bg-muted font-mono text-xs">
-                    {movement.position + 1}
-                  </span>
-                  <span className="min-w-0">
-                    <span data-privacy-exempt className="block truncate text-sm font-medium">
-                      {movement.targetLabel}
-                    </span>
-                    <span className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
-                      <span data-privacy-exempt>{TARGET_LABELS[movement.targetType]}</span>
-                      <span data-privacy-exempt>{movement.currency}</span>
-                      <span data-privacy-exempt className="font-mono">{movement.ledgerAccountId}</span>
-                    </span>
-                  </span>
-                  <span className="text-left font-mono text-sm sm:text-right">
-                    <span data-ledger-private-value className={cn(
-                      "block font-semibold",
-                      movement.amountMinor < 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400",
-                    )}>
-                      {privateValue(signedMoney(movement.amountMinor, movement.currency), privacyEnabled)}
-                    </span>
-                    {movement.quantityDelta !== null && (
-                      <span data-ledger-private-value className="block text-xs text-muted-foreground">
-                        Quantity {privateValue(signedQuantity(movement.quantityDelta), privacyEnabled)}
-                      </span>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </div>
-
-          <div className="rounded-lg border bg-muted/30 p-3">
-            {privacyEnabled ? (
-              <div data-privacy-exempt className="flex items-start gap-2 text-sm text-muted-foreground">
-                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                <span>Canonical payload and metadata are hidden while privacy mode is on.</span>
-              </div>
-            ) : (
-              <>
-                {payloadState === undefined && (
-                  <Button type="button" variant="outline" size="sm" onClick={onRetryPayload}>
-                    Load canonical details
-                  </Button>
-                )}
-                {payloadState?.status === "loading" && (
-                  <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    Loading canonical details…
-                  </p>
-                )}
-                {payloadState?.status === "error" && (
-                  <div role="alert" className="flex flex-wrap items-center justify-between gap-2 text-sm text-destructive">
-                    <span>{payloadState.error}</span>
-                    <Button type="button" variant="outline" size="sm" onClick={onRetryPayload}>
-                      Retry details
-                    </Button>
-                  </div>
-                )}
-                {payloadState?.status === "loaded" && (
-                  <div className="space-y-3">
-                    <details>
-                      <summary className="cursor-pointer text-sm font-medium">Canonical metadata</summary>
-                      <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-background p-3 text-[11px]">
-                        {payloadState.data.metadataJson}
-                      </pre>
-                      {!payloadState.data.metadataValid && (
-                        <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
-                          Stored metadata could not be parsed as an object.
-                        </p>
-                      )}
-                      <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => onCopy(payloadState.data.metadataJson, "metadata")}>
-                        <Clipboard className="mr-2 h-3.5 w-3.5" aria-hidden="true" /> Copy metadata
-                      </Button>
-                    </details>
-                    <details>
-                      <summary className="cursor-pointer text-sm font-medium">Canonical payload</summary>
-                      <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-background p-3 text-[11px]">
-                        {payloadState.data.canonicalPayload}
-                      </pre>
-                      <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => onCopy(payloadState.data.canonicalPayload, "canonical payload")}>
-                        <Clipboard className="mr-2 h-3.5 w-3.5" aria-hidden="true" /> Copy payload
-                      </Button>
-                    </details>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+    <div className="space-y-6 px-6 py-5">
+      {event.amendsEventId && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+          <p className="font-medium text-amber-800 dark:text-amber-200">Append-only correction</p>
+          <p className="mt-1 text-muted-foreground">
+            This event corrects{" "}
+            <button
+              type="button"
+              data-privacy-exempt
+              className="font-medium text-foreground underline underline-offset-4"
+              onClick={onNavigateToAmended}
+              disabled={navigationPending}
+            >
+              {navigationPending && <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+              sequence {event.amendsSequence ?? "unknown"}
+            </button>
+            . The earlier event remains unchanged.
+          </p>
         </div>
       )}
-    </article>
+
+      <section className="space-y-2" aria-labelledby="ledger-identity-heading">
+        <h3 id="ledger-identity-heading" className="text-sm font-semibold">Identity and chain</h3>
+        <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Event UUID</span>
+          <code data-privacy-exempt className="break-all rounded bg-muted px-2 py-1 text-[11px]">{event.eventId}</code>
+          <Button type="button" variant="ghost" size="sm" className="h-8 justify-self-start px-2" onClick={() => onCopy(event.eventId, "event UUID")} aria-label="Copy event UUID">
+            <Clipboard className="h-3.5 w-3.5" aria-hidden="true" />
+          </Button>
+        </div>
+        <HashField label="Hash" value={event.hash} onCopy={onCopy} />
+        <HashField label="Predecessor" value={event.previousHash} onCopy={onCopy} />
+        {copiedLabel && (
+          <p role="status" className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+            <Check className="h-3.5 w-3.5" aria-hidden="true" /> Copied {copiedLabel}
+          </p>
+        )}
+      </section>
+
+      <section className="space-y-2" aria-labelledby="ledger-movements-heading">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 id="ledger-movements-heading" className="text-sm font-semibold">Ordered movements</h3>
+          <div className="flex flex-wrap gap-2">
+            {event.balances.map((balance) => (
+              <Badge key={balance.currency} variant="outline" aria-label="Per-currency balance">
+                <span data-privacy-exempt>{balance.currency}</span>{" "}
+                <span data-ledger-private-value>{privateValue(formatMoney(balance.amountMinor, balance.currency), privacyEnabled)}</span>
+              </Badge>
+            ))}
+          </div>
+        </div>
+        <ol className="divide-y overflow-hidden rounded-lg border">
+          {event.movements.map((movement) => (
+            <li key={`${event.eventId}:${movement.position}`} className="grid gap-3 bg-background/40 p-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center">
+              <span data-privacy-exempt className="flex h-7 w-7 items-center justify-center rounded-full bg-muted font-mono text-xs">{movement.position + 1}</span>
+              <span className="min-w-0">
+                <span data-privacy-exempt className="block truncate text-sm font-medium">{movement.targetLabel}</span>
+                <span className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+                  <span data-privacy-exempt>{TARGET_LABELS[movement.targetType]}</span>
+                  <span data-privacy-exempt>{movement.currency}</span>
+                  <span data-privacy-exempt className="font-mono">{movement.ledgerAccountId}</span>
+                </span>
+              </span>
+              <span className="text-left font-mono text-sm sm:text-right">
+                <span data-ledger-private-value className={cn("block font-semibold", movement.amountMinor < 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400")}>
+                  {privateValue(signedMoney(movement.amountMinor, movement.currency), privacyEnabled)}
+                </span>
+                {movement.quantityDelta !== null && (
+                  <span data-ledger-private-value className="block text-xs text-muted-foreground">Quantity {privateValue(signedQuantity(movement.quantityDelta), privacyEnabled)}</span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section className="rounded-lg border bg-muted/30 p-3" aria-label="Canonical event data">
+        {privacyEnabled ? (
+          <div data-privacy-exempt className="flex items-start gap-2 text-sm text-muted-foreground">
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>Canonical payload and metadata are hidden while privacy mode is on.</span>
+          </div>
+        ) : (
+          <>
+            {payloadState === undefined && <Button type="button" variant="outline" size="sm" onClick={onRetryPayload}>Load canonical details</Button>}
+            {payloadState?.status === "loading" && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />Loading canonical details…</p>}
+            {payloadState?.status === "error" && (
+              <div role="alert" className="flex flex-wrap items-center justify-between gap-2 text-sm text-destructive">
+                <span>{payloadState.error}</span>
+                <Button type="button" variant="outline" size="sm" onClick={onRetryPayload}>Retry details</Button>
+              </div>
+            )}
+            {payloadState?.status === "loaded" && (
+              <div className="space-y-3">
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium">Canonical metadata</summary>
+                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-background p-3 text-[11px]">{payloadState.data.metadataJson}</pre>
+                  {!payloadState.data.metadataValid && <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">Stored metadata could not be parsed as an object.</p>}
+                  <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => onCopy(payloadState.data.metadataJson, "metadata")}><Clipboard className="mr-2 h-3.5 w-3.5" aria-hidden="true" /> Copy metadata</Button>
+                </details>
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium">Canonical payload</summary>
+                  <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-background p-3 text-[11px]">{payloadState.data.canonicalPayload}</pre>
+                  <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => onCopy(payloadState.data.canonicalPayload, "canonical payload")}><Clipboard className="mr-2 h-3.5 w-3.5" aria-hidden="true" /> Copy payload</Button>
+                </details>
+              </div>
+            )}
+          </>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -421,10 +362,9 @@ export function LedgerExplorer({
   const [nextBeforeSequence, setNextBeforeSequence] = useState(
     initialPage?.nextBeforeSequence ?? null,
   );
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [payloads, setPayloads] = useState<Record<string, EventPayloadState>>({});
   const [navigatingToEventId, setNavigatingToEventId] = useState<string | null>(null);
-  const [focusTargetEventId, setFocusTargetEventId] = useState<string | null>(null);
   const [fromDate, setFromDate] = useState<DateKey | undefined>();
   const [toDate, setToDate] = useState<DateKey | undefined>();
   const [currency, setCurrency] = useState("all");
@@ -452,51 +392,29 @@ export function LedgerExplorer({
   const verificationRequestId = useRef(0);
   const privacyActiveRef = useRef(privacyActive);
   privacyActiveRef.current = privacyActive;
+  const groups = useMemo(() => groupLedgerEvents(events), [events]);
+  const selectedEvent = useMemo(
+    () => events.find((event) => event.eventId === selectedEventId) ?? null,
+    [events, selectedEventId],
+  );
 
   const virtualizer = useVirtualizer({
-    count: events.length,
+    count: groups.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => expanded.has(events[index]?.eventId) ? 760 : 190,
-    getItemKey: (index) => events[index]?.eventId ?? index,
+    estimateSize: (index) => (groups[index]?.events.length ?? 1) * 92 + 20,
+    getItemKey: (index) => groups[index]?.id ?? index,
     overscan: 5,
   });
 
   useEffect(() => {
     virtualizer.measure();
-  }, [expanded, privacyActive, virtualizer]);
+  }, [groups, privacyActive, virtualizer]);
 
   useEffect(() => {
     if (!privacyActive) return;
     payloadRequestGeneration.current += 1;
     setPayloads({});
   }, [privacyActive]);
-
-  useEffect(() => {
-    if (!focusTargetEventId) return;
-    const index = events.findIndex((event) => event.eventId === focusTargetEventId);
-    if (index < 0) return;
-
-    virtualizer.scrollToIndex(index, { align: "center" });
-    const container = scrollRef.current;
-    if (!container) return;
-    return watchLedgerToggleMount(
-      container,
-      focusTargetEventId,
-      (target) => {
-        target.focus({ preventScroll: true });
-        setFocusTargetEventId(null);
-      },
-      () => {
-        setFocusTargetEventId(null);
-        setPageError("The amended event loaded, but its toggle did not mount. Retry to focus it again.");
-        setRetryRequest({
-          query: { filters: { search: focusTargetEventId } },
-          replace: true,
-          targetEventId: focusTargetEventId,
-        });
-      },
-    );
-  }, [events, focusTargetEventId, virtualizer]);
 
   useEffect(() => () => {
     pageRequestId.current += 1;
@@ -546,7 +464,6 @@ export function LedgerExplorer({
     targetEventId?: string,
   ) => {
     const requestId = ++pageRequestId.current;
-    setFocusTargetEventId(null);
     setLoadingPage(true);
     if (targetEventId) setNavigatingToEventId(targetEventId);
     setPageError(null);
@@ -574,7 +491,7 @@ export function LedgerExplorer({
         setActiveFilters(query.filters ?? {});
         payloadRequestGeneration.current += 1;
         setPayloads({});
-        setExpanded(targetEventId ? new Set([targetEventId]) : new Set());
+        setSelectedEventId(targetEventId ?? null);
       }
       setRetryRequest(null);
       if (targetEventId) {
@@ -583,7 +500,6 @@ export function LedgerExplorer({
         setCurrency("all");
         setTargetType("all");
         setSearch(targetEventId);
-        setFocusTargetEventId(targetEventId);
         if (shouldRequestLedgerEventPayload(true, privacyActiveRef.current)) {
           void loadPayload(targetEventId);
         }
@@ -649,16 +565,10 @@ export function LedgerExplorer({
     }
   };
 
-  const toggle = (eventId: string) => {
-    const willExpand = !expanded.has(eventId);
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (next.has(eventId)) next.delete(eventId);
-      else next.add(eventId);
-      return next;
-    });
+  const openEvent = (eventId: string) => {
+    setSelectedEventId(eventId);
     if (
-      shouldRequestLedgerEventPayload(willExpand, privacyActive) &&
+      shouldRequestLedgerEventPayload(true, privacyActive) &&
       payloads[eventId] === undefined
     ) {
       void loadPayload(eventId);
@@ -667,6 +577,10 @@ export function LedgerExplorer({
 
   const navigateToAmended = (event: LedgerExplorerEvent) => {
     if (!event.amendsEventId) return;
+    if (events.some((candidate) => candidate.eventId === event.amendsEventId)) {
+      openEvent(event.amendsEventId);
+      return;
+    }
     void loadPage(
       { filters: { search: event.amendsEventId } },
       true,
@@ -837,46 +751,81 @@ export function LedgerExplorer({
         <div
           ref={scrollRef}
           aria-label="Ledger event chain, newest first"
-          className="h-[72vh] min-h-[32rem] overflow-auto rounded-xl border bg-muted/20 px-2 py-4 sm:px-4"
+          className="h-[72vh] min-h-[32rem] overflow-x-hidden overflow-y-auto rounded-xl border bg-muted/10 px-2 py-3 sm:px-4"
         >
           <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
             {virtualizer.getVirtualItems().map((virtualItem) => {
-              const event = events[virtualItem.index];
-              if (!event) return null;
-              const isLastLoaded = virtualItem.index === events.length - 1;
+              const group = groups[virtualItem.index];
+              if (!group) return null;
               return (
                 <div
-                  key={event.eventId}
+                  key={group.id}
                   data-index={virtualItem.index}
                   ref={virtualizer.measureElement}
-                  className="absolute left-0 top-0 w-full pb-8"
+                  className="absolute left-0 top-0 w-full pb-4 pl-8"
                   style={{ transform: `translateY(${virtualItem.start}px)` }}
                 >
-                  <div className="absolute bottom-0 left-[1.22rem] top-6 w-px bg-border" aria-hidden="true" />
-                  <div className="absolute left-2 top-5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-primary bg-background shadow-sm" aria-hidden="true">
-                    <span className="h-2 w-2 rounded-full bg-primary" />
+                  <div className="absolute bottom-0 left-3 top-0 w-px bg-border" aria-hidden="true" />
+                  <div className="overflow-visible rounded-lg border bg-card shadow-sm">
+                    {group.events.length > 1 && (
+                      <div className="border-b bg-muted/30 px-4 py-1.5 text-xs font-medium text-muted-foreground">
+                        {group.events.length} linked versions
+                      </div>
+                    )}
+                    <div className="divide-y">
+                      {group.events.map((event) => (
+                        <div key={event.eventId} className="relative">
+                          {event.amendsEventId ? (
+                            <span className="absolute -left-[1.875rem] top-1/2 z-10 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border border-amber-500 bg-background text-amber-600 dark:text-amber-300" aria-hidden="true">
+                              <PencilLine className="h-2.5 w-2.5" />
+                            </span>
+                          ) : (
+                            <span className="absolute -left-[1.55rem] top-1/2 z-10 h-2.5 w-2.5 -translate-y-1/2 rounded-full border-2 border-muted-foreground/70 bg-background" aria-hidden="true" />
+                          )}
+                          <EventRow event={event} onOpen={() => openEvent(event.eventId)} />
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  {(!isLastLoaded || nextBeforeSequence !== null) && (
-                    <ArrowDown className="absolute -bottom-0.5 left-[0.82rem] h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                  )}
-                  <EventCard
-                    event={event}
-                    expanded={expanded.has(event.eventId)}
-                    privacyEnabled={privacyActive}
-                    payloadState={payloads[event.eventId]}
-                    navigationPending={navigatingToEventId === event.amendsEventId}
-                    copiedLabel={copied?.eventId === event.eventId ? copied.label : null}
-                    onToggle={() => toggle(event.eventId)}
-                    onNavigateToAmended={() => navigateToAmended(event)}
-                    onRetryPayload={() => void loadPayload(event.eventId)}
-                    onCopy={(value, label) => void copy(value, label, event.eventId)}
-                  />
                 </div>
               );
             })}
           </div>
         </div>
       )}
+
+      <Sheet open={selectedEvent !== null} onOpenChange={(open) => {
+        if (!open) setSelectedEventId(null);
+      }}>
+        <SheetContent>
+          {selectedEvent && (
+            <>
+              <SheetHeader>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge data-privacy-exempt variant="secondary" className="font-mono font-normal">#{selectedEvent.sequence}</Badge>
+                  <EventTypeBadges event={selectedEvent} className="flex-row" />
+                </div>
+                <SheetTitle data-privacy-exempt>{selectedEvent.description || "Journal event"}</SheetTitle>
+                <SheetDescription data-privacy-exempt>
+                  Effective {selectedEvent.effectiveDate} · Recorded {recordedDate(selectedEvent.recordedAt)} · {selectedEvent.movements.length} movements
+                </SheetDescription>
+              </SheetHeader>
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <EventDetails
+                  event={selectedEvent}
+                  privacyEnabled={privacyActive}
+                  payloadState={payloads[selectedEvent.eventId]}
+                  navigationPending={navigatingToEventId === selectedEvent.amendsEventId}
+                  copiedLabel={copied?.eventId === selectedEvent.eventId ? copied.label : null}
+                  onNavigateToAmended={() => navigateToAmended(selectedEvent)}
+                  onRetryPayload={() => void loadPayload(selectedEvent.eventId)}
+                  onCopy={(value, label) => void copy(value, label, selectedEvent.eventId)}
+                />
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3">
         <p data-privacy-exempt className="text-sm text-muted-foreground">

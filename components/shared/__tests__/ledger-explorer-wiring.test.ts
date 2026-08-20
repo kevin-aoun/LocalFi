@@ -47,17 +47,22 @@ describe("Ledger explorer product wiring", () => {
     expect(sidebar).toContain('item.name !== "Ledger" || showLedger');
   });
 
-  it("uses the frozen virtualized linked-timeline design with bounded loaded DOM", () => {
+  it("uses a virtualized grouped list and a side drawer with bounded loaded DOM", () => {
     const explorer = source("components/ledger/ledger-explorer.tsx");
     expect(explorer).toContain('from "@/lib/ledger/explorer-contract"');
     expect(explorer).not.toContain('from "@/lib/ledger/explorer"');
     expect(explorer).toContain("useVirtualizer({");
-    expect(explorer).toContain("getItemKey: (index) => events[index]?.eventId");
+    expect(explorer).toContain("groupLedgerEvents(events)");
+    expect(explorer).toContain("getItemKey: (index) => groups[index]?.id");
     expect(explorer).toContain("overscan: 5");
     expect(explorer).toContain("ref={virtualizer.measureElement}");
     expect(explorer).toContain("virtualizer.measure()");
+    expect(explorer).toContain("<SheetContent>");
+    expect(explorer).toContain("<EventRow event={event}");
+    expect(explorer).toContain("<PencilLine");
+    expect(explorer).toContain("Correction");
+    expect(explorer).toContain('event.eventFact.replace(/\\s+correction$/i, "")');
     expect(explorer).toContain("Load older");
-    expect(explorer).toContain("ArrowDown");
     expect(explorer).not.toMatch(/react-?flow/i);
   });
 
@@ -77,19 +82,15 @@ describe("Ledger explorer product wiring", () => {
     expect(explorer).not.toMatch(/aria-label=\{[^}]*quantityDelta/);
   });
 
-  it("loads, expands, scrolls to, and focuses amended events outside the loaded virtual page", () => {
+  it("opens loaded corrections locally and fetches amended events outside the loaded page", () => {
     const explorer = source("components/ledger/ledger-explorer.tsx");
     expect(explorer).toContain("onNavigateToAmended");
+    expect(explorer).toContain("events.some((candidate) => candidate.eventId === event.amendsEventId)");
+    expect(explorer).toContain("openEvent(event.amendsEventId)");
     expect(explorer).toContain("{ filters: { search: event.amendsEventId } }");
-    expect(explorer).toContain("setExpanded(targetEventId ? new Set([targetEventId]) : new Set())");
-    expect(explorer).toContain("virtualizer.scrollToIndex(index, { align: \"center\" })");
-    expect(explorer).toContain("watchLedgerToggleMount");
-    expect(explorer).toContain("new MutationObserver(onMutation)");
-    expect(explorer).toContain("target.focus({ preventScroll: true })");
-    expect(explorer).toContain("The amended event loaded, but its toggle did not mount");
+    expect(explorer).toContain("setSelectedEventId(targetEventId ?? null)");
     expect(explorer).toContain("retryRequest.targetEventId");
-    expect(explorer).not.toContain("requestAnimationFrame");
-    expect(explorer).not.toContain('href={`#ledger-event-${event.amendsEventId}`}');
+    expect(explorer).not.toContain("watchLedgerToggleMount");
   });
 
   it("queries raw ledger tables without importing the collapsed current-movement reader", () => {
