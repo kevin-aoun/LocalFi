@@ -3,56 +3,25 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # Run as the HOST user, not the image's uid 1001.
-    #
-    # `./data` is bind-mounted, so whatever uid the container writes as becomes
-    # the owner of budget.db on the host. As uid 1001 it wrote mode -rw------- and
-    # locked the host user out of their own ledger — `bun run test`, the CLI and even
-    # `sqlite3` then fail with EACCES. Override with DOCKER_UID/DOCKER_GID in .env
-    # if your account is not 1000:1000.
     user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     ports:
-      # Bound to loopback: this app has no authentication, so publishing on all
-      # interfaces would expose the whole financial database to the local network.
       - "127.0.0.1:1313:1313"
     environment:
       - NODE_ENV=production
       - DATABASE_URL=file:./data/budget.db
       - NEXT_PUBLIC_APP_URL=http://localhost:1313
-      # Optional AI profile settings. The app remains usable when needle is
-      # absent; enabling --profile ai supplies the private-network sidecar.
       - NEEDLE_URL=http://needle:8765
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
     volumes:
-      # BIND-MOUNTED, not a named volume: this is your real ledger, and you want
-      # the container to read and write the same `data/budget.db` you already
-      # have — a named volume would start empty and silently give you a fresh,
-      # seeded database instead.
-      #
-      # ⚠ SINGLE WRITER. `saveDb()` rewrites the whole file. The app acquires
-      # a cross-process lease before opening the database, so do NOT run
-      # another LocalFi process or `db:*` script against ./data while this
-      # container is up; a second process will refuse the lease.
       - ./data:/app/data
     restart: unless-stopped
     healthcheck:
-      # 127.0.0.1, not localhost: wget resolves localhost to [::1] but the
-      # server binds 0.0.0.0 (IPv4), so the IPv6 probe is always refused.
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:1313/"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
-  # ---------------------------------------------------------------------------
-  # Cactus Needle inference sidecar.
-  #
-  # NOTE the absence of a `ports:` block. That is deliberate and load-bearing:
-  # anything able to reach this port can drive writes to the ledger, so it is
-  # reachable only from `app` over the compose network, never from the host.
-  # (The sidecar itself refuses a non-loopback bind unless
-  # NEEDLE_ALLOW_NON_LOOPBACK=1, which its Dockerfile sets for exactly this case.)
-  # ---------------------------------------------------------------------------
   needle:
     profiles: [ai]
     build:
@@ -63,37 +32,12 @@ services:
       - NEEDLE_PORT=8765
       - NEEDLE_PLATFORM=cpu
       - NEEDLE_ALLOW_NON_LOOPBACK=1
-      # Pin a specific checkpoint, or leave unset to take the newest
-      # needle_finetuned_*_best.pkl in the mounted directory.
       - NEEDLE_CHECKPOINT=${NEEDLE_CHECKPOINT:-}
     volumes:
-      # The checkpoint is DATA, not code: mounted read-only rather than baked in,
-      # so a new finetune is `docker compose restart needle` instead of an image
-      # rebuild. Point NEEDLE_MODELS_DIR at the directory holding
-      # needle_finetuned_*_best.pkl (default: the local training checkout).
       - ${NEEDLE_MODELS_DIR:-~/.local/share/cactus-needle/checkpoints}:/opt/needle-src/checkpoints:ro
-      # JAX writes its compiled-kernel cache here; persisting it cuts the cold
-      # first inference from ~12 s to ~6 s across restarts.
       - needle-jax-cache:/tmp/jax-cache
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Net-worth snapshot scheduler.
-  #
-  # It is an HTTP CLIENT of the app, never a second writer: `saveDb()` rewrites
-  # the whole database and the app's cross-process lease prevents a second
-  # LocalFi database writer. A cron must call the app endpoint rather than open
-  # budget.db directly.
-  #
-  # It fires every SNAPSHOT_INTERVAL_HOURS (default 6) rather than once at
-  # midnight, because `recordNetWorthToday()` refreshes live holdings and then
-  # replaces the current day's rows — one retained observation per day no matter
-  # how often it runs. A daily-at-00:00 cron would miss any
-  # day the machine happened to be asleep; firing four times a day means any
-  # waking window records it. It does NOT backfill: a snapshot holds *today's*
-  # figures, so writing them under a past date would assert a net worth that was
-  # never true. Days the machine was off stay honest gaps.
-  # ---------------------------------------------------------------------------
   snapshot:
     profiles: [scheduler]
     image: alpine:latest
