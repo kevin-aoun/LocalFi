@@ -93,6 +93,22 @@ UUID/canonical-payload hash and backfill phase. A failed `.bak` refresh aborts
 before live replacement. The Categories tab's spend uses the same journal
 category movements as budget actuals, so the two surfaces cannot drift.
 
+## Category ordering is presentation metadata
+
+Categories have an explicit `display_order` within their existing Income,
+Expense, or Investment group. Reordering is an atomic metadata update and does
+not append a financial ledger event. Dragging never changes category type;
+moving between semantic groups still requires the explicit category editor.
+The UI uses shadcn styling with dnd-kit's sortable primitives, including a
+dedicated drag handle and keyboard sensor.
+
+Budget cards have their own `display_order` for the same reason: arranging a
+dashboard is not a financial event and must not silently rearrange categories.
+Reordering a filtered current-period view preserves the slots of hidden and
+historical rules. Inputs, editable fields, code, and explicitly marked content
+remain selectable; the rest of the application chrome disables text selection
+to avoid accidental highlighting during interaction and dragging.
+
 ## Decision record
 
 | Decision | Why | Rejected alternative |

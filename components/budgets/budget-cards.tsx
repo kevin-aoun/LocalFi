@@ -1,4 +1,5 @@
 import { AlertTriangle, Pencil, PiggyBank, Plus, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
 
 import {
   classifyBudgetRow,
@@ -28,19 +29,21 @@ export type BudgetCategory = {
   type: string;
   color: string;
   icon: string;
+  displayOrder: number;
 };
 
-/** One budget for the period in progress. */
 export function BudgetCard({
   row,
   onEdit,
   onDelete,
   reallocationFlow,
+  dragHandle,
 }: {
   row: BudgetRowView;
   onEdit: () => void;
   onDelete: () => void;
   reallocationFlow?: BudgetReallocationFlow;
+  dragHandle?: ReactNode;
 }) {
   const reallocationCents = reallocationFlow?.netCents ?? 0;
   const visualUsage = visualBudgetUsage(
@@ -55,8 +58,7 @@ export function BudgetCard({
   });
   const percent = visualUsage.percent;
   const rollover = describeRollover(row);
-  // The engine's limit includes this month's one-off reallocation. The goal's
-  // monthly allocation is the permanent rule limit from DEC-008.
+
   const goal = deriveBudgetGoalProgress({
     ...row,
     limitCents: row.limitCents - reallocationCents,
@@ -76,6 +78,7 @@ export function BudgetCard({
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {dragHandle}
           <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onEdit} aria-label="Edit budget"><Pencil className="h-3 w-3" /></Button></TooltipTrigger><TooltipContent>Edit budget</TooltipContent></Tooltip>
           <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onDelete} aria-label="Delete budget"><Trash2 className="h-3 w-3 text-destructive" /></Button></TooltipTrigger><TooltipContent>Delete budget</TooltipContent></Tooltip>
         </div>
@@ -131,15 +134,16 @@ export function BudgetCard({
   );
 }
 
-/** One category in the manager tab. */
+
 export function CategoryCard({
-  category, spendingCents, monthLabel, budgetCount, canBudget, onEdit, onAddBudget, onDelete,
+  category, spendingCents, monthLabel, budgetCount, canBudget, dragHandle, onEdit, onAddBudget, onDelete,
 }: {
   category: BudgetCategory;
   spendingCents: Cents;
   monthLabel: string;
   budgetCount: number;
   canBudget: boolean;
+  dragHandle?: ReactNode;
   onEdit: () => void;
   onAddBudget: () => void;
   onDelete: () => void;
@@ -149,6 +153,7 @@ export function CategoryCard({
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium flex items-center gap-2"><CategoryIcon name={category.icon} color={category.color} />{category.name}</CardTitle>
         <div className="flex items-center gap-1">
+          {dragHandle}
           {canBudget && <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onAddBudget} aria-label="Add a budget for this category"><Plus className="h-3 w-3" /></Button></TooltipTrigger><TooltipContent>Add a budget for this category</TooltipContent></Tooltip>}
           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onEdit}><Pencil className="h-3 w-3" /></Button>
           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onDelete}><Trash2 className="h-3 w-3 text-destructive" /></Button>

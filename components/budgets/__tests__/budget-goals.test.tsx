@@ -29,6 +29,7 @@ function row(overrides: Partial<BudgetRowView> = {}): BudgetRowView {
     categoryType: "Expense",
     categoryColor: "#10b981",
     categoryIcon: "Wallet",
+    displayOrder: 0,
     legacy: false,
     effectiveFrom: "2026-01-01",
     effectiveTo: null,

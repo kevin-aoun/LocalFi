@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { revalidate } from "@/lib/revalidate";
 import { withDb } from "@/lib/db/client";
 import { budgets, categories, transactions, type Budget } from "@/lib/db/schema";
@@ -10,9 +10,7 @@ import { str, parsePeriod, requireDateKey, goalFieldsFromFormData, type ActionRe
 
 export async function createBudget(formData: FormData): Promise<ActionResult<Budget>> {
   try {
-    // `str()` returns null for a missing or blank field, and `Number(null)` is 0
-    // — which IS an integer, so the guard below never fired and the user saw a
-    // thrown "No category with id 0" instead of this message.
+
     const categoryIdRaw = str(formData, "categoryId");
     const categoryId = categoryIdRaw === null ? Number.NaN : Number(categoryIdRaw);
     if (!Number.isInteger(categoryId) || categoryId <= 0) {
@@ -36,12 +34,13 @@ export async function createBudget(formData: FormData): Promise<ActionResult<Bud
     const budget = await withDb(async (db) => {
       const [category] = await db.select().from(categories).where(eq(categories.id, categoryId));
       if (!category) throw new Error(`No category with id ${categoryId}`);
-      // THE GATE. The dialog no longer offers an Income category, but the UI is
-      // not the only caller: the agent and the CLI reach this action directly.
-      // Refusing before `closePrevious` matters — otherwise a rejected create
-      // would still have closed the category's live budget.
+
+
+
+
       if (category.type === "Income") throw new Error(incomeBudgetRefusal(category.name));
 
+      let inheritedOrder: number | undefined;
       if (closePrevious) {
         const open = await db
           .select()
@@ -50,6 +49,9 @@ export async function createBudget(formData: FormData): Promise<ActionResult<Bud
         const dayBefore = previousDayKey(effectiveFrom);
         for (const row of open) {
           if (row.effectiveTo === null && row.effectiveFrom < effectiveFrom) {
+            inheritedOrder = inheritedOrder === undefined
+              ? row.displayOrder
+              : Math.min(inheritedOrder, row.displayOrder);
             await db
               .update(budgets)
               .set({ effectiveTo: dayBefore, updatedAt: new Date() })
@@ -57,6 +59,12 @@ export async function createBudget(formData: FormData): Promise<ActionResult<Bud
           }
         }
       }
+
+      const [{ nextOrder }] = await db
+        .select({
+          nextOrder: sql<number>`COALESCE(MAX(${budgets.displayOrder}), -1) + 1`,
+        })
+        .from(budgets);
 
       const [row] = await db
         .insert(budgets)
@@ -67,12 +75,13 @@ export async function createBudget(formData: FormData): Promise<ActionResult<Bud
           effectiveFrom,
           effectiveTo,
           rollover,
+          displayOrder: inheritedOrder ?? nextOrder,
           ...goal,
         })
         .returning();
-      // Once a real monthly rule exists, the legacy category column must stop
-      // being a second source of truth. Otherwise deleting this row later makes
-      // the old value silently reappear as a synthetic budget.
+
+
+
       if (period === "monthly" && category.monthlyLimitCents !== null) {
         await db
           .update(categories)
@@ -90,18 +99,13 @@ export async function createBudget(formData: FormData): Promise<ActionResult<Bud
   }
 }
 
-/**
- * Update a budget. Only the fields present in `formData` change.
- *
- * REFUSED when the budget sits on an Income category — which can only happen to
- * a row that predates the rule. Editing it is not the way out; delete it.
- */
+
 export async function updateBudget(id: number, formData: FormData): Promise<ActionResult<Budget>> {
   try {
     const budget = await withDb(async (db) => {
-      // Negative ids identify the old category-level monthly limits. Editing one
-      // promotes it atomically to a regular budget and clears the old field; the
-      // UI need not expose a separate conversion workflow.
+
+
+
       if (id < 0) {
         const categoryId = -id;
         const [category] = await db.select().from(categories).where(eq(categories.id, categoryId));
@@ -140,6 +144,11 @@ export async function updateBudget(id: number, formData: FormData): Promise<Acti
           ? formData.get("rollover") === "true"
           : false;
         const goal = goalFieldsFromFormData(formData, period, rollover);
+        const [{ nextOrder }] = await db
+          .select({
+            nextOrder: sql<number>`COALESCE(MAX(${budgets.displayOrder}), -1) + 1`,
+          })
+          .from(budgets);
         const [promoted] = await db
           .insert(budgets)
           .values({
@@ -150,6 +159,7 @@ export async function updateBudget(id: number, formData: FormData): Promise<Acti
             effectiveFrom,
             effectiveTo,
             rollover,
+            displayOrder: nextOrder,
             ...goal,
           })
           .returning();
@@ -224,10 +234,57 @@ export async function updateBudget(id: number, formData: FormData): Promise<Acti
   }
 }
 
-/**
- * Delete a budget row. History for the periods it covered disappears with it; to
- * stop a budget while keeping its history, set `effectiveTo` instead.
- */
+
+export async function reorderBudgets(orderedIds: number[]): Promise<ActionResult<undefined>> {
+  if (
+    orderedIds.length === 0 ||
+    orderedIds.some((id) => !Number.isSafeInteger(id) || id <= 0) ||
+    new Set(orderedIds).size !== orderedIds.length
+  ) {
+    return { error: "The budget order is invalid. Refresh and try again." };
+  }
+
+  try {
+    await withDb(async (db) => {
+      const stored = await db
+        .select({ id: budgets.id })
+        .from(budgets)
+        .orderBy(asc(budgets.displayOrder), asc(budgets.id));
+      const storedIds = new Set(stored.map((row) => row.id));
+      if (orderedIds.some((id) => !storedIds.has(id))) {
+        throw new BudgetOrderConflictError();
+      }
+
+      const reorderedIds = new Set(orderedIds);
+      let nextRequested = 0;
+      const normalized = stored.map((row) => (
+        reorderedIds.has(row.id) ? orderedIds[nextRequested++] : row.id
+      ));
+      const updatedAt = new Date();
+      for (const [displayOrder, id] of normalized.entries()) {
+        await db
+          .update(budgets)
+          .set({ displayOrder, updatedAt })
+          .where(eq(budgets.id, id));
+      }
+    });
+    revalidate("/budgets");
+    return { success: true, data: undefined };
+  } catch (error) {
+    if (error instanceof BudgetOrderConflictError) return { error: error.message };
+    console.error("Failed to reorder budgets:", error);
+    return { error: "Failed to save the budget order." };
+  }
+}
+
+class BudgetOrderConflictError extends Error {
+  constructor() {
+    super("One of these budgets changed. Refresh and try again.");
+    this.name = "BudgetOrderConflictError";
+  }
+}
+
+
 export async function deleteBudget(id: number): Promise<ActionResult<{ id: number }>> {
   try {
     await withDb(async (db) => {
@@ -256,9 +313,9 @@ export async function deleteBudget(id: number): Promise<ActionResult<{ id: numbe
         .returning({ id: budgets.id });
       if (deleted.length === 0) throw new Error(`No budget with id ${id}`);
       if (existing.period === "monthly") {
-        // Migration 0003 copied category limits into `budgets` but deliberately
-        // retained the old column. Delete means delete, so remove that fallback
-        // in the same transaction instead of resurrecting it on the next read.
+
+
+
         await db
           .update(categories)
           .set({ monthlyLimitCents: null, updatedAt: new Date() })
@@ -273,22 +330,14 @@ export async function deleteBudget(id: number): Promise<ActionResult<{ id: numbe
   }
 }
 
-/**
- * Copy any remaining `categories.monthly_limit_cents` values into real `budgets`
- * rows. Idempotent: a category that already has a budget of that period is left
- * alone. The 0003 migration does this once; this action exists for a database
- * that was set up some other way.
- *
- * An Income category is skipped: converting its legacy limit would create
- * exactly the row `createBudget` refuses.
- */
+
 export async function importLegacyBudgets(): Promise<ActionResult<{ created: number }>> {
   try {
     const created = await withDb(async (db) => {
       const categoryRows = await db.select().from(categories);
       const existing = await db.select().from(budgets);
-      // Same rule as loadLedger: a closed budget must not block the import, or
-      // the legacy limit it masks can never be recovered.
+
+
       const todayForCoverage = todayKey();
       const covered = new Set(
         existing
@@ -306,6 +355,10 @@ export async function importLegacyBudgets(): Promise<ActionResult<{ created: num
         : todayKey();
 
       let count = 0;
+      let nextOrder = existing.reduce(
+        (maximum, budget) => Math.max(maximum, budget.displayOrder),
+        -1,
+      ) + 1;
       for (const category of categoryRows) {
         if (category.type === "Income") continue;
         if (category.monthlyLimitCents === null || covered.has(category.id)) continue;
@@ -316,6 +369,7 @@ export async function importLegacyBudgets(): Promise<ActionResult<{ created: num
           effectiveFrom,
           effectiveTo: null,
           rollover: false,
+          displayOrder: nextOrder++,
         });
         count++;
       }
@@ -330,7 +384,7 @@ export async function importLegacyBudgets(): Promise<ActionResult<{ created: num
   }
 }
 
-/** 'YYYY-MM-DD' -> the previous calendar day, in local time. */
+
 function previousDayKey(key: DateKey): DateKey {
   const [y, m, d] = key.split("-").map(Number);
   return toDateKey(new Date(y, m - 1, d - 1));

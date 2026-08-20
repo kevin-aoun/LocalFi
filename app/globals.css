@@ -88,25 +88,29 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply select-none bg-background text-foreground;
   }
-  /* Saved privacy mode starts hidden for one layout pass while digits are
-     replaced, preventing a flash of the original figures on reload. */
+
+  input,
+  textarea,
+  [contenteditable="true"],
+  code,
+  pre,
+  [data-selectable] {
+    user-select: text;
+  }
+
   html[data-privacy-mode="true"]:not([data-privacy-ready="true"]) [data-privacy-content] {
     visibility: hidden;
   }
-  /* Charts can reveal scale and relative values even when tick labels are
-     masked, so only visualization surfaces are blurred and made inert. */
+
   html[data-privacy-mode="true"] [data-private-chart] {
     filter: blur(10px);
     opacity: 0.55;
     pointer-events: none;
     user-select: none;
   }
-  /* Browser text-security repeats one bullet per character and therefore
-     leaks the length of a value. Hide the input text and paint one constant
-     four-dot token instead. The same selector covers numeric inputs and the
-     explicitly tagged text inputs such as opening balances. */
+
   html[data-privacy-mode="true"] input[type="number"],
   html[data-privacy-mode="true"] input[type="date"],
   html[data-privacy-mode="true"] input[type="month"],
@@ -123,7 +127,7 @@
     background-position: 0.75rem center;
     background-size: 2.25rem 0.5rem;
   }
-  /* Remove shadows from all elements */
+
   * {
     box-shadow: none !important;
   }

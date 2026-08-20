@@ -1,20 +1,4 @@
-/**
- * Budget actions: spend-vs-budget for an arbitrary period, historical
- * performance, rollover, weekly/annual periods, and the legacy
- * `categories.monthly_limit_cents` fallback.
- *
- * The three things the old model could not do at all, pinned here:
- *   1. ask about a PAST period;
- *   2. use a period other than a calendar month;
- *   3. carry an unused surplus forward.
- *
- * And the rule the actions enforce, pinned in "an Income category cannot have a
- * budget" below: a budget is a SPENDING LIMIT, so income cannot hold one. This
- * file used to assert the opposite (an income "target" was accepted and
- * measured); those cases are inverted rather than deleted. The gate lives in the
- * action, not the dialog, because POST /api/agent and the CLI call these
- * functions directly.
- */
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -34,6 +18,7 @@ import {
   getBudgetsForCategory,
   getSpendVsBudget,
   importLegacyBudgets,
+  reorderBudgets,
   updateBudget,
 } from "@/app/actions/budgets";
 
@@ -111,6 +96,30 @@ describe("legacy categories.monthly_limit_cents", () => {
       [4, 2_000, "2025-06-01"],
       [5, 5_000, "2025-06-01"],
     ]);
+  });
+});
+
+describe("budget card ordering", () => {
+  it("persists a visible subset without moving hidden budget slots", async () => {
+    seedBudget(temp, { id: 10, categoryId: FOOD, period: "weekly", limitCents: 1_000, effectiveFrom: "2026-01-01", displayOrder: 0 });
+    seedBudget(temp, { id: 11, categoryId: FOOD, period: "monthly", limitCents: 2_000, effectiveFrom: "2026-01-01", displayOrder: 1 });
+    seedBudget(temp, { id: 12, categoryId: TRANSPORT, period: "yearly", limitCents: 3_000, effectiveFrom: "2026-01-01", displayOrder: 2 });
+
+    expect(await reorderBudgets([12, 10])).toMatchObject({ success: true });
+    expect(
+      temp.query("SELECT id FROM budgets ORDER BY display_order, id").map((row) => row.id),
+    ).toEqual([12, 11, 10]);
+  });
+
+  it("rejects duplicate and stale ids without changing the order", async () => {
+    seedBudget(temp, { id: 10, categoryId: FOOD, period: "weekly", limitCents: 1_000, effectiveFrom: "2026-01-01", displayOrder: 0 });
+    seedBudget(temp, { id: 11, categoryId: TRANSPORT, period: "monthly", limitCents: 2_000, effectiveFrom: "2026-01-01", displayOrder: 1 });
+
+    expect(await reorderBudgets([10, 10])).toMatchObject({ error: expect.any(String) });
+    expect(await reorderBudgets([99, 10])).toMatchObject({ error: expect.any(String) });
+    expect(
+      temp.query("SELECT id FROM budgets ORDER BY display_order, id").map((row) => row.id),
+    ).toEqual([10, 11]);
   });
 });
 

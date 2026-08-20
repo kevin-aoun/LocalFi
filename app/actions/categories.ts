@@ -2,19 +2,33 @@
 
 import { readDb, withDb } from "@/lib/db/client";
 import { categories, transactions } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
-export async function getCategories() {
-  return await readDb((db) => db.select().from(categories));
+const CATEGORY_TYPES = ["Income", "Expense", "Investment"] as const;
+type CategoryType = (typeof CATEGORY_TYPES)[number];
+
+function isCategoryType(value: string): value is CategoryType {
+  return CATEGORY_TYPES.includes(value as CategoryType);
 }
 
-/**
- * Translate a SQLite constraint failure into something the user can act on.
- * Without this, a duplicate category name surfaced as the generic
- * "Failed to create category" — and because the dialog ignored the return value
- * entirely, as nothing at all.
- */
+function revalidateCategorySurfaces() {
+  revalidatePath("/budgets");
+  revalidatePath("/transactions");
+  revalidatePath("/recurring");
+  revalidatePath("/settings");
+  revalidatePath("/");
+}
+
+export async function getCategories() {
+  return await readDb((db) => db.select().from(categories).orderBy(
+    sql`CASE ${categories.type} WHEN 'Income' THEN 0 WHEN 'Expense' THEN 1 ELSE 2 END`,
+    asc(categories.displayOrder),
+    asc(categories.id),
+  ));
+}
+
+
 function describeWriteFailure(error: unknown, name: string, verb: "create" | "update"): string {
   const message = error instanceof Error ? error.message : String(error);
   if (/UNIQUE constraint failed: categories\.name/i.test(message)) {
@@ -28,16 +42,25 @@ function describeWriteFailure(error: unknown, name: string, verb: "create" | "up
 
 export async function createCategory(formData: FormData) {
   const name = ((formData.get("name") as string) ?? "").trim();
-  const type = formData.get("type") as "Income" | "Expense" | "Investment";
+  const typeValue = String(formData.get("type") ?? "");
   if (name === "") return { error: "A category needs a name." };
+  if (!isCategoryType(typeValue)) return { error: "Choose a valid category type." };
+  const type = typeValue;
 
   try {
     const category = await withDb(async (db) => {
+      const [{ nextOrder }] = await db
+        .select({
+          nextOrder: sql<number>`COALESCE(MAX(${categories.displayOrder}), -1) + 1`,
+        })
+        .from(categories)
+        .where(eq(categories.type, type));
       const [row] = await db
         .insert(categories)
         .values({
           name,
           type,
+          displayOrder: nextOrder,
           icon: formData.get("icon") as string,
           color: formData.get("color") as string,
         })
@@ -45,7 +68,7 @@ export async function createCategory(formData: FormData) {
       return row;
     });
 
-    revalidatePath("/budgets");
+    revalidateCategorySurfaces();
     return { success: true, data: category };
   } catch (error) {
     console.error("Failed to create category:", error);
@@ -55,19 +78,39 @@ export async function createCategory(formData: FormData) {
 
 export async function updateCategory(id: number, formData: FormData) {
   const name = ((formData.get("name") as string) ?? "").trim();
-  const type = formData.get("type") as "Income" | "Expense" | "Investment";
+  const typeValue = String(formData.get("type") ?? "");
   if (name === "") return { error: "A category needs a name." };
+  if (!isCategoryType(typeValue)) return { error: "Choose a valid category type." };
+  const type = typeValue;
 
   try {
     const category = await withDb(async (db) => {
+      const [existing] = await db
+        .select({ type: categories.type })
+        .from(categories)
+        .where(eq(categories.id, id))
+        .limit(1);
+      if (!existing) throw new NotFoundError(`Category ${id} no longer exists.`);
+
+      let displayOrder: number | undefined;
+      if (existing.type !== type) {
+        const [{ nextOrder }] = await db
+          .select({
+            nextOrder: sql<number>`COALESCE(MAX(${categories.displayOrder}), -1) + 1`,
+          })
+          .from(categories)
+          .where(eq(categories.type, type));
+        displayOrder = nextOrder;
+      }
       const [row] = await db
         .update(categories)
         .set({
           name,
           type,
-          // Budget limits belong to the budgets table. If an old category-level
-          // limit becomes Income, clear it so it cannot reappear if the type is
-          // changed back later; otherwise preserve it until edited/deleted as a budget.
+          ...(displayOrder === undefined ? {} : { displayOrder }),
+
+
+
           ...(type === "Income" ? { monthlyLimitCents: null } : {}),
           icon: formData.get("icon") as string,
           color: formData.get("color") as string,
@@ -75,11 +118,10 @@ export async function updateCategory(id: number, formData: FormData) {
         })
         .where(eq(categories.id, id))
         .returning();
-      if (!row) throw new NotFoundError(`Category ${id} no longer exists.`);
       return row;
     });
 
-    revalidatePath("/budgets");
+    revalidateCategorySurfaces();
     return { success: true, data: category };
   } catch (error) {
     if (error instanceof NotFoundError) return { error: error.message };
@@ -88,7 +130,48 @@ export async function updateCategory(id: number, formData: FormData) {
   }
 }
 
-/** How many transactions still point at this category. */
+export async function reorderCategories(type: string, orderedIds: number[]) {
+  if (!isCategoryType(type)) return { error: "Choose a valid category type." };
+  if (
+    orderedIds.some((id) => !Number.isSafeInteger(id) || id <= 0) ||
+    new Set(orderedIds).size !== orderedIds.length
+  ) {
+    return { error: "The category order is invalid. Refresh and try again." };
+  }
+
+  try {
+    await withDb(async (db) => {
+      const rows = await db
+        .select({ id: categories.id })
+        .from(categories)
+        .where(eq(categories.type, type))
+        .orderBy(asc(categories.displayOrder), asc(categories.id));
+      const storedIds = new Set(rows.map((row) => row.id));
+      if (
+        rows.length !== orderedIds.length ||
+        orderedIds.some((id) => !storedIds.has(id))
+      ) {
+        throw new ReorderConflictError();
+      }
+
+      const updatedAt = new Date();
+      for (const [displayOrder, id] of orderedIds.entries()) {
+        await db
+          .update(categories)
+          .set({ displayOrder, updatedAt })
+          .where(eq(categories.id, id));
+      }
+    });
+    revalidateCategorySurfaces();
+    return { success: true };
+  } catch (error) {
+    if (error instanceof ReorderConflictError) return { error: error.message };
+    console.error("Failed to reorder categories:", error);
+    return { error: "Failed to save the category order." };
+  }
+}
+
+
 export async function countCategoryUsage(id: number): Promise<number> {
   const rows = await readDb((db) =>
     db.select().from(transactions).where(eq(transactions.categoryId, id)),
@@ -96,22 +179,7 @@ export async function countCategoryUsage(id: number): Promise<number> {
   return rows.length;
 }
 
-/**
- * Delete a category, refusing when it would orphan transactions.
- *
- * WHY THE CHECK EXISTS: this action used to delete the row unconditionally, and
- * because foreign keys were historically OFF in this database the referencing
- * transactions survived pointing at a category id that no longer existed. It
- * ALREADY happened to the live database — two rows ended up with
- * `category_id = 0`, which makes them invisible to the cash balance and to every
- * breakdown (see lib/cash-balance.ts: an unknown category contributes nothing).
- * Money the user entered silently stopped counting.
- *
- * The referencing rows are counted and reported so the user can reassign or
- * delete them deliberately. Nothing is written when the delete is refused: the
- * refusal is raised as an exception INSIDE `withDb`, which discards the
- * in-memory image rather than flushing an unchanged one.
- */
+
 export async function deleteCategory(id: number) {
   try {
     await withDb(async (db) => {
@@ -133,8 +201,7 @@ export async function deleteCategory(id: number) {
       await db.delete(categories).where(eq(categories.id, id));
     });
 
-    revalidatePath("/budgets");
-    revalidatePath("/");
+    revalidateCategorySurfaces();
     return { success: true };
   } catch (error) {
     if (error instanceof CategoryInUseError) return { error: error.message };
@@ -154,5 +221,12 @@ class NotFoundError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "NotFoundError";
+  }
+}
+
+class ReorderConflictError extends Error {
+  constructor() {
+    super("Categories changed while you were reordering them. Refresh and try again.");
+    this.name = "ReorderConflictError";
   }
 }

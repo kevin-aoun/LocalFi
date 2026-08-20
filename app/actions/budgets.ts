@@ -4,7 +4,6 @@ import * as mutations from "./budgets/mutations";
 import * as read from "./budgets/read";
 import * as reallocations from "./budgets/reallocations";
 
-/** Stable public budget-action surface; implementation is split by responsibility. */
 export async function getBudgets(...args: Parameters<typeof read.getBudgets>) {
   return read.getBudgets(...args);
 }
@@ -47,6 +46,10 @@ export async function updateBudget(...args: Parameters<typeof mutations.updateBu
 
 export async function deleteBudget(...args: Parameters<typeof mutations.deleteBudget>) {
   return mutations.deleteBudget(...args);
+}
+
+export async function reorderBudgets(...args: Parameters<typeof mutations.reorderBudgets>) {
+  return mutations.reorderBudgets(...args);
 }
 
 export async function importLegacyBudgets(...args: Parameters<typeof mutations.importLegacyBudgets>) {

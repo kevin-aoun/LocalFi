@@ -1,15 +1,31 @@
 "use client";
 
-/** Budget performance, history, one-off reallocations, and category management. */
-
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  rectSortingStrategy,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   AlertCircle,
   AlertTriangle,
   ArrowLeftRight,
   CalendarRange,
   CircleSlash,
+  GripVertical,
   Plus,
   PiggyBank,
   Trash2,
@@ -21,6 +37,7 @@ import {
   deleteBudgetReallocation,
   deleteBudget,
   getBudgetHistory,
+  reorderBudgets,
   type BudgetReallocationView,
   type BudgetPerformanceRow,
 } from "@/app/actions/budgets";
@@ -80,9 +97,64 @@ import type { DateKey } from "@/lib/dates";
 import { formatMoney, type Cents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
+function SortableBudgetCard({
+  row,
+  disabled,
+  onEdit,
+  onDelete,
+  reallocationFlow,
+}: {
+  row: BudgetRowView;
+  disabled: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+  reallocationFlow?: ReturnType<typeof monthlyReallocationFlow>;
+}) {
+  const {
+    attributes,
+    listeners,
+    setActivatorNodeRef,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: row.budgetId, disabled });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn("relative", isDragging && "z-10 opacity-70")}
+    >
+      <BudgetCard
+        row={row}
+        onEdit={onEdit}
+        onDelete={onDelete}
+        reallocationFlow={reallocationFlow}
+        dragHandle={(
+          <Button
+            ref={setActivatorNodeRef}
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 touch-none cursor-grab p-0 active:cursor-grabbing"
+            disabled={disabled}
+            {...attributes}
+            {...listeners}
+            aria-label={`Reorder ${row.categoryName} budget`}
+            title="Drag to reorder"
+          >
+            <GripVertical className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          </Button>
+        )}
+      />
+    </div>
+  );
+}
+
 type Category = BudgetCategory;
 
-/** A `budgets` row as it arrives from the server. */
+
 type BudgetRecord = {
   id: number;
   categoryId: number;
@@ -95,11 +167,11 @@ type BudgetRecord = {
   goalAmountCents: Cents | null;
 };
 
-/** The little a delete confirmation needs; `BudgetRowView` satisfies it. */
+
 type DeletableBudget = { budgetId: number; categoryName: string; period: BudgetPeriod };
 
 type BudgetsClientProps = {
-  /** Today as a LOCAL calendar day, resolved on the server. */
+
   todayKey: DateKey;
   initialCategories: Category[];
   initialBudgets: BudgetRecord[];
@@ -124,42 +196,56 @@ export default function BudgetsClient({
 }: BudgetsClientProps) {
   const router = useRouter();
 
-  // --- budget dialogs -------------------------------------------------------
+
   const [budgetDialogOpen, setBudgetDialogOpen] = useState(false);
   const [budgetBeingEdited, setBudgetBeingEdited] = useState<EditableBudget | null>(null);
   const [budgetDefaultCategoryId, setBudgetDefaultCategoryId] = useState<number | undefined>();
-  // Only what the confirmation needs, so a stranded income row — which has no
-  // BudgetRowView, because the engine refuses to measure it — can be deleted too.
+
+
   const [budgetToDelete, setBudgetToDelete] = useState<DeletableBudget | null>(null);
   const [budgetDeleteError, setBudgetDeleteError] = useState<string | null>(null);
   const [reallocationDialogOpen, setReallocationDialogOpen] = useState(false);
   const [reallocationDeleteId, setReallocationDeleteId] = useState<number | null>(null);
   const [reallocationError, setReallocationError] = useState<string | null>(null);
 
-  // --- category dialogs (this page is still the category manager) -----------
+
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState<number | null>(null);
-  /** Why the last delete was refused; null when there is nothing to report. */
+
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // --- current period -------------------------------------------------------
-  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("all");
 
-  // --- history --------------------------------------------------------------
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("all");
+  const [orderedBudgetIds, setOrderedBudgetIds] = useState(() =>
+    sortBudgetRows(initialCurrentPeriod)
+      .filter((row) => row.budgetId > 0)
+      .map((row) => row.budgetId),
+  );
+  const [savingBudgetOrder, setSavingBudgetOrder] = useState(false);
+  const [budgetOrderError, setBudgetOrderError] = useState<string | null>(null);
+  const budgetSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  useEffect(() => {
+    setOrderedBudgetIds(
+      sortBudgetRows(initialCurrentPeriod)
+        .filter((row) => row.budgetId > 0)
+        .map((row) => row.budgetId),
+    );
+  }, [initialCurrentPeriod]);
+
+
   const [historyPeriod, setHistoryPeriod] = useState<BudgetPeriod>("monthly");
   const [historyLength, setHistoryLength] = useState(initialHistoryPeriods);
   const [historyCategory, setHistoryCategory] = useState<string>("all");
   const [historyRows, setHistoryRows] = useState<BudgetPerformanceRow[]>(initialHistory);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
-  /**
-   * The server already rendered ONE selection (monthly, `initialHistoryPeriods`,
-   * every category). While that is what is on screen there is nothing to fetch;
-   * any other selection is fetched, including again after a `router.refresh()` —
-   * otherwise a save would silently replace a weekly view with monthly rows.
-   */
+
   const isDefaultHistorySelection =
     historyPeriod === "monthly" &&
     historyLength === initialHistoryPeriods &&
@@ -197,21 +283,21 @@ export default function BudgetsClient({
 
   const currentRows: BudgetRowView[] = initialCurrentPeriod;
   const summary = summarizeBudgets(rowsForPeriodFilter(currentRows, periodFilter));
-  // Belt and braces: the actions already drop income rows before the engine sees
-  // them, so this filter should never remove anything — but if one does arrive it
-  // is not rendered as a budget card.
+
+
+
+  const budgetOrderIndex = new Map(orderedBudgetIds.map((id, index) => [id, index]));
   const visibleRows = sortBudgetRows(
     rowsForPeriodFilter(currentRows, periodFilter).filter((row) => !isIgnoredRow(row)),
+  ).sort((a, b) =>
+    (budgetOrderIndex.get(a.budgetId) ?? Number.MAX_SAFE_INTEGER) -
+    (budgetOrderIndex.get(b.budgetId) ?? Number.MAX_SAFE_INTEGER),
   );
   const overRows = visibleRows.filter((row) => classifyBudgetRow(row) === "over");
   const missingBudgets = unbudgetedCategories(initialCategories, currentRows);
-  /** Categories a budget may be created for — Income is not one of them. */
+
   const creatableCategories = budgetableCategories(initialCategories);
-  /**
-   * Budget rows sitting on an income category. `createBudget` refuses to make
-   * one, so this is only ever non-empty for a row that predates the rule or was
-   * written into the database by hand. They are reported, not silently obeyed.
-   */
+
   const strandedBudgets = strandedIncomeBudgets(initialBudgets, initialCategories);
 
   const budgetsById = new Map(initialBudgets.map((budget) => [budget.id, budget]));
@@ -237,8 +323,8 @@ export default function BudgetsClient({
       id: record?.id ?? row.budgetId,
       categoryId: record?.categoryId ?? row.categoryId,
       period: record?.period ?? row.period,
-      // A synthetic legacy row has no record to read. Remove this month's
-      // one-off adjustment so editing never turns it into a permanent change.
+
+
       limitCents: record?.limitCents ?? row.limitCents - reallocationCents,
       effectiveFrom: record?.effectiveFrom ?? row.effectiveFrom ?? row.startKey,
       effectiveTo: record?.effectiveTo ?? row.effectiveTo ?? null,
@@ -253,7 +339,7 @@ export default function BudgetsClient({
   const handleDeleteBudget = async () => {
     if (!budgetToDelete) return;
     const result = await deleteBudget(budgetToDelete.budgetId);
-    // The action reports refusal by RETURNING { error }; keep the dialog open.
+
     if (result && "error" in result && result.error) {
       setBudgetDeleteError(result.error);
       return;
@@ -268,9 +354,9 @@ export default function BudgetsClient({
 
     const result = await deleteCategory(categoryToDelete);
 
-    // `deleteCategory` REFUSES when transactions still reference the category —
-    // silently closing here is how a category used to disappear while its
-    // transactions were left pointing at nothing.
+
+
+
     if (result && "error" in result && result.error) {
       setDeleteError(result.error);
       return;
@@ -297,6 +383,35 @@ export default function BudgetsClient({
 
   const handleSuccess = () => {
     router.refresh();
+  };
+
+  const handleBudgetDragEnd = async ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id || savingBudgetOrder) return;
+    const visibleIds = visibleRows
+      .filter((row) => row.budgetId > 0)
+      .map((row) => row.budgetId);
+    const oldIndex = visibleIds.indexOf(Number(active.id));
+    const newIndex = visibleIds.indexOf(Number(over.id));
+    if (oldIndex < 0 || newIndex < 0) return;
+
+    const previous = orderedBudgetIds;
+    const movedVisibleIds = arrayMove(visibleIds, oldIndex, newIndex);
+    const visibleIdSet = new Set(visibleIds);
+    let nextVisibleIndex = 0;
+    const next = previous.map((id) => (
+      visibleIdSet.has(id) ? movedVisibleIds[nextVisibleIndex++] : id
+    ));
+    setOrderedBudgetIds(next);
+    setSavingBudgetOrder(true);
+    setBudgetOrderError(null);
+    const result = await reorderBudgets(next);
+    if ("error" in result) {
+      setOrderedBudgetIds(previous);
+      setBudgetOrderError(result.error);
+    } else {
+      router.refresh();
+    }
+    setSavingBudgetOrder(false);
   };
 
   const historyGroups = groupHistory(historyRows);
@@ -334,10 +449,10 @@ export default function BudgetsClient({
         </div>
       </div>
 
-      {/* ---------------------------------------------------------------- */}
-      {/* Summary: the over-budget signal used to be a red card you had to  */}
-      {/* find. It is now the first thing on the page.                     */}
-      {/* ---------------------------------------------------------------- */}
+      {}
+      {}
+      {}
+      {}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card className={summary.overCount > 0 ? "border-destructive" : undefined}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -426,8 +541,7 @@ export default function BudgetsClient({
         </Card>
       </div>
 
-      {/* An income category cannot have a budget. One that predates the rule is
-          named here and can be removed — never folded into the totals above. */}
+      {}
       {strandedBudgets.length > 0 && (
         <div
           role="status"
@@ -499,7 +613,7 @@ export default function BudgetsClient({
           <TabsTrigger value="categories">Categories</TabsTrigger>
         </TabsList>
 
-        {/* ================= This period ================= */}
+        {}
         <TabsContent value="current" className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -542,7 +656,23 @@ export default function BudgetsClient({
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <>
+              {budgetOrderError && (
+                <p role="alert" className="text-sm text-destructive">{budgetOrderError}</p>
+              )}
+              <p aria-live="polite" className="sr-only">
+                {savingBudgetOrder ? "Saving budget order" : budgetOrderError ?? "Budget order saved"}
+              </p>
+              <DndContext
+                sensors={budgetSensors}
+                collisionDetection={closestCenter}
+                onDragEnd={(event) => void handleBudgetDragEnd(event)}
+              >
+                <SortableContext
+                  items={visibleRows.filter((row) => row.budgetId > 0).map((row) => row.budgetId)}
+                  strategy={rectSortingStrategy}
+                >
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {visibleRows.map((row) => {
                 const reallocationFlow =
                   row.period === "monthly"
@@ -552,27 +682,35 @@ export default function BudgetsClient({
                         row.periodKey,
                       )
                     : undefined;
-                return (
-                  <BudgetCard
+                const cardProps = {
+                  row,
+                  onEdit: () => openEditBudget(row),
+                  onDelete: () => {
+                    setBudgetDeleteError(null);
+                    setBudgetToDelete(row);
+                  },
+                  reallocationFlow,
+                };
+                return row.budgetId > 0 ? (
+                  <SortableBudgetCard
                     key={`${row.budgetId}-${row.periodKey}`}
-                    row={row}
-                    onEdit={() => openEditBudget(row)}
-                    onDelete={() => {
-                      setBudgetDeleteError(null);
-                      setBudgetToDelete(row);
-                    }}
-                    reallocationFlow={reallocationFlow}
+                    {...cardProps}
+                    disabled={savingBudgetOrder}
                   />
+                ) : (
+                  <BudgetCard key={`${row.budgetId}-${row.periodKey}`} {...cardProps} />
                 );
               })}
-            </div>
+                  </div>
+                </SortableContext>
+              </DndContext>
+            </>
           )}
 
           {missingBudgets.length > 0 && (
             <Card>
               <CardHeader>
-                {/* `unbudgetedCategories` leaves Income out: it cannot have a
-                    budget, so inviting one here would be a dead end. */}
+                {}
                 <CardTitle className="text-sm font-medium">
                   {missingBudgets.length} {missingBudgets.length === 1 ? "category" : "categories"}{" "}
                   with no budget
@@ -595,7 +733,7 @@ export default function BudgetsClient({
           )}
         </TabsContent>
 
-        {/* ================= History ================= */}
+        {}
         <TabsContent value="history" className="space-y-4">
           <BudgetHistoryTab
             historyPeriod={historyPeriod}
@@ -612,7 +750,7 @@ export default function BudgetsClient({
           />
         </TabsContent>
 
-        {/* ================= Reallocations ================= */}
+        {}
         <TabsContent value="reallocations" className="space-y-4">
           <BudgetReallocationsTab
             reallocations={sortedReallocations}
@@ -624,7 +762,7 @@ export default function BudgetsClient({
           />
         </TabsContent>
 
-        {/* ================= Categories ================= */}
+        {}
         <TabsContent value="categories" className="space-y-8">
           <BudgetCategoriesTab
             categories={initialCategories}
@@ -640,7 +778,7 @@ export default function BudgetsClient({
         </TabsContent>
       </Tabs>
 
-      {/* ---------------------------------- dialogs ---------------------------------- */}
+      {}
 
       <BudgetRuleDialog
         open={budgetDialogOpen}
@@ -701,7 +839,7 @@ export default function BudgetsClient({
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={(event) => {
-                // Keep the dialog open so a refusal can be read.
+
                 event.preventDefault();
                 void handleDeleteBudget();
               }}
@@ -723,9 +861,7 @@ export default function BudgetsClient({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Category</AlertDialogTitle>
             <AlertDialogDescription>
-              {/* The old copy claimed the transactions would simply lose their
-                  category. They did — and then vanished from every balance.
-                  Deletion is now refused while any transaction references it. */}
+              {}
               A category can only be deleted once no transactions use it. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -744,7 +880,7 @@ export default function BudgetsClient({
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={(event) => {
-                // Keep the dialog open so the refusal can be read.
+
                 event.preventDefault();
                 void handleDeleteCategory();
               }}

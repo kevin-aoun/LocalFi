@@ -55,7 +55,6 @@ import {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-/** A rendered budget row, with every field the UI reads. */
 function view(over: Partial<BudgetRowView> = {}): BudgetRowView {
   const limitCents = over.limitCents ?? 50_000;
   const carriedInCents = over.carriedInCents ?? 0;
@@ -80,6 +79,7 @@ function view(over: Partial<BudgetRowView> = {}): BudgetRowView {
     categoryType: "Expense",
     categoryColor: "#10b981",
     categoryIcon: "ShoppingCart",
+    displayOrder: 0,
     legacy: false,
     ...over,
   };
@@ -507,7 +507,13 @@ describe("over-budget and near-limit classification", () => {
   });
 });
 
-describe("sorting puts problems first", () => {
+describe("sorting puts manual order first, then problems", () => {
+  it("puts the saved card order ahead of urgency", () => {
+    const over = view({ categoryName: "Urgent", spentCents: 60_000, displayOrder: 2 });
+    const calm = view({ categoryName: "Calm", budgetId: 11, displayOrder: 1 });
+    expect(sortBudgetRows([over, calm]).map((row) => row.categoryName)).toEqual(["Calm", "Urgent"]);
+  });
+
   it("orders over budget, then near limit, then by usage, then by name", () => {
     const rows = [
       view({ categoryId: 1, categoryName: "Travel", limitCents: 10_000, spentCents: 1_000 }),

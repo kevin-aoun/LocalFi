@@ -1,4 +1,4 @@
-/** Pure, timezone-safe budget period, rollover, and reallocation arithmetic. */
+
 import { isSpendable, type CashLedgerTransaction } from "./cash-balance";
 import { fromDateKey, isDateKey, toDateKey, type DateKey } from "./dates";
 import { assertCents, negateCents, sumCents, type Cents } from "./money";
@@ -6,33 +6,32 @@ import { assertCents, negateCents, sumCents, type Cents } from "./money";
 export const budgetPeriods = ["weekly", "monthly", "yearly"] as const;
 export type BudgetPeriod = (typeof budgetPeriods)[number];
 
-/** Guard against a pathological simulation (a weekly budget anchored in 1970). */
 const MAX_PERIODS = 5_000;
 
 export type PeriodRange = {
-  /** Stable, sortable identifier for the period. */
+
   key: string;
   startKey: DateKey;
-  /** Inclusive. */
+
   endKey: DateKey;
 };
 
-/** A `budgets` row, structurally typed so this module needs no schema import. */
 export type BudgetRow = {
   id: number;
   categoryId: number;
   period: BudgetPeriod;
   limitCents: Cents;
   effectiveFrom: DateKey;
-  /** Inclusive last day the budget applies. null = open-ended. */
+
   effectiveTo: DateKey | null;
   rollover: boolean;
-  /** DECISION: DEC-008 — optional presentation metadata on rollover. */
+
   goalName?: string | null;
   goalAmountCents?: Cents | null;
+
+  displayOrder?: number;
 };
 
-/** A fixed one-month transfer between two category budgets. */
 export type BudgetReallocationRow = {
   id?: number;
   month: string;
@@ -47,10 +46,9 @@ export type BudgetReallocationFlow = {
   netCents: Cents;
 };
 
-/** A transaction as the budget engine sees it: a calendar day plus a magnitude. */
 export type BudgetLedgerTransaction = CashLedgerTransaction & {
   dateKey: DateKey;
-  /** Signed category movement: positive consumption, negative income/reversal. */
+
   categoryMovementCents?: Cents;
 };
 
@@ -62,17 +60,17 @@ export type BudgetPeriodResult = {
   startKey: DateKey;
   endKey: DateKey;
   limitCents: Cents;
-  /** Surplus carried in from earlier periods. Always 0 when rollover is off. */
+
   carriedInCents: Cents;
-  /** limitCents + carriedInCents */
+
   availableCents: Cents;
   spentCents: Cents;
-  /** availableCents − spentCents. Negative means over budget. */
+
   remainingCents: Cents;
-  /** Surplus handed to the next period: `rollover ? max(0, remaining) : 0`. */
+
   carriedOutCents: Cents;
   rollover: boolean;
-  /** Nullable target metadata copied from the budget in force. */
+
   goalName?: string | null;
   goalAmountCents?: Cents | null;
   overBudget: boolean;
@@ -81,20 +79,15 @@ export type BudgetPeriodResult = {
 export type BudgetGoalProgress = {
   name: string;
   targetCents: Cents;
-  /** The monthly rule limit: contribution capacity, not a ledger entry. */
+
   monthlyAllocationCents: Cents;
-  /** Existing non-negative current-period remaining rollover balance. */
+
   savedCents: Cents;
   remainingCents: Cents;
-  /** Clamped for display; may never render below 0 or above 100. */
+
   progressPercent: number;
 };
 
-/**
- * Present one savings goal using facts already derived by the budget engine.
- * No transaction or synthetic contribution is created here or by callers.
- * DECISION: DEC-008
- */
 export function deriveBudgetGoalProgress(
   row: Pick<
     BudgetPeriodResult,
@@ -149,13 +142,13 @@ function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
 
-/** Monday of `d`'s local week. */
+
 function startOfWeek(d: Date): Date {
-  const offset = (d.getDay() + 6) % 7; // Mon=0 ... Sun=6
+  const offset = (d.getDay() + 6) % 7;
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() - offset);
 }
 
-/** The period of type `period` that contains `dateKey`. */
+
 export function periodContaining(period: BudgetPeriod, dateKey: DateKey): PeriodRange {
   assertPeriod(period);
   const d = fromDateKey(assertKey(dateKey, "date key"));
@@ -183,17 +176,14 @@ export function periodContaining(period: BudgetPeriod, dateKey: DateKey): Period
   }
 }
 
-/** The period immediately after `range`. */
+
 function nextPeriod(period: BudgetPeriod, range: PeriodRange): PeriodRange {
   const end = fromDateKey(range.endKey);
   const dayAfter = new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1);
   return periodContaining(period, toDateKey(dayAfter));
 }
 
-/**
- * Every period of type `period` that overlaps `[fromKey, toKey]`, in order.
- * Returns `[]` when the range is inverted.
- */
+
 export function periodsBetween(period: BudgetPeriod, fromKey: DateKey, toKey: DateKey): PeriodRange[] {
   assertPeriod(period);
   assertKey(fromKey, "from date key");
@@ -212,13 +202,7 @@ export function periodsBetween(period: BudgetPeriod, fromKey: DateKey, toKey: Da
   );
 }
 
-/**
- * The budget in force for `categoryId` on `dateKey`, or null.
- *
- * When windows overlap (an edit that did not close the previous row) the LATEST
- * `effectiveFrom` wins, and ties break on the highest id, so the most recently
- * created row is authoritative.
- */
+
 export function budgetInForce(
   budgets: readonly BudgetRow[],
   categoryId: number,
@@ -241,10 +225,7 @@ export function budgetInForce(
   );
 }
 
-/**
- * Total spend for `categoryId` in `[startKey, endKey]`, both ends inclusive.
- * Pending rows and transfers are excluded (see `isSpendable`).
- */
+
 export function spendInRange(
   transactions: readonly BudgetLedgerTransaction[],
   categoryId: number,
@@ -258,8 +239,8 @@ export function spendInRange(
       (tx) =>
         tx.categoryId === categoryId &&
         isSpendable(tx) &&
-        // DECISION: DEC-003. Persisted direction is historical truth. Missing
-        // direction preserves the pre-0009 pure-fixture behaviour.
+
+
         (tx.direction == null || tx.direction === "outflow") &&
         tx.dateKey >= startKey &&
         tx.dateKey <= endKey,
@@ -275,18 +256,18 @@ export function spendInRange(
 export type BudgetPerformanceInput = {
   budgets: readonly BudgetRow[];
   transactions: readonly BudgetLedgerTransaction[];
-  /** One-off monthly transfers; ignored by weekly and yearly budgets. */
+
   reallocations?: readonly BudgetReallocationRow[];
-  /** Inclusive window of periods to REPORT. */
+
   fromKey: DateKey;
   toKey: DateKey;
-  /** Restrict to one category. */
+
   categoryId?: number;
-  /** Restrict to one period type. Default: every period type present in `budgets`. */
+
   period?: BudgetPeriod;
 };
 
-/** Incoming, outgoing, and net budget movement for one category in one month. */
+
 export function monthlyReallocationFlow(
   reallocations: readonly BudgetReallocationRow[],
   categoryId: number,
@@ -309,7 +290,7 @@ export function monthlyReallocationFlow(
   };
 }
 
-/** Incoming minus outgoing for one category in one month. */
+
 export function monthlyReallocationAdjustment(
   reallocations: readonly BudgetReallocationRow[],
   categoryId: number,
@@ -318,18 +299,7 @@ export function monthlyReallocationAdjustment(
   return monthlyReallocationFlow(reallocations, categoryId, month).netCents;
 }
 
-/**
- * Historical performance, one row per (category, period) that had a budget in
- * force. Periods with no budget are omitted rather than reported as zero-limit.
- *
- * Rollover is SIMULATED FROM THE BUDGET'S START, not from `fromKey`: asking for
- * March alone must still see the surplus January and February handed forward, or
- * the number shown would depend on how far back the user happened to scroll.
- * The rows outside `[fromKey, toKey]` are computed and then dropped.
- *
- * Which budget applies to a period is resolved on the period's FIRST day, so a
- * limit change mid-period takes effect in the following period.
- */
+
 export function budgetPerformance(input: BudgetPerformanceInput): BudgetPeriodResult[] {
   const { budgets, transactions, reallocations = [], categoryId, period } = input;
   const fromKey = assertKey(input.fromKey, "from date key");
@@ -342,8 +312,8 @@ export function budgetPerformance(input: BudgetPerformanceInput): BudgetPeriodRe
       (period === undefined || b.period === period),
   );
 
-  // Group by (categoryId, period): a category may hold a weekly AND a monthly
-  // budget, and each carries over independently.
+
+
   const groups = new Map<string, BudgetRow[]>();
   for (const budget of relevant) {
     const key = `${budget.categoryId}|${budget.period}`;
@@ -360,9 +330,9 @@ export function budgetPerformance(input: BudgetPerformanceInput): BudgetPeriodRe
     const groupCategory = group[0].categoryId;
     assertPeriod(groupPeriod);
 
-    // Simulate from the earliest effectiveFrom so carry-over is deterministic.
+
     const simulationStart = group[0].effectiveFrom;
-    // ...but never past the last day any budget in the group applies.
+
     const openEnded = group.some((b) => b.effectiveTo === null);
     const lastApplicable = openEnded
       ? toKey
@@ -374,7 +344,7 @@ export function budgetPerformance(input: BudgetPerformanceInput): BudgetPeriodRe
     for (const range of periodsBetween(groupPeriod, simulationStart, simulationEnd)) {
       const budget = budgetInForce(group, groupCategory, range.startKey, groupPeriod);
       if (!budget) {
-        // A gap between budgets breaks the chain: nothing to carry.
+
         carriedInCents = 0;
         continue;
       }
@@ -426,18 +396,14 @@ export type SpendVsBudgetInput = {
   budgets: readonly BudgetRow[];
   transactions: readonly BudgetLedgerTransaction[];
   reallocations?: readonly BudgetReallocationRow[];
-  /** Any day inside the period of interest — including a past one. */
+
   dateKey: DateKey;
-  /** Default: every period type present in `budgets`. */
+
   period?: BudgetPeriod;
   categoryId?: number;
 };
 
-/**
- * Spend vs budget for the single period containing `dateKey` — the "am I over
- * budget right now (or in March)?" query. Rollover is accounted for exactly as in
- * `budgetPerformance`.
- */
+
 export function spendVsBudget(input: SpendVsBudgetInput): BudgetPeriodResult[] {
   const { budgets, transactions, reallocations = [], dateKey, period, categoryId } = input;
   assertKey(dateKey, "date key");
@@ -461,13 +427,7 @@ export function spendVsBudget(input: SpendVsBudgetInput): BudgetPeriodResult[] {
   return out;
 }
 
-/**
- * Reads the legacy `categories.monthly_limit_cents` column as monthly budgets.
- *
- * Kept so that nothing regresses if the `budgets` table is empty (a database that
- * has not been migrated, or a category edited through the old code path). Synthetic
- * ids are NEGATIVE so they can never be confused with a real `budgets.id`.
- */
+
 export function budgetsFromLegacyLimits(
   categories: readonly { id: number; monthlyLimitCents?: Cents | null }[],
   effectiveFrom: DateKey,

@@ -1,18 +1,10 @@
-/**
- * Regression tests for `deleteCategory` orphaning transactions (item 10) and for
- * the error values the dialogs now surface (item 5, server half).
- *
- * The live database already contains the damage this prevents: two transactions
- * ended up with `category_id = 0` after a category was deleted, which makes them
- * invisible to the cash balance and to every breakdown. Repairing those rows is
- * a migration's job; this file only proves it cannot happen again.
- */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTempDb, execOn, seedCategory, seedTransaction, type TempDb } from "./support/temp-db";
 
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
-const { createCategory, deleteCategory, updateCategory, countCategoryUsage, getCategories } =
+const { createCategory, deleteCategory, updateCategory, countCategoryUsage, getCategories, reorderCategories } =
   await import("../categories");
 
 let temp: TempDb;
@@ -45,7 +37,7 @@ describe("deleteCategory refuses to orphan transactions", () => {
 
     expect(result).toMatchObject({ error: expect.stringContaining("2 transactions") });
     expect(temp.query("SELECT id FROM categories")).toHaveLength(1);
-    // And, crucially, the transactions still point at a category that exists.
+
     expect(temp.query("SELECT category_id FROM transactions")).toEqual([
       { category_id: 1 },
       { category_id: 1 },
@@ -85,8 +77,6 @@ describe("deleteCategory refuses to orphan transactions", () => {
     seedCategory(temp, { id: 1, name: "Groceries", type: "Expense" });
     seedTransaction(temp, { categoryId: 1, amountCents: 4500, dateKey: "2026-07-28" });
 
-    // Touch the database once through the client so any lazy auto-migration has
-    // already been flushed, then snapshot it.
     await getCategories();
     const { readFileSync } = await import("node:fs");
     const before = readFileSync(temp.file);
@@ -104,7 +94,7 @@ describe("deleteCategory refuses to orphan transactions", () => {
   });
 
   it("fails closed when a transaction was orphaned before the fix landed", async () => {
-    // Simulate the shape of the live damage: a row pointing at category 0.
+
     seedCategory(temp, { id: 1, name: "Groceries", type: "Expense" });
     execOn(temp, (db) => {
       db.run("PRAGMA foreign_keys = OFF");
@@ -113,13 +103,9 @@ describe("deleteCategory refuses to orphan transactions", () => {
       );
     });
 
-    // DECISION: DEC-005 — database readiness refuses pre-existing FK
-    // corruption before any product query or delete can run.
     const result = await deleteCategory(1);
     expect(result).toMatchObject({ error: "Failed to delete category." });
-    // The failed startup leaves both the referenced category and the orphan
-    // untouched. Repairing existing corruption is a migration/recovery job,
-    // not a destructive action side effect.
+
     expect(temp.query("SELECT id FROM categories")).toEqual([{ id: 1 }]);
     expect(temp.query("SELECT category_id FROM transactions")).toEqual([{ category_id: 0 }]);
   });
@@ -150,7 +136,7 @@ describe("category writes report their failures instead of pretending to succeed
     expect(await updateCategory(rent.id, categoryForm({ name: "Groceries" }))).toEqual({
       error: 'A category named "Groceries" already exists.',
     });
-    // The original name survived.
+
     expect(temp.query("SELECT name FROM categories ORDER BY id")).toEqual([
       { name: "Groceries" },
       { name: "Rent" },
@@ -196,5 +182,61 @@ describe("category writes do not create budget limits", () => {
     expect(temp.query("SELECT monthly_limit_cents FROM categories")).toEqual([
       { monthly_limit_cents: null },
     ]);
+  });
+});
+
+describe("category display order", () => {
+  it("appends new categories and persists an explicit order within a type", async () => {
+    await createCategory(categoryForm({ name: "Groceries" }));
+    await createCategory(categoryForm({ name: "Rent" }));
+    await createCategory(categoryForm({ name: "Dining" }));
+    const before = (await getCategories()).filter((category) => category.type === "Expense");
+
+    expect(before.map((category) => category.name)).toEqual(["Groceries", "Rent", "Dining"]);
+    expect(await reorderCategories("Expense", [before[2].id, before[0].id, before[1].id]))
+      .toEqual({ success: true });
+
+    const after = (await getCategories()).filter((category) => category.type === "Expense");
+    expect(after.map((category) => category.name)).toEqual(["Dining", "Groceries", "Rent"]);
+    expect(temp.query("SELECT name, display_order FROM categories ORDER BY display_order, id"))
+      .toEqual([
+        { name: "Dining", display_order: 0 },
+        { name: "Groceries", display_order: 1 },
+        { name: "Rent", display_order: 2 },
+      ]);
+  });
+
+  it("rejects stale, duplicate, and cross-type reorder requests without partial writes", async () => {
+    await createCategory(categoryForm({ name: "Groceries" }));
+    await createCategory(categoryForm({ name: "Rent" }));
+    await createCategory(categoryForm({ name: "Salary", type: "Income" }));
+    const all = await getCategories();
+    const expenses = all.filter((category) => category.type === "Expense");
+    const income = all.find((category) => category.type === "Income");
+    const before = temp.query("SELECT id, display_order FROM categories ORDER BY id");
+
+    expect(await reorderCategories("Expense", [expenses[0].id])).toMatchObject({
+      error: expect.stringContaining("changed"),
+    });
+    expect(await reorderCategories("Expense", [expenses[0].id, income!.id])).toMatchObject({
+      error: expect.stringContaining("changed"),
+    });
+    expect(await reorderCategories("Expense", [expenses[0].id, expenses[0].id])).toMatchObject({
+      error: expect.stringContaining("invalid"),
+    });
+    expect(temp.query("SELECT id, display_order FROM categories ORDER BY id")).toEqual(before);
+  });
+
+  it("moves a category to the end when its semantic type changes", async () => {
+    await createCategory(categoryForm({ name: "Salary", type: "Income" }));
+    await createCategory(categoryForm({ name: "Groceries" }));
+    await createCategory(categoryForm({ name: "Rent" }));
+    const groceries = (await getCategories()).find((category) => category.name === "Groceries")!;
+
+    await updateCategory(groceries.id, categoryForm({ name: "Refund", type: "Income" }));
+
+    const income = (await getCategories()).filter((category) => category.type === "Income");
+    expect(income.map((category) => category.name)).toEqual(["Salary", "Refund"]);
+    expect(income.map((category) => category.displayOrder)).toEqual([0, 1]);
   });
 });

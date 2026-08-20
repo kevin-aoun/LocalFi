@@ -1,20 +1,4 @@
-/**
- * Throwaway database fixture for the domain-model server actions (accounts,
- * transfers, recurring transactions, budgets).
- *
- * Every test gets its own file in a fresh `mkdtemp` directory, pointed at via
- * BUDGET_DB_PATH. data/budget.db — the user's real financial history — is never
- * opened, and no `db:init` / `db:seed` script is run.
- *
- * The schema comes from replaying drizzle/migrations in journal order, exactly as
- * lib/db/init.ts does, so the fixture tracks the real schema instead of
- * duplicating DDL that would rot.
- *
- * This is deliberately separate from support/temp-db.ts: that fixture belongs to
- * the concurrent UI/actions work and predates the accounts tables. Sharing one
- * file across two independent workstreams costs more than the forty lines of
- * overlap.
- */
+
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import os from "node:os";
@@ -52,14 +36,13 @@ async function sqlJs() {
 export type DomainDb = {
   dir: string;
   file: string;
-  /** Read rows without going through lib/db/client — independent verification. */
+
   query: (sql: string) => Array<Record<string, unknown>>;
-  /** First column of the first row. */
+
   scalar: (sql: string) => unknown;
   cleanup: () => Promise<void>;
 };
 
-/** Create a migrated, empty database and point BUDGET_DB_PATH at it. */
 export async function createDomainDb(): Promise<DomainDb> {
   const SqlJs = await sqlJs();
   const dir = mkdtempSync(path.join(os.tmpdir(), "budget-c1-test-"));
@@ -474,11 +457,12 @@ export function seedBudget(
     effectiveFrom: string;
     effectiveTo?: string | null;
     rollover?: boolean;
+    displayOrder?: number;
   },
 ) {
   execOn(temp, (db) => {
     db.run(
-      "INSERT INTO budgets (id, category_id, period, limit_cents, effective_from, effective_to, rollover) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO budgets (id, category_id, period, limit_cents, effective_from, effective_to, rollover, display_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       [
         values.id ?? null,
         values.categoryId,
@@ -487,6 +471,7 @@ export function seedBudget(
         values.effectiveFrom,
         values.effectiveTo ?? null,
         values.rollover ? 1 : 0,
+        values.displayOrder ?? 0,
       ],
     );
   });

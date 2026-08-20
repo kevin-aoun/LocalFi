@@ -19,8 +19,6 @@ import path from "node:path";
 import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 import type { WriterLease } from "./writer-lease";
 
-// DECISION: DEC-005 -- upgrades complete, verify, and persist before the
-// shared application handle can expose a product query.
 export const SCHEMA_JOURNAL_TABLE = "localfi_schema_journal";
 
 const MIGRATIONS_DIRECTORY = path.resolve(process.cwd(), "drizzle", "migrations");
@@ -30,11 +28,6 @@ type DrizzleJournalEntry = { idx: number; tag: string };
 type MigrationEntry = DrizzleJournalEntry & { checksum: string; sql: string };
 type SchemaState = "applied" | "absent" | "partial";
 
-// Exact hashes of the audited pre-correction migrations. These aliases let an
-// already-journaled 0009 reach 0012's provenance repair; arbitrary drift still
-// fails closed. The old 0012 hash is recognized only so its obsolete schema is
-// rejected by the structural verifier with recovery guidance, not misreported
-// as an unknown migration.
 const COMPATIBLE_MIGRATION_CHECKSUMS = new Map<number, ReadonlySet<string>>([
   [9, new Set(["d4b22ffa8ffa059a5bd703a3473dfa4e681d75cdbd583a6bf28f41cf69ae18d5"])],
   [12, new Set(["b11b611f8015645fceceb39cd02ac7c6dad5150cfd94acc7ee3756c35d3d0e3b"])],
@@ -295,6 +288,16 @@ function migrationState(db: Database, idx: number): SchemaState {
     }
     case 13:
       return columns(db, "settings").has("show_ledger") ? "applied" : "absent";
+    case 14:
+      return allOrNone([
+        columns(db, "categories").has("display_order"),
+        indexExists(db, "categories_type_display_order_idx"),
+      ]);
+    case 15:
+      return allOrNone([
+        columns(db, "budgets").has("display_order"),
+        indexExists(db, "budgets_display_order_idx"),
+      ]);
     default:
       throw new Error(
         `Migration ${String(idx).padStart(4, "0")} has no upgrade verifier; ` +
@@ -353,10 +356,10 @@ function detectAppliedPrefix(db: Database, entries: MigrationEntry[]): number {
     if (foundAbsent) {
       throw new Error(`Schema has ${entry.tag} without all earlier migrations`);
     }
-    // An unjournaled 0012-shaped database may have run only the SQL file. Safe
-    // adoption therefore requires the owned TypeScript semantic backfill too.
-    // Once a valid journal records 0012, projection damage belongs to
-    // CONTRACT-014 verification/rebuild and must not block startup readiness.
+
+
+
+
     if (entry.idx === 12) assertImmutableLedgerSemanticBackfillComplete(db);
     count += 1;
   }
@@ -517,9 +520,9 @@ async function applyMigration(
   if (migrationState(migrated, entry.idx) !== "applied") {
     throw new Error(`${entry.tag} did not produce its required schema`);
   }
-  // 0010 intentionally collapses duplicate holding/day rows, and its owned
-  // verifier proves the retained row is the newest. Every other migration must
-  // preserve the row count of every table that already existed.
+
+
+
   if (entry.idx !== 10) assertExistingRowsPreserved(migrated, countsBefore, entry.tag);
   if (entry.idx === 12) {
     const { rebuildCashAssetProjectionRaw } = await import("../ledger/rebuild");
@@ -559,7 +562,7 @@ function fsyncDirectory(directory: string) {
       closeSync(fd);
     }
   } catch {
-    // Some platforms do not support syncing directories.
+
   }
 }
 
@@ -586,7 +589,7 @@ function writeBytesAtomically(file: string, bytes: Buffer) {
     try {
       if (existsSync(temporary)) unlinkSync(temporary);
     } catch {
-      // Best-effort cleanup; the uniquely named temp never replaces the target.
+
     }
     throw error;
   }
@@ -621,9 +624,9 @@ function normalizeLegacyBaseline(db: Database): boolean {
   }
   const hasPending = columns(db, "transactions").has("pending");
   const hasVisitedCountries = tableExists(db, "visited_countries");
-  // Historical clients applied these two 0001 changes independently on load.
-  // Complete only that known split state; an untouched pre-0001 database still
-  // runs the official migration SQL and is journaled as applied.
+
+
+
   if (hasPending === hasVisitedCountries) return false;
   if (!hasVisitedCountries) {
     db.exec(`
@@ -651,10 +654,7 @@ function verifyReadyDatabase(db: Database, entries: MigrationEntry[]) {
   assertDatabaseHealthy(db);
 }
 
-/**
- * Upgrade one database image. The caller must hold its writer lease for this
- * whole operation; the app client and db-upgrade CLI both do so.
- */
+
 export async function upgradeDatabase(options: {
   dbPath: string;
   dryRun?: boolean;
@@ -679,8 +679,8 @@ export async function upgradeDatabase(options: {
   });
   let db: Database;
   try {
-    // sql.js may retain the supplied Uint8Array. Give it a private copy so the
-    // byte-for-byte recovery generation can never be mutated in memory.
+
+
     db = originalBytes.length > 0
       ? new SQL.Database(Uint8Array.from(originalBytes))
       : new SQL.Database();
@@ -768,7 +768,7 @@ export async function upgradeDatabase(options: {
     try {
       db.close();
     } catch {
-      // A staging migration may already have replaced and closed this handle.
+
     }
   }
 }
