@@ -155,7 +155,12 @@ describe("journaled pre-open upgrade", () => {
       db.close();
 
       expect(await runUpgrade(dbPath)).toMatchObject({
-        applied: ["0012_immutable-ledger", "0013_ledger-explorer"],
+        applied: [
+          "0012_immutable-ledger",
+          "0013_ledger-explorer",
+          "0014_category-order",
+          "0015_budget-order",
+        ],
       });
       const upgraded = open(dbPath);
       try {
@@ -259,6 +264,8 @@ describe("journaled pre-open upgrade", () => {
       expect(journalRows[11]).toEqual([11, "0011_budget-goals", "applied"]);
       expect(journalRows[12]).toEqual([12, "0012_immutable-ledger", "applied"]);
       expect(journalRows[13]).toEqual([13, "0013_ledger-explorer", "applied"]);
+      expect(journalRows[14]).toEqual([14, "0014_category-order", "applied"]);
+      expect(journalRows[15]).toEqual([15, "0015_budget-order", "applied"]);
       for (const [idx, tag] of [[9, "0009_ledger-semantics"], [12, "0012_immutable-ledger"]] as const) {
         const expectedChecksum = createHash("sha256")
           .update(readFileSync(path.join(MIGRATIONS, `${tag}.sql`), "utf8"))
