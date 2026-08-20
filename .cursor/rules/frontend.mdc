@@ -1,0 +1,7 @@
+---
+description: Dashboard, component, accessibility, and privacy UI rules
+globs: "app/(dashboard)/**/*.ts,app/(dashboard)/**/*.tsx,app/globals.css,app/providers.tsx,components/**/*.ts,components/**/*.tsx"
+alwaysApply: false
+---
+
+Follow the canonical rule in @.claude/rules/frontend.md.

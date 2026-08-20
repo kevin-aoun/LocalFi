@@ -1,0 +1,7 @@
+---
+description: Money, dates, Server Actions, ledger, and investment invariants
+globs: "app/actions/**/*.ts,app/api/snapshot/**/*.ts,lib/money.ts,lib/dates.ts,lib/cash-balance.ts,lib/budgets.ts,lib/recurrence.ts,lib/reports.ts,lib/prices.ts,lib/privacy.ts,lib/ledger/**/*.ts,lib/investments/**/*.ts,lib/history/**/*.ts"
+alwaysApply: false
+---
+
+Follow the canonical rule in @.claude/rules/financial-domain.md.

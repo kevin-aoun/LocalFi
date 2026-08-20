@@ -58,6 +58,8 @@ next-env.d.ts
 
 # Local agent state can contain ledger details
 /.agent/
+/CLAUDE.local.md
+/.claude/settings.local.json
 
 # python sidecar (agent/needle_sidecar.py)
 __pycache__/

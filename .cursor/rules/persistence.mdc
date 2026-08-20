@@ -1,0 +1,7 @@
+---
+description: Persistence, database safety, and migration rules
+globs: "lib/db/**/*.ts,drizzle/**/*.sql,drizzle/**/*.json,scripts/db-*.ts,scripts/ledger-*.ts,scripts/backfill-history.ts"
+alwaysApply: false
+---
+
+Follow the canonical rule in @.claude/rules/persistence.md.

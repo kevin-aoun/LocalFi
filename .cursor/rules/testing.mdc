@@ -1,0 +1,7 @@
+---
+description: Vitest, fixtures, and regression-test conventions
+globs: "**/__tests__/**/*.ts,**/__tests__/**/*.tsx,vitest.config.ts"
+alwaysApply: false
+---
+
+Follow the canonical rule in @.claude/rules/testing.md.
