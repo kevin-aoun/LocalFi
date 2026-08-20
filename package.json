@@ -34,6 +34,7 @@
     "test:tz": "node -e \"const{execFileSync}=require('child_process');for(const tz of ['Pacific/Kiritimati','Pacific/Niue']){console.log('\\n=== vitest run with TZ='+tz+' ===');execFileSync(process.execPath,['node_modules/vitest/vitest.mjs','run'],{stdio:'inherit',env:{...process.env,TZ:tz}})}\"",
     "typegen": "node node_modules/next/dist/bin/next typegen --webpack",
     "typecheck": "bun run typegen && node node_modules/typescript/bin/tsc --noEmit --noUnusedLocals --noUnusedParameters",
+    "validate:agent": "node --import tsx scripts/validate-agent-work.ts",
     "check": "bun run lint && bun run typecheck && bun run test"
   },
   "dependencies": {
