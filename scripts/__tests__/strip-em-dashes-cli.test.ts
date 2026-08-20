@@ -1,11 +1,4 @@
-/**
- * End-to-end tests for the codemod DRIVER: the safety behaviour that the pure
- * logic cannot express.
- *
- * There is no git in this project, so "did it refuse to write, and did it back
- * up first" is the property that actually protects the user. Every test here
- * runs the real script in a throwaway directory; nothing touches the repo.
- */
+
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -70,7 +63,7 @@ describe("dry run is the default", () => {
 
     expect(output).toContain("--- a/lib/sample.ts");
     expect(output).toContain("+++ b/lib/sample.ts");
-    // Both lines changed and they are adjacent, so it is one hunk.
+
     expect(output).toMatch(/@@ -1,2 \+1,2 @@/);
     expect(output).toContain("-/** The report period lengths — the same set budgets use. */");
     expect(output).toContain("+/** The report period lengths: the same set budgets use. */");
@@ -109,10 +102,9 @@ describe("--write", () => {
     const stamps = fs.readdirSync(backupRoot);
     expect(stamps).toHaveLength(1);
 
-    // The backup holds the ORIGINAL, byte for byte, at its original path.
     const backed = fs.readFileSync(path.join(backupRoot, stamps[0], "lib/sample.ts"), "utf8");
     expect(backed).toBe(SAMPLE);
-    // ...and the working file really did change.
+
     expect(read("lib/sample.ts")).not.toBe(SAMPLE);
   });
 
@@ -145,7 +137,7 @@ describe("scope", () => {
 
     const output = cli("--include-tests", "--write");
     expect(output).toContain("INCLUDED (--include-tests)");
-    // "with" is a preposition, so the dash was doing a comma's job.
+
     expect(read("lib/__tests__/sample.test.ts")).toContain("/** a test, with a dash */");
   });
 

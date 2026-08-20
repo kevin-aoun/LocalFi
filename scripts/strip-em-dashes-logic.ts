@@ -1,74 +1,4 @@
-/**
- * Pure transformation logic for `scripts/strip-em-dashes.ts`.
- *
- * ---------------------------------------------------------------------------
- * WHY THIS IS NOT A GLOBAL SEARCH-AND-REPLACE
- * ---------------------------------------------------------------------------
- * An em dash does several unrelated jobs. Replacing every one of them with the
- * same character produces copy that is worse than what it replaced:
- *
- *     "Nothing is re-derived here — that is what keeps this page honest"
- *       -> " - "   reads like a bullet list that lost its bullet
- *       -> ","     splices two independent clauses
- *       -> ";"     correct
- *
- * So each dash is classified by (a) WHERE it sits (comment / string / JSX text
- * / code) and (b) WHAT FOLLOWS it, and only then rewritten.
- *
- * ---------------------------------------------------------------------------
- * RULE TABLE  (first match wins, top to bottom)
- * ---------------------------------------------------------------------------
- * | # | Rule                | Trigger                                    | Result    |
- * |---|---------------------|--------------------------------------------|-----------|
- * | 0 | skip: code          | dash is not inside a comment/string/JSX     | untouched |
- * | 0 | skip: module/type/  | import path, `LiteralType`, property key,   | untouched |
- * |   |   key/attr          | `data-*`/`className`/`key`/... attribute    |           |
- * | 1 | skip: glyph         | the WHOLE literal is dashes+space ("—")     | untouched |
- * |   |                     | it is a VALUE ("no data"), not punctuation  |           |
- * |1b | skip: quoted glyph  | the dash is inside `...`, "..." or '...'    | untouched |
- * |   |                     | with nothing else in it: the prose is       |           |
- * |   |                     | NAMING the character, not using it          |           |
- * | 2 | range               | tight digit-dash-digit, e.g. `5–15`         | `-`       |
- * | 2 | range (spaced)      | en dash between two date/number operands    | ` - `     |
- * | 3 | pair -> commas      | two dashes, short gap, no `.?!` between     | `,` `,`   |
- * | 3 | pair -> parentheses | ...and the gap already contains a comma     | `(` `)`   |
- * | 4 | label separator     | short line-leading label (UI string, JSX,   | `:`       |
- * |   |                     | or a doc bullet), <=40 chars, no comma      |           |
- * | 5 | connective          | follower is a coordinator (and/but/so/or/   | `,`       |
- * |   |                     | plus), a contrast (not/never/instead), a    |           |
- * |   |                     | subordinator (which/because/when/as), a     |           |
- * |   |                     | participle (including), a preposition, or   |           |
- * |   |                     | an appositive marker (i.e./e.g./namely)     |           |
- * | 6 | independent clause  | follower starts a clause: pronoun (it/that/ | `;`       |
- * |   |                     | they/there/nothing), auxiliary (is/has/     |           |
- * |   |                     | can/must), or an imperative (see/use/note)  |           |
- * | 7 | appositive (default)| anything else — overwhelmingly a determiner | `:`       |
- * |   |                     | ("the"/"a"/"an"), i.e. a noun phrase that   |           |
- * |   |                     | explains what came before                   |           |
- *
- * Rule 7 is the safe default: a colon is grammatical wherever an em dash
- * introduced an explanation, and it never splices two clauses the way a comma
- * would. Sites that reach rule 7 inside USER-VISIBLE text (string/JSX) are
- * flagged `ambiguous` so they can be eyeballed rather than trusted silently.
- *
- * The word lists in rules 5 and 6 were derived from this repository: the
- * frequency of the first word after each of its 906 em dashes was measured, and
- * the head of that distribution ("the" 139, "a" 58, "so" 37, "and" 39, "never"
- * 27, "it" 22, "not" 20, "see" 19, "which" 14, ...) is what the lists cover.
- *
- * ---------------------------------------------------------------------------
- * SPACING CONTRACT
- * ---------------------------------------------------------------------------
- * Punctuation attaches to the word BEFORE the dash and is followed by exactly
- * one space ("path — the" -> "path: the"). Never a doubled space, never a
- * trailing space at end of line. When the dash begins a line inside a block
- * comment, the punctuation is appended to the previous line and the dash is
- * deleted in place, so the `*` gutter and the line count are preserved. The
- * transform never adds or removes a newline; the caller asserts that.
- *
- * Idempotent by construction: a rewritten site no longer contains a dash, and
- * a skipped site is skipped identically on every run.
- */
+
 
 import ts from "typescript";
 
@@ -121,7 +51,7 @@ export interface Change {
   dash: DashChar;
   rule: Rule;
   ambiguous: boolean;
-  /** A one-line window around the dash, for reporting. */
+
   probe: string;
 }
 
@@ -136,13 +66,13 @@ export interface Skip {
 }
 
 export interface Segment {
-  /** Inner content range: comment/quote delimiters already excluded. */
+
   start: number;
   end: number;
   kind: SiteKind;
-  /** Set when the segment exists only so its dashes get a precise skip reason. */
+
   skip?: SkipReason;
-  /** True for TemplateHead/Middle/Tail: dash-only content is a separator, not a glyph. */
+
   interpolated?: boolean;
 }
 
@@ -157,52 +87,39 @@ export interface PlanOptions {
   dashes?: ReadonlySet<DashChar>;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Word classes                                                               */
-/* -------------------------------------------------------------------------- */
-
-/** Rule 5: the dash was doing a comma's job. */
 const CONNECTIVE = new Set([
-  // coordinators
+
   "and", "but", "so", "or", "nor", "yet", "plus", "then",
-  // contrast / negation
+
   "not", "never", "rather", "instead", "neither", "no longer",
-  // subordinators
+
   "which", "who", "whom", "whose", "because", "when", "whenever", "while",
   "where", "since", "until", "unless", "except", "if", "after", "before",
   "although", "though", "as",
-  // participles used as appositive heads
+
   "including", "excluding", "meaning", "giving", "leaving", "making", "using",
   "keeping", "returning",
-  // appositive markers
+
   "i.e.", "ie", "e.g.", "eg", "namely", "viz.",
-  // prepositions
+
   "for", "with", "without", "from", "in", "on", "at", "by", "to", "of",
   "about", "over", "under", "per", "via", "against", "into", "onto",
 ]);
 
-/** Rule 6: what follows is an independent clause. */
 const CLAUSE_STARTER = new Set([
-  // pronouns and expletives
+
   "it", "they", "them", "this", "that", "these", "those", "there", "we",
   "you", "he", "she", "i", "nothing", "everything", "something", "anything",
   "nobody", "everyone", "someone",
-  // NOTE: "all", "both", "each", "either" and "them" are deliberately absent.
-  // They head a noun phrase ("— all of them") far more often than they subject
-  // a clause, and a semicolon in front of a noun phrase is simply wrong.
-  // auxiliaries and copulas
+
   "is", "are", "was", "were", "be", "been", "being", "has", "have", "had",
   "do", "does", "did", "can", "could", "will", "would", "shall", "should",
   "must", "may", "might", "let", "lets",
-  // imperatives that show up in this codebase's asides
+
   "see", "use", "note", "check", "read", "add", "record", "keep", "treat",
   "prefer", "run", "call", "pass", "ask", "look", "compare", "start", "stop",
   "make", "give", "take", "put", "write", "remove", "delete", "fix", "avoid",
 ]);
-
-/* -------------------------------------------------------------------------- */
-/* Text scanning helpers                                                      */
-/* -------------------------------------------------------------------------- */
 
 function lineStartOf(text: string, index: number): number {
   const nl = text.lastIndexOf("\n", index - 1);
@@ -213,11 +130,6 @@ function isBlank(s: string): boolean {
   return /^[ \t\r]*$/.test(s);
 }
 
-/**
- * True when `i` holds a comment continuation marker (`*` or the second `/` of
- * `//`) rather than a real character of prose. A `*` only counts when the whole
- * line up to it is blank, so markdown emphasis (`*before*`) is left alone.
- */
 function markerLengthAt(text: string, i: number, lower: number): number {
   if (i < lower) return 0;
   const c = text[i];
@@ -230,11 +142,6 @@ function markerLengthAt(text: string, i: number, lower: number): number {
   return 0;
 }
 
-/**
- * Walk backwards from `from` over whitespace and comment gutters. Returns the
- * index just AFTER the last real character of prose, or -1 when the segment has
- * no prose before this point.
- */
 function anchorBefore(text: string, from: number, lower: number): number {
   let i = from - 1;
   while (i >= lower) {
@@ -253,10 +160,6 @@ function anchorBefore(text: string, from: number, lower: number): number {
   return -1;
 }
 
-/**
- * Walk forwards from `from` over whitespace and comment gutters. Returns the
- * index of the next real character of prose, or -1.
- */
 function anchorAfter(text: string, from: number, upper: number): number {
   let i = from;
   while (i < upper) {
@@ -278,7 +181,6 @@ function anchorAfter(text: string, from: number, upper: number): number {
   return -1;
 }
 
-/** Trailing spaces/tabs after the dash, and whether the line ends right there. */
 function spaceRunAfter(
   text: string,
   dashIndex: number,
@@ -294,14 +196,12 @@ function spaceRunAfter(
   return { end: i, atEol, hadSpace };
 }
 
-/** Start of the whitespace run immediately before the dash, on the same line. */
 function spaceRunBefore(text: string, dashIndex: number, lower: number): number {
   let i = dashIndex;
   while (i > lower && (text[i - 1] === " " || text[i - 1] === "\t")) i -= 1;
   return i;
 }
 
-/** The word that follows the dash, lowercased, with trailing punctuation kept and stripped. */
 function followerWord(text: string, at: number, upper: number): { raw: string; bare: string } {
   const m = /^\S+/.exec(text.slice(at, upper));
   const raw = (m ? m[0] : "").toLowerCase();
@@ -320,16 +220,6 @@ function probeAround(text: string, index: number): string {
   return text.slice(from, to).trim();
 }
 
-/* -------------------------------------------------------------------------- */
-/* Segment discovery (TypeScript AST)                                         */
-/* -------------------------------------------------------------------------- */
-
-/**
- * JSX attributes whose value is machine-readable, not prose. A dash in any of
- * these is either meaningful or invisible; either way, do not touch it.
- * Everything NOT listed (title, placeholder, aria-label, description, label,
- * alt, ...) is treated as user-visible text.
- */
 const CODE_JSX_ATTRIBUTES = new Set([
   "classname", "class", "key", "id", "href", "src", "srcset", "style", "type",
   "name", "value", "htmlfor", "d", "viewbox", "fill", "stroke", "role", "rel",
@@ -384,17 +274,12 @@ function literalSkipReason(node: ts.StringLiteralLike): SkipReason | undefined {
   return undefined;
 }
 
-/**
- * Every range of a source file that holds prose. Delimiters (`/**`, `*&#47;`,
- * quotes, backticks, `${`) are excluded, so the returned ranges contain only
- * text a human reads.
- */
 export function findSegments(text: string, fileName: string): Segment[] {
   const sourceFile = ts.createSourceFile(
     fileName,
     text,
     ts.ScriptTarget.Latest,
-    /* setParentNodes */ true,
+     true,
     fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
 
@@ -421,14 +306,10 @@ export function findSegments(text: string, fileName: string): Segment[] {
   };
 
   const visit = (node: ts.Node): void => {
-    // Walk TOKENS, not just named children: a comment can sit in the trivia of
-    // punctuation (`|` in a union type, `,` in an argument list), and
-    // `forEachChild` never visits those, so those comments would be invisible.
+
     pushCommentsAt(node.pos);
     pushCommentsAt(node.end);
 
-    // `{/* ... */}` in JSX holds no child token, so its comment is invisible to
-    // the trivia walk above. Look inside the braces explicitly.
     if (ts.isJsxExpression(node) && !node.expression) {
       pushCommentsAt(node.getStart(sourceFile) + 1);
     }
@@ -465,15 +346,11 @@ export function findSegments(text: string, fileName: string): Segment[] {
   pushCommentsAt(0);
   pushCommentsAt(sourceFile.endOfFileToken.pos);
 
-  // A `//` or `/*` sitting inside JSX text or a string is not a comment. The
-  // trivia scanner can be fooled by JSX children, so drop overlaps.
   const overlapsLiteral = (seg: Segment) =>
     literals.some((lit) => seg.start < lit.end && lit.start < seg.end);
 
   const realComments = comments.filter((c) => !overlapsLiteral(c));
 
-  // Consecutive `//` lines are one thought. Merge them so a dash at the end of
-  // one line can see the word that follows it on the next.
   realComments.sort((a, b) => a.start - b.start);
   const merged: Segment[] = [];
   for (const comment of realComments) {
@@ -488,11 +365,6 @@ export function findSegments(text: string, fileName: string): Segment[] {
   return [...merged, ...literals].sort((a, b) => a.start - b.start);
 }
 
-/* -------------------------------------------------------------------------- */
-/* The transformation                                                         */
-/* -------------------------------------------------------------------------- */
-
-/** True when the literal is a dash used AS A VALUE, e.g. `formatShare(null) -> "—"`. */
 function isGlyphSegment(text: string, seg: Segment): boolean {
   if (seg.interpolated) return false;
   const body = text.slice(seg.start, seg.end);
@@ -500,21 +372,6 @@ function isGlyphSegment(text: string, seg: Segment): boolean {
   return body.replace(/[—–―]/g, "").trim() === "";
 }
 
-/**
- * Rule 1b: the dash is QUOTED, so it is being named rather than used.
- *
- * Prose about the placeholder glyph is full of it:
- *
- *     lib/reports.ts:310
- *     A fraction as a percentage string, or "—" when there is no number
- *
- *     components/assets/currency-totals.ts
- *     `12.34%`, or `—` when the share is undefined.
- *
- * Rewriting those to `":"` or `` `:` `` documents the code incorrectly, which
- * is worse than leaving a dash in a comment. A delimited span on the dash's own
- * line that contains nothing but dashes is a reference to the character.
- */
 function isQuotedGlyph(text: string, seg: Segment, dashIndex: number): boolean {
   const from = Math.max(lineStartOf(text, dashIndex), seg.start);
   const nl = text.indexOf("\n", dashIndex);
@@ -535,16 +392,16 @@ function isQuotedGlyph(text: string, seg: Segment, dashIndex: number): boolean {
   return false;
 }
 
-/** Rule 4: a short label at the head of a line, e.g. `Asset — money you hold`. */
+
 function isLabelSeparator(text: string, seg: Segment, dashIndex: number): boolean {
   const lineStart = Math.max(lineStartOf(text, dashIndex), seg.start);
   let label = text.slice(lineStart, dashIndex);
 
   if (seg.kind === "comment") {
-    // Only doc BULLETS carry labels; flowing prose does not. Note that `*` is
-    // deliberately NOT a bullet character here: it is the JSDoc gutter, and
-    // treating it as a bullet makes every single comment line look like a
-    // label.
+
+
+
+
     const bullet = /^[ \t]*(?:\*[ \t]*)?(?:[-+•]|\d+\.)[ \t]+(.*)$/.exec(label);
     if (!bullet) return false;
     label = bullet[1];
@@ -557,7 +414,7 @@ function isLabelSeparator(text: string, seg: Segment, dashIndex: number): boolea
   return true;
 }
 
-/** Rule 2: `5–15`, `2020—2024`. Tight on both sides, digits on both sides. */
+
 function isTightRange(text: string, dashIndex: number, seg: Segment): boolean {
   const before = dashIndex - 1 >= seg.start ? text[dashIndex - 1] : "";
   const after = dashIndex + 1 < seg.end ? text[dashIndex + 1] : "";
@@ -567,12 +424,12 @@ function isTightRange(text: string, dashIndex: number, seg: Segment): boolean {
 const DATE_OPERAND = /(?:\d{1,4}|[A-Z][a-z]{2,8}\s+\d{1,2}(?:,\s*\d{4})?|\$\{[^}]*\})\s*$/;
 const DATE_OPERAND_AHEAD = /^\s*(?:\d{1,4}|[A-Z][a-z]{2,8}\s+\d{1,2}|\$\{[^}]*\})/;
 
-/** Rule 2 (spaced): an EN dash between two dates or numbers is a range, not punctuation. */
+
 function isSpacedRange(text: string, dashIndex: number, seg: Segment, dash: DashChar): boolean {
   if (dash !== "en") return false;
-  // `${start} – ${end}`: the operands are interpolated, so they are not visible
-  // inside the segment. An EN dash alone between two substitutions is a range
-  // by convention; an EM dash in the same position is a label separator.
+
+
+
   if (seg.interpolated && text.slice(seg.start, seg.end).replace(/[—–―]/g, "").trim() === "") {
     return true;
   }
@@ -593,9 +450,9 @@ function attachLeft(
   const space = atEol || (atSegmentEnd && !hadSpace) ? "" : " ";
 
   if (anchor < 0) {
-    // Nothing precedes the dash inside this segment. That is normal for a
-    // fragment like `" — day first"` or a `${a} — ${b}` separator: the
-    // punctuation still belongs against whatever is concatenated before it.
+
+
+
     const from = spaceRunBefore(text, dashIndex, seg.start);
     if (text.slice(from, dashIndex).includes("\n")) return null;
     return { edits: [{ start: from, end: afterEnd, text: punctuation + space }] };
@@ -605,9 +462,9 @@ function attachLeft(
     return { edits: [{ start: anchor, end: afterEnd, text: punctuation + space }] };
   }
 
-  // The dash opens a line inside a block comment. Put the punctuation at the
-  // end of the previous line and delete the dash where it stands, so the `*`
-  // gutter and the line count survive.
+
+
+
   const rest = text.slice(afterEnd, seg.end);
   if (rest.trim() === "") return null;
   return {
@@ -636,37 +493,7 @@ function classifyFollower(text: string, dashIndex: number, seg: Segment): Rule {
   return "appositive-colon";
 }
 
-/**
- * Rule 8: do not put a second colon on a line that already has one.
- *
- * The colon rules are the safe default because a colon is grammatical wherever a
- * dash introduces an explanation, and unlike a comma it can never splice. But
- * "safe" is not the same as "readable". A log line like
- *
- *     `[prices] ${type}: ${code} — ${message}`
- *
- * becomes `[prices] gold: NETWORK: message` — three segments, two colons, and no
- * way to tell which one is the real separator. The dash was carrying a DIFFERENT
- * rank of separation than the colon beside it, and collapsing both to one glyph
- * destroys that hierarchy.
- *
- * So when a colon rule fires on a line that already contains a colon, step down
- * to a comma, or to a semicolon when the follower starts an independent clause
- * (where a comma would splice). Only the text on the dash's own line counts: a
- * colon three lines up in a JSDoc block is not a collision.
- *
- * ## Why interpolated segments are measured differently
- *
- * A template literal is split by the scanner into one segment per span, so the
- * dash in `` `[prices] ${type}: ${code} — ${msg}` `` sits in a segment whose
- * entire content is " — ". Clamping the search to that segment would find no
- * colon and miss the very collision this rule exists for. For those, widen to
- * the physical source line, which is where the reader sees the collision anyway.
- *
- * For an ordinary string the clamp is kept, because the colon in
- * `note: "in credit — overpaid"` belongs to the CODE, not to the sentence, and
- * the reader of that message never sees it.
- */
+
 function avoidColonCollision(text: string, dashIndex: number, seg: Segment, rule: Rule): Rule {
   if (rule !== "label-colon" && rule !== "appositive-colon") return rule;
 
@@ -677,8 +504,8 @@ function avoidColonCollision(text: string, dashIndex: number, seg: Segment, rule
   const lineEnd = lineBreak < 0 ? ceiling : Math.min(ceiling, lineBreak);
   const line = text.slice(lineStart, lineEnd);
 
-  // A `::` or a `?:` is TypeScript, not prose, and never a real collision here
-  // because rule 0 already excluded code. Plain `:` is what we care about.
+
+
   if (!line.includes(":")) return rule;
 
   return classifyFollower(text, dashIndex, seg) === "clause-semicolon"
@@ -696,17 +523,7 @@ const PUNCTUATION: Record<Rule, string> = {
   "appositive-colon": ":",
 };
 
-/**
- * Rule 3: are these two dashes one parenthetical, or two separate asides?
- *
- * Length turns out to be a poor test. Measured over this repo, genuine pairs
- * run from 2 to 137 characters ("Every table — accounts, categories, ... and
- * settings — as readable JSON" is a real 106-character parenthetical), while
- * every FALSE pair is two dashes in adjacent bullets of a documentation list.
- * So the test is structural: no sentence break, no clause break, no bullet
- * marker and no paragraph break between the two dashes, and prose on both
- * sides. The length cap is only a sanity bound.
- */
+
 const BULLET_IN_GAP = /(?:^|\n)[ \t]*(?:\*[ \t]*)?(?:[-+•]|\d+\.)[ \t]+/;
 const PARAGRAPH_BREAK = /\n[ \t]*\*?[ \t]*\n/;
 
@@ -722,7 +539,7 @@ function isParentheticalPair(text: string, seg: Segment, open: number, close: nu
   return true;
 }
 
-/** Plan every dash inside one prose segment. */
+
 function planSegment(
   text: string,
   seg: Segment,
@@ -800,13 +617,13 @@ function planSegment(
       continue;
     }
 
-    // Rule 1b: the dash is quoted, so the prose is naming the character.
+
     if (isQuotedGlyph(text, seg, index)) {
       skipOne(index, "glyph");
       continue;
     }
 
-    // Rule 2: ranges.
+
     if (isTightRange(text, index, seg)) {
       record(index, "range", [{ start: index, end: index + 1, text: "-" }], false);
       continue;
@@ -821,7 +638,7 @@ function planSegment(
       }
     }
 
-    // Rule 3: parenthetical pair.
+
     const next = indices[cursor + 1];
     if (
       next !== undefined &&
@@ -829,9 +646,9 @@ function planSegment(
       isParentheticalPair(text, seg, index, next)
     ) {
       const gap = text.slice(index + 1, next);
-      // Parentheses read better than commas when the enclosed span already has
-      // commas in it. The one thing to avoid is an opening "(" stranded at the
-      // end of a line, so require content after the opening dash on its line.
+
+
+
       const openerHasContentAfter = /^[ \t]*\S/.test(text.slice(index + 1, seg.end).split("\n")[0] ?? "");
       const useParens = gap.includes(",") && openerHasContentAfter;
       const open = useParens
@@ -850,8 +667,8 @@ function planSegment(
       }
     }
 
-    // Rules 4-7: a single dash. Rule 8 then vetoes a colon that would land on a
-    // line already carrying one.
+
+
     const chosen: Rule = isLabelSeparator(text, seg, index)
       ? "label-colon"
       : classifyFollower(text, index, seg);
@@ -880,11 +697,11 @@ export function applyEdits(text: string, edits: readonly Edit[]): string {
 export interface SourcePlan extends Plan {
   original: string;
   transformed: string;
-  /** Dash characters present anywhere in the file, before any change. */
+
   totals: Record<DashChar, number>;
 }
 
-/** Plan (and apply, in memory) every change for one source file. */
+
 export function planSource(text: string, fileName: string, options: PlanOptions = {}): SourcePlan {
   const sourceFile = ts.createSourceFile(
     fileName,
@@ -910,7 +727,7 @@ export function planSource(text: string, fileName: string, options: PlanOptions 
     if (!DASH_RE.test(text[i])) continue;
     totals[dashName(text[i])] += 1;
     if (covered.has(i)) continue;
-    // Not inside any comment, string or JSX text: this is code.
+
     const { line, character } = ts.getLineAndCharacterOfPosition(sourceFile, i);
     plan.skips.push({
       index: i,
@@ -934,19 +751,7 @@ export function planSource(text: string, fileName: string, options: PlanOptions 
   };
 }
 
-/**
- * A distinctive window of LITERAL text around a dash, used to pair a source
- * string with a test that asserts on it.
- *
- * Short windows are useless: `"— so"` occurs in half the test suite. Only a
- * window with enough real text on both sides of the dash can identify one
- * specific piece of user-facing copy, so anything shorter than
- * `MIN_PROBE_LENGTH` is dropped rather than reported as a false alarm.
- *
- * This cannot see through interpolation: in `` `${start} – ${end}` `` the
- * operands are code, so there is no literal to match. The caller pairs those
- * by FILE NAME instead.
- */
+
 export const MIN_PROBE_LENGTH = 16;
 
 export function collisionProbes(text: string, fileName: string): { index: number; probe: string }[] {
@@ -959,7 +764,7 @@ export function collisionProbes(text: string, fileName: string): { index: number
       const nl = text.indexOf("\n", i);
       const to = Math.min(seg.end, nl === -1 ? text.length : nl, i + 30);
       const probe = text.slice(from, to).trim();
-      // Require real text on BOTH sides of the dash, not just a fragment.
+
       const [head, tail] = probe.split(text[i]);
       if (probe.length < MIN_PROBE_LENGTH) continue;
       if ((head ?? "").trim().length < 4 || (tail ?? "").trim().length < 4) continue;

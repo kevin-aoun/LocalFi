@@ -1,33 +1,4 @@
-/**
- * Replace em dashes (and en dashes, and horizontal bars) in the frontend
- * sources with punctuation that reads correctly.
- *
- * The rules, and the reasoning behind them, live in the header of
- * `scripts/strip-em-dashes-logic.ts`. This file is only the driver: file
- * discovery, the dry-run diff, backups, and the report.
- *
- *   node node_modules/tsx/dist/cli.mjs scripts/strip-em-dashes.ts
- *
- * SAFETY
- *   - `--dry-run` is the DEFAULT. Nothing is written without `--write`.
- *   - `--write` first copies every file it is about to touch into
- *     `.strip-em-dashes-backups/<timestamp>/` and prints the path. If a single
- *     copy fails, nothing at all is written.
- *   - `__tests__` directories are EXCLUDED by default, because tests assert on
- *     user-facing strings that contain dashes. Pass `--include-tests` to
- *     include them; the collision report tells you when that matters.
- *   - The transform never adds or removes a line. A file whose line count
- *     changes is dropped from the run and reported.
- *
- * FLAGS
- *   --write               actually modify files (default: dry run)
- *   --only=comments|strings|jsx|all      which kinds of site to rewrite
- *   --dashes=em,en,bar    which dash characters to rewrite (default: all)
- *   --include-tests       do not skip `__tests__` directories
- *   --paths=a,b           override the roots (default: app,components,lib)
- *   --show=N              how many diff hunks to print per file (default: all)
- *   --quiet               totals and warnings only, no diff
- */
+
 
 import fs from "node:fs";
 import path from "node:path";
@@ -44,10 +15,18 @@ const ROOT = process.cwd();
 const DEFAULT_ROOTS = ["app", "components", "lib"];
 const EXCLUDED_DIRS = new Set(["node_modules", ".next", "data", "drizzle", ".git"]);
 const BACKUP_ROOT = ".strip-em-dashes-backups";
+const HELP = `Usage: strip-em-dashes [options]
 
-/* -------------------------------------------------------------------------- */
-/* Arguments                                                                  */
-/* -------------------------------------------------------------------------- */
+Options:
+  --write                 apply changes after creating backups
+  --dry-run               preview changes (default)
+  --include-tests         include __tests__ directories
+  --only=comments|strings|jsx|all
+  --dashes=em,en,bar
+  --paths=app,components,lib
+  --show=<count>
+  --quiet
+`;
 
 interface Options {
   write: boolean;
@@ -97,7 +76,7 @@ function parseArgs(argv: string[]): Options {
     } else if (arg.startsWith("--show=")) {
       options.show = Number(arg.slice("--show=".length));
     } else if (arg === "--help" || arg === "-h") {
-      process.stdout.write(readHeaderDoc());
+      process.stdout.write(HELP);
       process.exit(0);
     } else {
       fail(`unknown argument "${arg}" (try --help)`);
@@ -111,16 +90,6 @@ function fail(message: string): never {
   process.stderr.write(`strip-em-dashes: ${message}\n`);
   process.exit(2);
 }
-
-function readHeaderDoc(): string {
-  const self = fs.readFileSync(new URL(import.meta.url), "utf8");
-  const end = self.indexOf("*/");
-  return `${self.slice(0, end + 2)}\n`;
-}
-
-/* -------------------------------------------------------------------------- */
-/* File discovery                                                             */
-/* -------------------------------------------------------------------------- */
 
 function walk(dir: string, out: string[]): void {
   let entries: fs.Dirent[];
@@ -155,10 +124,6 @@ function discover(options: Options): { files: string[]; testFiles: string[] } {
 
 const rel = (file: string) => path.relative(ROOT, file);
 
-/* -------------------------------------------------------------------------- */
-/* Diff rendering                                                             */
-/* -------------------------------------------------------------------------- */
-
 interface Hunk {
   line: number;
   before: string[];
@@ -186,10 +151,6 @@ function lineHunks(original: string, transformed: string): Hunk[] {
   return hunks;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Backups                                                                    */
-/* -------------------------------------------------------------------------- */
-
 function backupAll(files: string[]): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const dir = path.join(ROOT, BACKUP_ROOT, stamp);
@@ -204,10 +165,6 @@ function backupAll(files: string[]): string {
   }
   return dir;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Main                                                                       */
-/* -------------------------------------------------------------------------- */
 
 function main(): void {
   const options = parseArgs(process.argv.slice(2));
@@ -249,8 +206,6 @@ function main(): void {
     plans.set(file, plan);
   }
 
-  /* ---- diff preview ---- */
-
   if (!options.quiet) {
     for (const [file, plan] of plans) {
       const hunks = lineHunks(plan.original, plan.transformed);
@@ -272,14 +227,12 @@ function main(): void {
     }
   }
 
-  /* ---- test collisions ---- */
-
   const collisions: { source: string; test: string; probe: string }[] = [];
   const suspects: { source: string; test: string }[] = [];
   const testTexts = testFiles.map((file) => {
     const text = fs.readFileSync(file, "utf8");
-    // A dash in a test's own COMMENTS cannot break anything. Only a dash the
-    // test asserts on - i.e. one inside a string - can.
+
+
     const inAssertions = /[—–―]/.test(text)
       ? findSegments(text, file).some(
           (seg) => seg.kind !== "comment" && !seg.skip && /[—–―]/.test(text.slice(seg.start, seg.end)),
@@ -292,7 +245,7 @@ function main(): void {
     if (isTestFile(file)) continue;
     const changedIndices = new Set(plan.changes.filter((c) => c.kind !== "comment").map((c) => c.index));
 
-    // (a) CERTAIN: the test contains the very same literal text being rewritten.
+
     const probes = new Set(
       collisionProbes(plan.original, file)
         .filter((p) => changedIndices.has(p.index))
@@ -304,9 +257,9 @@ function main(): void {
       }
     }
 
-    // (b) LIKELY: a user-facing string changed and the test file NAMED AFTER
-    // this module still contains a dash. Interpolated copy (`${a} – ${b}`) has
-    // no literal to match on, so file naming is the only link available.
+
+
+
     if (changedIndices.size === 0) continue;
     const base = path.basename(file).replace(/\.tsx?$/, "");
     for (const test of testTexts) {
@@ -316,8 +269,6 @@ function main(): void {
       suspects.push({ source: rel(file), test: rel(test.file) });
     }
   }
-
-  /* ---- report ---- */
 
   const found = totals.em + totals.en + totals.bar;
   const changed = plans.size === 0 ? 0 : [...plans.values()].reduce((n, p) => n + p.changes.length, 0);
@@ -379,8 +330,6 @@ function main(): void {
   }
 
   process.stdout.write(`${out.join("\n")}\n`);
-
-  /* ---- write ---- */
 
   if (!options.write) {
     process.stdout.write("\nDry run only. Re-run with --write to apply.\n");
