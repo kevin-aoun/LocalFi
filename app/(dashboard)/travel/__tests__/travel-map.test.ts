@@ -45,11 +45,12 @@ describe("travel map", () => {
     );
   });
 
-  it("alternates solid, high-contrast marker labels to separate nearby cities", () => {
+  it("declutters dense itineraries without showing markers through the globe", () => {
     const source = read("app/(dashboard)/travel/travel-map.tsx");
     expect(source).toMatch(/cities\.map\(\(city, index\)/);
-    expect(source).toContain('opacityWhenCovered="1"');
-    expect(source).toContain('position={index % 2 === 0 ? "top" : "bottom"}');
+    expect(source).toContain('opacityWhenCovered="0"');
+    expect(source).toMatch(/cityLabelPresentations\(cities\.length\)/);
+    expect(source).toContain("position={labels[index].position}");
     expect(source).toMatch(/border-border bg-background[\s\S]*text-foreground shadow-sm/);
     expect(source).not.toMatch(/bg-background\/80/);
   });
@@ -72,6 +73,9 @@ describe("travel map", () => {
     expect(page).toMatch(/addTravelCity/);
     expect(page).toMatch(/Add city/);
     expect(page).toMatch(/groupCitiesByCountry/);
+    expect(page).toMatch(/countryGroupPresentation/);
+    expect(page).toMatch(/presentation\.cityName/);
+    expect(page).toMatch(/presentation\.countLabel/);
     expect(page).toMatch(/group\.cities\.map/);
     expect(page).toMatch(/<details[\s\S]*<summary/);
     expect(page).not.toMatch(/<details[^>]*\sopen(?:=|\s|>)/);

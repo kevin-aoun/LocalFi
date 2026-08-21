@@ -14,6 +14,7 @@ import {
   MarkerLabel,
 } from "@/components/ui/map";
 import type { TravelCity } from "@/lib/db/schema";
+import { cityLabelPresentations } from "./travel-map-logic";
 
 const WORLD_GEOJSON =
   "/maps/natural-earth-countries-110m-v5.1.2.geojson";
@@ -27,6 +28,7 @@ export default function TravelMap({ cities }: { cities: readonly TravelCity[] })
     ? [firstCity.longitude, firstCity.latitude]
     : [15, 25];
   const citiesById = new globalThis.Map(cities.map((city) => [city.id, city]));
+  const labels = cityLabelPresentations(cities.length);
   const arcs = cities.flatMap((city) => {
     const origin = city.originCityId === null ? null : citiesById.get(city.originCityId);
     if (!origin) return [];
@@ -76,16 +78,18 @@ export default function TravelMap({ cities }: { cities: readonly TravelCity[] })
             key={city.id}
             longitude={city.longitude}
             latitude={city.latitude}
-            opacityWhenCovered="1"
+            opacityWhenCovered="0"
           >
             <MarkerContent>
               <div className="size-2.5 rounded-full border-2 border-background bg-blue-500 ring-1 ring-blue-600" />
-              <MarkerLabel
-                position={index % 2 === 0 ? "top" : "bottom"}
-                className="rounded-sm border border-border bg-background px-1.5 py-0.5 text-[11px] font-semibold text-foreground shadow-sm"
-              >
-                {city.cityName}
-              </MarkerLabel>
+              {labels[index].visible && (
+                <MarkerLabel
+                  position={labels[index].position}
+                  className="rounded-sm border border-border bg-background px-1.5 py-0.5 text-[11px] font-semibold text-foreground shadow-sm"
+                >
+                  {city.cityName}
+                </MarkerLabel>
+              )}
             </MarkerContent>
           </MapMarker>
         ))}
