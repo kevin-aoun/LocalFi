@@ -4,27 +4,13 @@ LocalFi is a local-first finance application. Contributions should preserve
 the single-user, loopback-bound privacy model and must not include real
 financial data, database files, credentials, or model checkpoints.
 
-## Working with a coding agent
+## Customizing your own LocalFi
 
-Start the agent from the repository root and replace the bracketed text in this
-prompt with the outcome you want:
-
-> Understand this repository, then help me add **[feature or change]**. Before
-> editing, read `AGENTS.md`, every scoped rule it identifies for the files you
-> expect to touch, and the relevant parts of `README.md`, `docs/REFERENCE.md`,
-> and `docs/DECISIONS.md`. Inspect the existing implementation, its callers,
-> data flow, and nearby tests. Summarize the constraints you found and propose a
-> small implementation plan; ask only about ambiguities that would materially
-> change the result. Then implement the smallest coherent change, preserve the
-> documented financial, privacy, persistence, and UI invariants, and add or
-> update regression tests. Do not use real financial data or overwrite unrelated
-> work. Validate every changed path with
-> `bun run validate:agent -- <changed paths>` and run the full validator when
-> the rules require it. Finish by reporting what changed, what was validated,
-> and any remaining risks. Do not commit or push unless I explicitly ask.
-
-This prompt is only an entry point. `AGENTS.md` and its referenced scoped rules
-remain the source of truth as the task moves into different parts of the codebase.
+Personal customization is part of adopting LocalFi, not the upstream
+contribution policy. Start with [Customize your LocalFi](README.md#customize-your-localfi)
+for an agent-ready prompt, extension points, privacy boundaries, and validation
+expectations. Return here when you want to propose the result to the shared
+project.
 
 ## Before opening a pull request
 
@@ -52,9 +38,11 @@ compatible or safe to merge. For this repository:
 1. Make sure the `verify` workflow is green on `main` before evaluating an
    update. A failing baseline means every Dependabot branch can fail for an
    unrelated reason.
-2. After the current Node 20 CI repair is on `main`, activate the existing
-   `main` ruleset if it is still disabled. Require a pull request, one approval,
-   and the `verify` status check; keep force-push and deletion protection.
+2. Activate the existing `main` ruleset if it is still disabled. Require a pull
+   request and the `verify` status check, require the branch to be up to date,
+   and keep force-push and deletion protection. A solo maintainer should require
+   zero approvals because a pull-request author cannot approve their own change;
+   require one approval only when a trusted collaborator can review it.
 3. Close the existing `tailwind-merge` 3.x pull request (#5). LocalFi uses
    Tailwind CSS 3, which requires `tailwind-merge` 2.6.x; Dependabot is configured
    to stop proposing that incompatible major.

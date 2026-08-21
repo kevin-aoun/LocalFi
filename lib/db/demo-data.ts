@@ -186,7 +186,7 @@ function insertMetadata(raw: Database): void {
   raw.run(
     `INSERT INTO settings
       (id, user_name, accent_color, theme, show_ledger, created_at, updated_at)
-     VALUES (1, 'Khalil Mansour', 'ocean', 'dark', 1, ?, ?)`,
+     VALUES (1, 'Khalil', 'ocean', 'dark', 1, ?, ?)`,
     [DEMO_RECORDED_AT, DEMO_RECORDED_AT],
   );
   const commands = [
@@ -459,15 +459,32 @@ function insertHistoryAndTravel(raw: Database): void {
   }
   raw.run(
     `INSERT INTO visited_countries (id, country_code, country_name, visited_at) VALUES
-      (1, 'PT', 'Portugal', '2026-04-12'),
-      (2, 'JP', 'Japan', '2026-07-08')`,
+      (1, 'PRT', 'Portugal', '2025-09-06'),
+      (2, 'USA', 'United States', '2025-09-20'),
+      (3, 'MEX', 'Mexico', '2025-10-04'),
+      (4, 'PER', 'Peru', '2025-10-18'),
+      (5, 'NZL', 'New Zealand', '2025-11-08'),
+      (6, 'AUS', 'Australia', '2025-11-22'),
+      (7, 'JPN', 'Japan', '2025-12-13'),
+      (8, 'SGP', 'Singapore', '2025-12-27'),
+      (9, 'NPL', 'Nepal', '2026-01-10'),
+      (10, 'ARE', 'United Arab Emirates', '2026-01-24'),
+      (11, 'LBN', 'Lebanon', '2026-02-07')`,
   );
   raw.run(
     `INSERT INTO travel_checkpoints
       (id, country_code, city_name, latitude, longitude, origin_city_id, visited_at) VALUES
-      (1, 'PT', 'Lisbon', 38.7223, -9.1393, NULL, '2026-04-12'),
-      (2, 'PT', 'Porto', 41.1579, -8.6291, 1, '2026-04-16'),
-      (3, 'JP', 'Tokyo', 35.6762, 139.6503, 2, '2026-07-08')`,
+      (1, 'PRT', 'Lisbon', 38.7223, -9.1393, NULL, '2025-09-06'),
+      (2, 'USA', 'New York', 40.7128, -74.0060, 1, '2025-09-20'),
+      (3, 'MEX', 'Mexico City', 19.4326, -99.1332, 2, '2025-10-04'),
+      (4, 'PER', 'Lima', -12.0464, -77.0428, 3, '2025-10-18'),
+      (5, 'NZL', 'Auckland', -36.8509, 174.7645, 4, '2025-11-08'),
+      (6, 'AUS', 'Sydney', -33.8688, 151.2093, 5, '2025-11-22'),
+      (7, 'JPN', 'Tokyo', 35.6762, 139.6503, 6, '2025-12-13'),
+      (8, 'SGP', 'Singapore', 1.3521, 103.8198, 7, '2025-12-27'),
+      (9, 'NPL', 'Kathmandu', 27.7172, 85.3240, 8, '2026-01-10'),
+      (10, 'ARE', 'Dubai', 25.2048, 55.2708, 9, '2026-01-24'),
+      (11, 'LBN', 'Beirut', 33.8938, 35.5018, 10, '2026-02-07')`,
   );
 }
 
