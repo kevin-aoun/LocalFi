@@ -1,5 +1,13 @@
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const snapshotEncryptedDatabaseGeneration = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/db/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db/client")>();
+  return { ...actual, snapshotEncryptedDatabaseGeneration };
+});
 
 import {
   describeDatabaseLocation,
@@ -17,6 +25,12 @@ import {
   type ImportCategory,
 } from "@/components/transactions/import-logic";
 import { parseAmount } from "@/lib/money";
+import {
+  createVaultEnvelope,
+  destroyVaultKey,
+  inspectVaultEnvelope,
+  isVaultEnvelope,
+} from "@/lib/vault/envelope";
 
 import {
   createDomainDb,
@@ -37,6 +51,7 @@ const CATEGORIES: ImportCategory[] = [
 ];
 
 beforeEach(async () => {
+  snapshotEncryptedDatabaseGeneration.mockReset();
   temp = await createDomainDb();
 
   seedAccount(temp, { id: 10, name: "Checking", kind: "asset", type: "Checking", openingBalanceCents: 250_000 });
@@ -64,6 +79,19 @@ afterEach(async () => {
 function ok<T>(result: { success: true; data: T } | { error: string }): T {
   if ("error" in result) throw new Error(`action failed: ${result.error}`);
   return result.data;
+}
+
+async function prepareEncryptedSnapshot(fileName = "budget.localfi-vault") {
+  const created = await createVaultEnvelope(
+    readFileSync(temp.file),
+    "disposable-export-test-passphrase",
+  );
+  destroyVaultKey(created.key);
+  snapshotEncryptedDatabaseGeneration.mockResolvedValueOnce({
+    bytes: created.envelope,
+    fileName,
+  });
+  return created.envelope;
 }
 
 describe("exportTransactionsCsv", () => {
@@ -163,9 +191,12 @@ describe("exportTransactionsCsv", () => {
 });
 
 describe("exportJsonBackup", () => {
-  it("captures every table, with a row count per table", async () => {
+  it("labels the selected records as a non-vault data export", async () => {
     const data = ok(await exportJsonBackup());
-    expect(data.fileName).toMatch(/^budget-backup-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(data.fileName).toMatch(/^budget-data-export-\d{4}-\d{2}-\d{2}\.json$/);
+    const payload = JSON.parse(data.json);
+    expect(payload.meta.kind).toBe("data-export");
+    expect(payload.meta).not.toHaveProperty("sourceFile");
     expect(data.counts).toMatchObject({
       // 2 seeded + 'Main', which the 0003 migration creates.
       accounts: 3,
@@ -173,7 +204,7 @@ describe("exportJsonBackup", () => {
       transactions: 6,
       budgets: 1,
     });
-    // Pending rows and transfers ARE in the backup: a backup is not a report.
+    // Pending rows and transfers remain in this data export: it is not a report.
     expect(data.counts.transactions).toBe(6);
     expect(Object.keys(data.counts).sort()).toEqual([
       "accounts",
@@ -223,7 +254,7 @@ describe("exportJsonBackup", () => {
     for (const date of dates) expect(date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it("keeps the transfer leg and the pending flag, so the backup is complete", async () => {
+  it("keeps the transfer leg and pending flag in the selected transaction records", async () => {
     const backup = JSON.parse(ok(await exportJsonBackup()).json);
     const transfer = backup.transactions.find((t: { id: number }) => t.id === 5);
     expect(transfer.transferAccountId).toBe(11);
@@ -241,12 +272,12 @@ describe("exportJsonBackup", () => {
   it("includes the persisted Ledger explorer preference", async () => {
     execOn(temp, (db) => {
       db.run(
-        "INSERT INTO settings (user_name, accent_color, theme, show_ledger) VALUES ('Owner', 'default', 'system', 1)",
+        "INSERT INTO settings (user_name, accent_color, theme, show_ledger, idle_timeout_minutes) VALUES ('Owner', 'default', 'system', 1, 45)",
       );
     });
     const backup = JSON.parse(ok(await exportJsonBackup()).json);
     expect(backup.settings).toEqual([
-      expect.objectContaining({ userName: "Owner", showLedger: true }),
+      expect.objectContaining({ userName: "Owner", showLedger: true, idleTimeoutMinutes: 45 }),
     ]);
   });
 });
@@ -260,38 +291,49 @@ describe("exportDatabaseFile / describeDatabaseLocation", () => {
     expect(data.byteLength).toBeGreaterThan(512);
   });
 
-  it("hands over a COMPLETE, valid SQLite image", async () => {
+  it("does not reveal database location metadata without vault authorization", async () => {
+    const previousMode = process.env.LOCALFI_VAULT_TEST_MODE;
+    delete process.env.LOCALFI_VAULT_TEST_MODE;
+    try {
+      const result = await describeDatabaseLocation();
+      expect(result).toMatchObject({ error: expect.stringMatching(/vault is locked/i) });
+    } finally {
+      if (previousMode === undefined) delete process.env.LOCALFI_VAULT_TEST_MODE;
+      else process.env.LOCALFI_VAULT_TEST_MODE = previousMode;
+    }
+  });
+
+  it("hands over a complete, validated encrypted vault generation", async () => {
+    const expected = await prepareEncryptedSnapshot();
     const data = ok(await exportDatabaseFile());
     const bytes = Buffer.from(data.base64, "base64");
 
     expect(bytes.length).toBe(data.byteLength);
-    expect(bytes.subarray(0, 16).toString("binary")).toBe("SQLite format 3\0");
-    expect(data.fileName).toMatch(/^budget-\d{4}-\d{2}-\d{2}\.db$/);
-    expect(data.path).toBe(temp.file);
+    expect(bytes).toEqual(Buffer.from(expected));
+    expect(isVaultEnvelope(bytes)).toBe(true);
+    await expect(inspectVaultEnvelope(bytes)).resolves.toMatchObject({ encrypted: true, version: 1 });
+    expect(data.fileName).toBe("budget.localfi-vault");
+    expect(data.fileName).not.toMatch(/\.db$/);
+    expect(snapshotEncryptedDatabaseGeneration).toHaveBeenCalledOnce();
   });
 
-  it("the downloaded image is a usable database, not just plausible bytes", async () => {
-    const data = ok(await exportDatabaseFile());
-    const initSqlJs = (await import("sql.js")).default;
-    const SQL = await initSqlJs({
-      locateFile: (file: string) => `${process.cwd()}/node_modules/sql.js/dist/${file}`,
+  it("refuses bytes that are not a LocalFi vault envelope", async () => {
+    snapshotEncryptedDatabaseGeneration.mockResolvedValueOnce({
+      bytes: Buffer.alloc(1024, 0x41),
+      fileName: "not-a-vault.localfi-vault",
     });
-    const handle = new SQL.Database(Buffer.from(data.base64, "base64"));
-    try {
-      const rows = handle.exec("SELECT COUNT(*) FROM transactions");
-      expect(Number(rows[0].values[0][0])).toBe(6);
-    } finally {
-      handle.close();
-    }
-  });
-
-  it("refuses a file that is not a SQLite database rather than calling it a backup", async () => {
-    const { writeFileSync } = await import("node:fs");
-    const { closeDb } = await import("@/lib/db/client");
-    await closeDb();
-    writeFileSync(temp.file, Buffer.alloc(1024, 0x41)); // 1KB of "A"
 
     const result = await exportDatabaseFile();
-    expect("error" in result && result.error).toMatch(/not a valid SQLite database/i);
+    expect("error" in result && result.error).toMatch(/not a LocalFi vault envelope/i);
+  });
+
+  it("refuses a truncated vault envelope instead of trusting magic bytes alone", async () => {
+    snapshotEncryptedDatabaseGeneration.mockResolvedValueOnce({
+      bytes: Buffer.from([0x4c, 0x46, 0x56, 0x41, 0x55, 0x4c, 0x54, 0x00]),
+      fileName: "truncated.localfi-vault",
+    });
+
+    const result = await exportDatabaseFile();
+    expect("error" in result && result.error).toMatch(/truncated/i);
   });
 });

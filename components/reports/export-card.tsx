@@ -10,6 +10,7 @@ import {
   exportTransactionsCsv,
   type DatabaseLocation,
 } from "@/app/actions/export";
+import { ExportDisclosure } from "@/components/exports/export-disclosure";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -151,17 +152,16 @@ export function ExportCard({ range, currency, mixedCurrency }: ExportCardProps) 
         setError(result.error);
         return;
       }
-      const { fileName, base64, byteLength, savedAt } = result.data;
+      const { fileName, base64, byteLength } = result.data;
       download(
         fileName,
-        new Blob([base64ToBytes(base64) as unknown as BlobPart], { type: "application/vnd.sqlite3" }),
+        new Blob([base64ToBytes(base64) as unknown as BlobPart], {
+          type: "application/octet-stream",
+        }),
       );
-      setNote(
-        `${fileName} (${formatBytes(byteLength)}): the database exactly as it was last saved ` +
-          `(${formatInstant(savedAt)}).`,
-      );
+      setNote(`${fileName} (${formatBytes(byteLength)}): encrypted vault generation downloaded.`);
     } catch (e) {
-      setError((e as Error).message || "Failed to read the database file.");
+      setError((e as Error).message || "Failed to export the encrypted vault.");
     } finally {
       setBusy(null);
     }
@@ -202,21 +202,23 @@ export function ExportCard({ range, currency, mixedCurrency }: ExportCardProps) 
             <div>
               <h3 className="flex items-center gap-2 font-medium">
                 <Database className="h-4 w-4" />
-                The database file
+                Encrypted vault copy
               </h3>
               <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-                This is the real backup: one SQLite file containing everything. Copy it anywhere and
-                the app can be restored by putting it back.
+                A portable encrypted generation of your complete LocalFi database. It remains
+                sensitive, and restoring it requires the vault passphrase or recovery secret.
               </p>
             </div>
-            <Button onClick={handleDatabase} disabled={busy !== null}>
-              {busy === "db" ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4" />
-              )}
-              Download budget.db
-            </Button>
+            <ExportDisclosure format="database" onConfirm={handleDatabase}>
+              <Button disabled={busy !== null}>
+                {busy === "db" ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                Download encrypted vault
+              </Button>
+            </ExportDisclosure>
           </div>
 
           <div className="mt-3 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
@@ -240,10 +242,9 @@ export function ExportCard({ range, currency, mixedCurrency }: ExportCardProps) 
                 <div className="flex items-start gap-2 pt-1">
                   <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
-                    The download is read while the database lock is held and is verified to be a
-                    valid SQLite file, so it is never a half-written one. It is the last SAVED
-                    generation: if you have an edit in flight, save it first (every action saves
-                    immediately, so in practice this is the current state).
+                    The download is snapshotted while the database lock is held and is verified as a
+                    complete LocalFi vault envelope. The live and previous generations shown above
+                    are encrypted at rest.
                   </span>
                 </div>
               </div>
@@ -260,23 +261,26 @@ export function ExportCard({ range, currency, mixedCurrency }: ExportCardProps) 
           <div>
             <h3 className="flex items-center gap-2 font-medium">
               <FileJson className="h-4 w-4" />
-              Full JSON backup
+              Plaintext JSON data export
             </h3>
             <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-              Every table (accounts, categories, transactions, budgets, recurring templates, assets,
-              net-worth snapshots and settings) as readable JSON. Amounts are written as decimals
-              (<code className="font-mono">45.50</code>) in each row&apos;s own currency; no exchange
-              rate is applied anywhere.
+              Selected portable records (accounts, categories, transactions, budgets, recurring
+              templates, assets, net-worth snapshots and settings) as plaintext JSON outside vault
+              protection. This omits canonical internal tables and is not a restorable vault backup.
+              Amounts are written as decimals (<code className="font-mono">45.50</code>) in each
+              row&apos;s own currency; no exchange rate is applied anywhere.
             </p>
           </div>
-          <Button variant="outline" onClick={handleJson} disabled={busy !== null}>
-            {busy === "json" ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="mr-2 h-4 w-4" />
-            )}
-            Download JSON
-          </Button>
+          <ExportDisclosure format="json" onConfirm={handleJson}>
+            <Button variant="outline" disabled={busy !== null}>
+              {busy === "json" ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              Download JSON
+            </Button>
+          </ExportDisclosure>
         </div>
 
         <Separator />
@@ -290,18 +294,21 @@ export function ExportCard({ range, currency, mixedCurrency }: ExportCardProps) 
                 Transactions as CSV
               </h3>
               <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-                {formatRangeLabel(range)}. The header row is the one this app&apos;s own importer
+                {formatRangeLabel(range)}. This plaintext, Excel-readable file is outside vault
+                protection. The header row is the one this app&apos;s own importer
                 reads, so the file round-trips: Date, Category, Amount, Description.
               </p>
             </div>
-            <Button variant="outline" onClick={handleCsv} disabled={busy !== null}>
-              {busy === "csv" ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4" />
-              )}
-              Download CSV
-            </Button>
+            <ExportDisclosure format="csv" onConfirm={handleCsv}>
+              <Button variant="outline" disabled={busy !== null}>
+                {busy === "csv" ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                Download CSV
+              </Button>
+            </ExportDisclosure>
           </div>
 
           <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2">

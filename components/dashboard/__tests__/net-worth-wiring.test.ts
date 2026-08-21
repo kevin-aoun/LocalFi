@@ -45,9 +45,10 @@ describe("record-today entry points", () => {
       "app/api/snapshot/route.ts",
     ].map((file) => readFileSync(path.join(projectRoot, file), "utf8"));
 
-    for (const source of sources) {
+    for (const source of sources.slice(0, 2)) {
       expect(source).toMatch(/await recordNetWorthToday\(\)/);
     }
+    expect(sources[2]).toMatch(/withActiveVaultAuthorization\(\(\) => recordNetWorthToday\(\)\)/);
     expect(sources[2]).not.toMatch(/refreshLivePricedAssets/);
   });
 });

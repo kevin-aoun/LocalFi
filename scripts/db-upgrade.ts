@@ -46,7 +46,11 @@ export async function runDbUpgrade(args = process.argv.slice(2)) {
   const options = parseArgs(args);
   const lease = await acquireWriterLease(options.dbPath);
   try {
-    const result = await upgradeDatabase({ ...options, lease });
+    const result = await upgradeDatabase({
+      ...options,
+      lease,
+      passphrase: process.env.LOCALFI_VAULT_PASSPHRASE,
+    });
     lease.assertOwned();
     console.log(`${options.dryRun ? "Checked" : "Ready"}: ${result.dbPath}`);
     if (result.pending.length > 0) {
