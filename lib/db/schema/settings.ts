@@ -8,6 +8,7 @@ export const settings = sqliteTable("settings", {
   accentColor: text("accent_color").notNull().default("default"),
   theme: text("theme", { enum: ["light", "dark", "system"] }).notNull().default("system"),
   showLedger: integer("show_ledger", { mode: "boolean" }).notNull().default(false),
+  idleTimeoutMinutes: integer("idle_timeout_minutes").notNull().default(15),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

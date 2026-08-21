@@ -1,4 +1,4 @@
-import { closeDb } from "../lib/db/client";
+import { authorizeDatabaseVaultFromEnvironment, closeDb } from "../lib/db/client";
 import { rebuildLedgerProjections } from "../lib/ledger/rebuild";
 
 async function main() {
@@ -7,8 +7,13 @@ async function main() {
     process.exitCode = 2;
     return;
   }
-  const result = await rebuildLedgerProjections();
-  console.log(JSON.stringify(result, null, 2));
+  const releaseAuthorization = await authorizeDatabaseVaultFromEnvironment();
+  try {
+    const result = await rebuildLedgerProjections();
+    console.log(JSON.stringify(result, null, 2));
+  } finally {
+    await releaseAuthorization();
+  }
 }
 
 main()

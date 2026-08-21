@@ -1,4 +1,8 @@
-import { getDb, saveDb } from "./client";
+import {
+  authorizeDatabaseVaultFromEnvironment,
+  getDb,
+  saveDb,
+} from "./client";
 import { categories } from "./schema";
 import { parseAmount } from "@/lib/money";
 
@@ -24,16 +28,24 @@ const defaultCategories = [
 ];
 
 async function seed() {
-  console.log("Seeding database...");
+  const releaseAuthorization = await authorizeDatabaseVaultFromEnvironment();
+  try {
+    console.log("Seeding database...");
 
-  const db = await getDb();
+    const db = await getDb();
 
-  for (const category of defaultCategories) {
-    await db.insert(categories).values(category).onConflictDoNothing();
+    for (const category of defaultCategories) {
+      await db.insert(categories).values(category).onConflictDoNothing();
+    }
+
+    await saveDb();
+    console.log("Database seeded successfully!");
+  } finally {
+    await releaseAuthorization();
   }
-
-  await saveDb();
-  console.log("Database seeded successfully!");
 }
 
-seed().catch(console.error);
+seed().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});

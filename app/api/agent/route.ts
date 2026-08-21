@@ -37,6 +37,8 @@ import { AGENT_TOOLS } from "@/lib/agent/tools";
 import { needleBudget } from "@/lib/agent/tool-schema";
 import { isDateKey } from "@/lib/dates";
 import { agentAuthConfigured, authorizeAgentRequest } from "@/lib/agent/api-auth";
+import { withActiveVaultAuthorization } from "@/lib/vault/access";
+import { VaultLockedError } from "@/lib/vault/errors";
 
 const NO_STORE = { "cache-control": "no-store" } as const;
 
@@ -72,6 +74,13 @@ export const runtime = "nodejs";
 export async function GET(): Promise<Response> {
   const configured = agentAuthConfigured();
   const budget = needleBudget();
+
+  try {
+    await withActiveVaultAuthorization(async () => undefined, { touch: false });
+  } catch (error) {
+    if (error instanceof VaultLockedError) return json({ error: "vault_locked" }, 423);
+    throw error;
+  }
 
   return json(
     {
@@ -136,10 +145,16 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const reply: AgentReply = await handleMessage(body.message, {
-    debug: body.debug === true,
-    ...(typeof body.today === "string" ? { today: body.today } : {}),
-  });
+  let reply: AgentReply;
+  try {
+    reply = await withActiveVaultAuthorization(() => handleMessage(body.message as string, {
+      debug: body.debug === true,
+      ...(typeof body.today === "string" ? { today: body.today } : {}),
+    }));
+  } catch (error) {
+    if (error instanceof VaultLockedError) return json({ error: "vault_locked" }, 423);
+    throw error;
+  }
 
   // Always 200 for a handled message: `status` inside the payload is the result,
   // and an HTTP error code here would conflate "the ledger refused this" with

@@ -15,7 +15,7 @@ import {
   registerLedgerAccount,
 } from "@/lib/ledger";
 import { parseAmount } from "@/lib/money";
-import { withDb } from "./client";
+import { authorizeDatabaseVaultFromEnvironment, withDb } from "./client";
 import { accounts, assets, categories, transactions } from "./schema";
 import { syncCashAssetWithin } from "./sync-cash";
 
@@ -136,7 +136,16 @@ async function addSampleData(): Promise<void> {
   console.log(`Added ${result.assets} sample assets and ${result.transactions} journaled transactions`);
 }
 
-addSampleData().catch((error) => {
+async function main(): Promise<void> {
+  const releaseAuthorization = await authorizeDatabaseVaultFromEnvironment();
+  try {
+    await addSampleData();
+  } finally {
+    await releaseAuthorization();
+  }
+}
+
+main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

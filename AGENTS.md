@@ -6,9 +6,18 @@ client does not auto-load Claude rules.
 
 ## Product boundary
 
-- LocalFi is a single-user, local-first finance app. Preserve the loopback-only,
-  unauthenticated default; do not make cloud services required or transmit financial
-  data by default.
+- LocalFi is a single-user, local-first finance app. Preserve the loopback-only
+  default and single-owner vault gate; do not treat it as a multi-user or
+  internet-facing authentication system, make cloud services required, or
+  transmit financial data by default.
+- Owner live, managed backup, and temporary database generations must remain
+  authenticated encrypted vault envelopes. Preserve owner-only `0700`
+  directories and `0600` sensitive files. Plaintext database access is allowed
+  only through the explicit disposable fixture bypass and never for an owner
+  database path.
+- CSV and JSON exports cross the vault boundary as plaintext and require a clear
+  per-download disclosure before building the file. Database downloads remain
+  encrypted but sensitive.
 - Treat `data/`, database files, exports, backups, credentials, and real ledger
   values as private. Never inspect, copy, log, seed from, or commit them.
 - Preserve pre-existing work. Check `git status` before editing and do not rewrite

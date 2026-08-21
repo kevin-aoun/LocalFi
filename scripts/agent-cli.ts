@@ -10,18 +10,18 @@
  * ⚠  THE SINGLE-WRITER RULE — READ THIS BEFORE RUNNING IT
  * ============================================================================
  *
- * `lib/db/client.ts` serializes writers with an **in-process** lock, and
- * `saveDb()` rewrites the WHOLE database file (temp → fsync → rename). Two
- * processes writing the same file is therefore not a row-level race: it is
- * last-writer-wins on the entire ledger.
+ * `lib/db/client.ts` serializes work in-process and holds a cross-process writer
+ * lease while the SQLite image is open. This CLI therefore refuses to start if
+ * the app or another maintenance command owns the same database.
  *
- * So this process must not run at the same time as `npm run dev`, `npm start` or
- * the Docker container against the same database. The banner says so on every
- * start, because a warning in a file nobody opens is not a warning.
+ * Do not run it at the same time as `bun run dev`, `bun run start` or the Docker
+ * container against the same database. The lease fails closed, and stopping the
+ * other process first keeps the operational boundary unambiguous.
  *
- * For anything experimental, point it somewhere else:
+ * For anything experimental, point it at an already-initialized disposable vault:
  *
- *   BUDGET_DB_PATH=/tmp/scratch.db npm run agent -- --once "10 groceries"
+ *   BUDGET_DB_PATH=/tmp/scratch.db LOCALFI_VAULT_PASSPHRASE=... \
+ *     bun run agent -- --once "10 groceries"
  *
  * ============================================================================
  * WHAT THIS FILE IS AND IS NOT
@@ -38,7 +38,10 @@ import { getSettings } from "@/app/actions/settings";
 import { checkNeedleHealth, handleMessage, NEEDLE_START_HINT } from "@/lib/agent/handle";
 import { needleBudget } from "@/lib/agent/tool-schema";
 import { AGENT_TOOLS } from "@/lib/agent/tools";
-import { resolveDbPath } from "@/lib/db/client";
+import {
+  authorizeDatabaseVaultFromEnvironment,
+  resolveDbPath,
+} from "@/lib/db/client";
 import { isDateKey, todayKey, type DateKey } from "@/lib/dates";
 
 // ---------------------------------------------------------------------------
@@ -55,15 +58,17 @@ type Options = {
 const USAGE = `Chat capture, in a terminal.
 
 Usage:
-  npm run agent                          interactive REPL
-  npm run agent -- --once "10 groceries" one message, then exit
-  npm run agent -- --debug               show raw model output, tool and latency
-  npm run agent -- --today 2026-07-29    override today (relative dates only —
+  bun run agent                          interactive REPL
+  bun run agent -- --once "10 groceries" one message, then exit
+  bun run agent -- --debug               show raw model output, tool and latency
+  bun run agent -- --today 2026-07-29    override today (relative dates only —
                                          a message with no date still lands on
                                          the real day; see lib/agent/tools.ts)
 
 Environment:
-  BUDGET_DB_PATH   the database to write. STRONGLY recommended for testing.
+  BUDGET_DB_PATH   explicit existing vault to use instead of the default path.
+  LOCALFI_VAULT_PASSPHRASE
+                   required for an encrypted owner vault; scope it to this command.
   AGENT_DEBUG=1    same as --debug.
 
 In the REPL: send a message, or /help. Ctrl-D or /exit to quit.`;
@@ -137,12 +142,12 @@ async function banner(options: Options): Promise<void> {
       : "             ⚠  THIS IS THE REAL DATABASE. Use BUDGET_DB_PATH=/tmp/x.db to test.",
   );
   lines.push(
-    "  ⚠  single writer: do NOT run this while `npm run dev`, `npm start` or the",
+    "  ⚠  single writer: stop `bun run dev`, `bun run start` or the Docker",
   );
   lines.push(
-    "     container is using the same file. saveDb() rewrites the whole database,",
+    "     container before using this database. The cross-process lease refuses",
   );
-  lines.push("     so two writers means last-writer-wins on the entire ledger.");
+  lines.push("     concurrent access rather than risking a whole-generation overwrite.");
   lines.push("");
   lines.push(
     `  tools      ${AGENT_TOOLS.length} tools, ~${budget.estimatedTokens} tokens of ${budget.limit} ` +
@@ -284,16 +289,21 @@ async function main(): Promise<void> {
   }
   if (!options.debug) quietDebugLogs();
 
-  await banner(options);
+  const releaseAuthorization = await authorizeDatabaseVaultFromEnvironment();
+  try {
+    await banner(options);
 
-  if (options.once !== null) {
-    const status = await send(options.once, options);
-    // A non-zero code on a failed write is what makes this usable in a smoke test.
-    process.exitCode = status === "error" ? 1 : 0;
-    return;
+    if (options.once !== null) {
+      const status = await send(options.once, options);
+      // A non-zero code on a failed write is what makes this usable in a smoke test.
+      process.exitCode = status === "error" ? 1 : 0;
+      return;
+    }
+
+    await repl(options);
+  } finally {
+    await releaseAuthorization();
   }
-
-  await repl(options);
 }
 
 main().then(

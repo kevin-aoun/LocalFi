@@ -18,6 +18,7 @@ import {
   resolveAccent,
   type AccentApplication,
 } from "@/components/ui/color-picker-logic";
+import { idleTimeoutSecurityWarning } from "./settings-logic";
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(false);
@@ -26,12 +27,14 @@ export default function SettingsPage() {
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT);
   const [quickCommands, setQuickCommands] = useState<QuickCommand[]>([]);
   const [showLedger, setShowLedger] = useState(false);
+  const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState(15);
   const [ledgerSaving, setLedgerSaving] = useState(false);
   const { theme, setTheme } = useTheme();
   const [saved, setSaved] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
+  const idleTimeoutWarning = idleTimeoutSecurityWarning(idleTimeoutMinutes);
 
   useEffect(() => {
     setMounted(true);
@@ -43,6 +46,7 @@ export default function SettingsPage() {
     setUserName(settings.userName);
     setAccentColor(settings.accentColor);
     setShowLedger(settings.showLedger);
+    setIdleTimeoutMinutes(settings.idleTimeoutMinutes);
     setQuickCommands(settings.quickCommands || []);
 
   };
@@ -67,6 +71,7 @@ export default function SettingsPage() {
         accentColor,
         theme: (theme as "light" | "dark" | "system") || "system",
         showLedger,
+        idleTimeoutMinutes,
         quickCommands,
       });
       if (!ok) return;
@@ -88,6 +93,7 @@ export default function SettingsPage() {
       accentColor,
       theme: (theme as "light" | "dark" | "system") || "system",
       showLedger,
+      idleTimeoutMinutes,
       quickCommands: commands,
     });
   };
@@ -107,6 +113,7 @@ export default function SettingsPage() {
       accentColor: color,
       theme: (theme as "light" | "dark" | "system") || "system",
       showLedger,
+      idleTimeoutMinutes,
       quickCommands,
     });
   };
@@ -123,6 +130,7 @@ export default function SettingsPage() {
         accentColor,
         theme: (theme as "light" | "dark" | "system") || "system",
         showLedger: next,
+        idleTimeoutMinutes,
         quickCommands,
       });
       if (!ok) {
@@ -173,6 +181,48 @@ export default function SettingsPage() {
           </button>
         </div>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Vault security</CardTitle>
+          <CardDescription>
+            Control how quickly an unattended unlocked session locks itself.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Label htmlFor="idle-timeout">Lock after inactivity</Label>
+          <div className="flex max-w-sm items-center gap-2">
+            <Input
+              id="idle-timeout"
+              type="number"
+              min={1}
+              max={120}
+              step={1}
+              value={idleTimeoutMinutes}
+              onChange={(event) => setIdleTimeoutMinutes(Number(event.target.value))}
+              aria-describedby={
+                idleTimeoutWarning
+                  ? "idle-timeout-guidance idle-timeout-warning"
+                  : "idle-timeout-guidance"
+              }
+            />
+            <span className="shrink-0 text-sm text-muted-foreground">minutes</span>
+          </div>
+          <p id="idle-timeout-guidance" className="text-sm text-muted-foreground">
+            Choose 1–120 minutes. Activity extends the session; saving a shorter timeout applies it
+            to this session immediately.
+          </p>
+          {idleTimeoutWarning && (
+            <p
+              id="idle-timeout-warning"
+              role="status"
+              className="text-sm text-amber-700 dark:text-amber-400"
+            >
+              {idleTimeoutWarning}
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-card to-muted/30">
         <CardHeader>
@@ -301,9 +351,11 @@ export default function SettingsPage() {
       {}
       <div className="flex items-center justify-between rounded-lg border p-4">
         <div>
-          <h3 className="font-semibold">Save Profile & Appearance</h3>
+          <h3 className="font-semibold">Save profile, security &amp; appearance</h3>
           <p className="text-sm text-muted-foreground">
-            {saved ? "Your settings have been saved!" : "Click save to apply your profile and appearance changes"}
+            {saved
+              ? "Your settings have been saved!"
+              : "Apply your profile, vault timeout, and appearance changes"}
           </p>
         </div>
         <Button onClick={handleSave} disabled={loading}>

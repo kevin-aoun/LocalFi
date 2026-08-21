@@ -45,6 +45,14 @@ describe("travel map", () => {
     );
   });
 
+  it("packages the offline geography in the standalone Docker runtime", () => {
+    const dockerfile = read("Dockerfile");
+
+    expect(dockerfile).toContain(
+      "COPY --from=builder --chown=nextjs:nodejs /app/public ./public",
+    );
+  });
+
   it("declutters dense itineraries without showing markers through the globe", () => {
     const source = read("app/(dashboard)/travel/travel-map.tsx");
     expect(source).toMatch(/cities\.map\(\(city, index\)/);

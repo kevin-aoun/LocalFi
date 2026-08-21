@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `idle_timeout_minutes` integer DEFAULT 15 NOT NULL;
