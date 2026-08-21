@@ -24,6 +24,9 @@ const REPOSITORY_ROOT = path.resolve(process.cwd());
 const CHROME_PATH = "/usr/bin/google-chrome";
 const TEMP_PREFIX = "localfi-showcase-";
 const VIEWPORT = { width: 1728, height: 1080 } as const;
+export const TRAVEL_GLOBE_PATH = "/maps/natural-earth-countries-110m-v5.1.2.geojson";
+const TRAVEL_GLOBE_REGION = { left: 420, top: 150, width: 850, height: 800 } as const;
+const MINIMUM_TRAVEL_GLOBE_PIXELS = 20_000;
 export const SHOWCASE_NOW_ISO = `${DEMO_ANCHOR_DATE}T12:00:00.000Z`;
 
 export const SHOWCASE_PAGES = [
@@ -90,6 +93,17 @@ export class DemoScreenshotError extends Error {
 export type CaptureDemoOptions = {
   outputDirectory: string;
 };
+
+export type HandledWaiterResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: unknown };
+
+export function handleWaiter<T>(waiter: Promise<T>): Promise<HandledWaiterResult<T>> {
+  return waiter.then(
+    (value) => ({ ok: true, value }),
+    (error: unknown) => ({ ok: false, error }),
+  );
+}
 
 export function parseCaptureArgs(args: readonly string[]): CaptureDemoOptions | { help: true } {
   let outputDirectory: string | null = null;
@@ -333,6 +347,36 @@ async function countForegroundPixels(
   return foreground;
 }
 
+export async function travelGlobeCoveragePixels(
+  screenshot: Buffer,
+  theme: ShowcaseTheme,
+): Promise<number> {
+  const { data, info } = await sharp(screenshot)
+    .extract(TRAVEL_GLOBE_REGION)
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let coveredPixels = 0;
+  for (let index = 0; index < data.length; index += info.channels) {
+    const luminance = (data[index] + data[index + 1] + data[index + 2]) / 3;
+    if (theme === "dark" ? luminance > 35 : luminance < 225) coveredPixels += 1;
+  }
+  return coveredPixels;
+}
+
+export async function assertTravelGlobePaint(
+  screenshot: Buffer,
+  theme: ShowcaseTheme,
+): Promise<void> {
+  const coveredPixels = await travelGlobeCoveragePixels(screenshot, theme);
+  if (coveredPixels < MINIMUM_TRAVEL_GLOBE_PIXELS) {
+    throw new DemoScreenshotError(
+      `${theme}/travel globe is blank: ${coveredPixels} covered pixels; ` +
+        `expected at least ${MINIMUM_TRAVEL_GLOBE_PIXELS}`,
+    );
+  }
+}
+
 async function assertPublicationPaint(
   screenshot: Buffer,
   theme: ShowcaseTheme,
@@ -355,6 +399,7 @@ async function assertPublicationPaint(
         `(brand pixels ${brandPixels}, misplaced heading pixels ${misplacedHeadingPixels})`,
     );
   }
+  if (pagePath === "/travel") await assertTravelGlobePaint(screenshot, theme);
 }
 
 async function capturePages(
@@ -367,8 +412,18 @@ async function capturePages(
     mkdirSync(outputDirectory, { recursive: true });
     for (const showcase of SHOWCASE_PAGES) {
       const page = await context.newPage();
+      let travelGeographyResponse: Promise<HandledWaiterResult<unknown>> | null = null;
       try {
         await preparePage(page, baseUrl, theme);
+        travelGeographyResponse = showcase.path === "/travel"
+          ? handleWaiter(page.waitForResponse(
+              (response) => {
+                const requestUrl = new URL(response.url());
+                return requestUrl.pathname === TRAVEL_GLOBE_PATH && response.ok();
+              },
+              { timeout: 30_000 },
+            ))
+          : null;
         const response = await page.goto(`${baseUrl}${showcase.path}`, {
           waitUntil: "domcontentloaded",
           timeout: 60_000,
@@ -378,6 +433,8 @@ async function capturePages(
             `Could not load ${showcase.path}: HTTP ${response?.status() ?? "unknown"}`,
           );
         }
+        const geographyResult = await travelGeographyResponse;
+        if (geographyResult && !geographyResult.ok) throw geographyResult.error;
         // Chrome can retain the server-rendered heading's initial paint position even after
         // hydration has laid it out correctly. A warm reload after the fully-ready first render
         // gives the software compositor a stable document without mutating the publication DOM.
@@ -455,6 +512,9 @@ async function capturePages(
         );
       } finally {
         await page.close();
+        // Closing rejects any pending Playwright waiter. It was handled at creation time;
+        // awaiting its settled wrapper here also drains it on navigation and HTTP failures.
+        await travelGeographyResponse;
       }
     }
   }

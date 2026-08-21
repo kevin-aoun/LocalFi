@@ -16,7 +16,7 @@ import {
 import type { TravelCity } from "@/lib/db/schema";
 
 const WORLD_GEOJSON =
-  "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@v5.1.2/geojson/ne_110m_admin_0_countries.geojson";
+  "/maps/natural-earth-countries-110m-v5.1.2.geojson";
 
 type MapView = "flat" | "globe";
 
@@ -71,13 +71,18 @@ export default function TravelMap({ cities }: { cities: readonly TravelCity[] })
           />
         )}
 
-        {cities.map((city) => (
-          <MapMarker key={city.id} longitude={city.longitude} latitude={city.latitude}>
+        {cities.map((city, index) => (
+          <MapMarker
+            key={city.id}
+            longitude={city.longitude}
+            latitude={city.latitude}
+            opacityWhenCovered="1"
+          >
             <MarkerContent>
-              <div className="size-2 rounded-full border-2 border-white bg-blue-500" />
+              <div className="size-2.5 rounded-full border-2 border-background bg-blue-500 ring-1 ring-blue-600" />
               <MarkerLabel
-                position="top"
-                className="rounded-sm bg-background/80 px-1.5 py-0.5 text-[11px] font-semibold backdrop-blur"
+                position={index % 2 === 0 ? "top" : "bottom"}
+                className="rounded-sm border border-border bg-background px-1.5 py-0.5 text-[11px] font-semibold text-foreground shadow-sm"
               >
                 {city.cityName}
               </MarkerLabel>

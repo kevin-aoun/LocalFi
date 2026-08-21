@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -6,7 +7,7 @@ const root = path.resolve(__dirname, "..", "..", "..", "..");
 const read = (relativePath: string) => readFileSync(path.join(root, relativePath), "utf8");
 
 describe("travel map", () => {
-  it("uses mapcn's globe, world geography, arcs, and city markers", () => {
+  it("uses mapcn's globe, offline world geography, arcs, and city markers", () => {
     const source = read("app/(dashboard)/travel/travel-map.tsx");
     expect(source).toMatch(/blank=\{view === "globe"\}/);
     expect(source).toMatch(/<MapGeoJSON/);
@@ -14,6 +15,43 @@ describe("travel map", () => {
     expect(source).toMatch(/<MapMarker/);
     expect(source).toMatch(/<MarkerLabel/);
     expect(source).toMatch(/"line-dasharray": \[2, 2\]/);
+    expect(source).toContain('"/maps/natural-earth-countries-110m-v5.1.2.geojson"');
+    expect(source).not.toMatch(/https?:\/\/|cdn\.jsdelivr/i);
+  });
+
+  it("vendors the pinned Natural Earth country polygons with attribution", () => {
+    const geographyPath = path.join(
+      root,
+      "public/maps/natural-earth-countries-110m-v5.1.2.geojson",
+    );
+    const geographyBytes = readFileSync(geographyPath);
+    const geography = JSON.parse(geographyBytes.toString("utf8")) as {
+      type?: string;
+      features?: Array<{ geometry?: { type?: string } }>;
+    };
+    const attribution = read("public/maps/README.md");
+
+    expect(geography.type).toBe("FeatureCollection");
+    expect(geography.features).toHaveLength(177);
+    expect(
+      geography.features?.every(({ geometry }) =>
+        geometry?.type === "Polygon" || geometry?.type === "MultiPolygon"),
+    ).toBe(true);
+    expect(attribution).toMatch(/Natural Earth 1:110m/);
+    expect(attribution).toMatch(/public domain/i);
+    expect(attribution).toContain("v5.1.2");
+    expect(createHash("sha256").update(geographyBytes).digest("hex")).toBe(
+      "6866c877d39cba9c357620878839b336d569f8c662d3cfab4cb1dbe2d39c977f",
+    );
+  });
+
+  it("alternates solid, high-contrast marker labels to separate nearby cities", () => {
+    const source = read("app/(dashboard)/travel/travel-map.tsx");
+    expect(source).toMatch(/cities\.map\(\(city, index\)/);
+    expect(source).toContain('opacityWhenCovered="1"');
+    expect(source).toContain('position={index % 2 === 0 ? "top" : "bottom"}');
+    expect(source).toMatch(/border-border bg-background[\s\S]*text-foreground shadow-sm/);
+    expect(source).not.toMatch(/bg-background\/80/);
   });
 
   it("has no custom country hover or visited-country coloring", () => {

@@ -10,10 +10,13 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import sharp from "sharp";
 
 import {
+  assertTravelGlobePaint,
   buildIsolatedAppEnvironment,
   expectedShowcaseRelativePaths,
+  handleWaiter,
   initialThemeForCapture,
   isOwnedShowcaseDirectory,
   parseCaptureArgs,
@@ -23,7 +26,29 @@ import {
   SHOWCASE_NOW_ISO,
   SHOWCASE_THEMES,
   themeBootValues,
+  TRAVEL_GLOBE_PATH,
 } from "../capture-demo-screenshots";
+
+async function syntheticTravelScreenshot(
+  theme: "light" | "dark",
+  filled: boolean,
+): Promise<Buffer> {
+  const width = 1728;
+  const height = 1080;
+  const channels = 3;
+  const background = theme === "light" ? 255 : 9;
+  const foreground = theme === "light" ? 160 : 64;
+  const pixels = Buffer.alloc(width * height * channels, background);
+  if (filled) {
+    for (let y = 250; y < 450; y += 1) {
+      for (let x = 600; x < 800; x += 1) {
+        const offset = (y * width + x) * channels;
+        pixels.fill(foreground, offset, offset + channels);
+      }
+    }
+  }
+  return await sharp(pixels, { raw: { width, height, channels } }).png().toBuffer();
+}
 
 describe("capture-demo-screenshots safety contract", () => {
   it("requires the explicit public showcase output directory", () => {
@@ -98,6 +123,32 @@ describe("capture-demo-screenshots safety contract", () => {
     expect(themeBootValues("dark")).toEqual({
       theme: "dark",
       "localfi-privacy-mode": "false",
+    });
+  });
+
+  it("fails closed when the same-origin Travel globe is blank", async () => {
+    expect(TRAVEL_GLOBE_PATH).toBe(
+      "/maps/natural-earth-countries-110m-v5.1.2.geojson",
+    );
+    await expect(
+      assertTravelGlobePaint(await syntheticTravelScreenshot("light", false), "light"),
+    ).rejects.toThrow(/globe is blank/);
+    await expect(
+      assertTravelGlobePaint(await syntheticTravelScreenshot("dark", false), "dark"),
+    ).rejects.toThrow(/globe is blank/);
+    await expect(
+      assertTravelGlobePaint(await syntheticTravelScreenshot("light", true), "light"),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertTravelGlobePaint(await syntheticTravelScreenshot("dark", true), "dark"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("handles a response waiter rejection immediately so failure cleanup can drain it", async () => {
+    const failure = new Error("navigation failed before geography loaded");
+    await expect(handleWaiter(Promise.reject(failure))).resolves.toEqual({
+      ok: false,
+      error: failure,
     });
   });
 
