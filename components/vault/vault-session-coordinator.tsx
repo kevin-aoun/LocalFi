@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import {
   statusRequest,
@@ -12,8 +11,7 @@ import {
 const STATUS_INTERVAL_MS = 15_000;
 
 export function VaultSessionCoordinator() {
-  const router = useRouter();
-  const [locked, setLocked] = useState(false);
+  const [status, setStatus] = useState<"checking" | "unlocked" | "locked">("checking");
 
   useEffect(() => {
     let activityPending = false;
@@ -26,9 +24,8 @@ export function VaultSessionCoordinator() {
 
     const showLockScreen = () => {
       if (stopped) return;
-      setLocked(true);
-      router.replace("/vault");
-      router.refresh();
+      setStatus("locked");
+      window.location.replace("/vault");
     };
 
     const checkStatus = async () => {
@@ -44,6 +41,7 @@ export function VaultSessionCoordinator() {
         });
         const payload = await response.json() as VaultStatusPayload;
         if (!response.ok || !vaultStatusIsUnlocked(payload)) showLockScreen();
+        else if (!stopped) setStatus("unlocked");
       } catch {
         // A transient local-server failure is retried on the next interval.
       } finally {
@@ -69,16 +67,18 @@ export function VaultSessionCoordinator() {
       document.removeEventListener("touchstart", markActivity, true);
       window.removeEventListener("focus", markActivity);
     };
-  }, [router]);
+  }, []);
 
-  if (!locked) return null;
+  if (status === "unlocked") return null;
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-background"
       role="status"
       aria-live="assertive"
     >
-      <p className="text-sm text-muted-foreground">LocalFi is locked. Returning to the vault…</p>
+      <p className="text-sm text-muted-foreground">
+        {status === "locked" ? "LocalFi is locked. Returning to the vault…" : "Checking vault…"}
+      </p>
     </div>
   );
 }

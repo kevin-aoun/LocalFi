@@ -43,9 +43,12 @@ first start, generate a random 24–512 character
 `LOCALFI_VAULT_BOOTSTRAP_TOKEN`, pass it only in the server process environment,
 and enter that value in the setup form. This bootstrap credential authorizes the
 one setup request; it is not the vault passphrase or recovery secret. Setup
-consumes the server-process value after success. Also remove it from the parent
-shell or container configuration and restart the server so process supervisors
-cannot restore it. Do not put it in a committed environment file.
+consumes the live server-process value after success. Remove it from the parent
+shell, but do not restart solely for setup: a restart locks the in-memory vault
+and requires a normal passphrase unlock. A later process start may restore a
+supervisor-configured copy, but an initialized vault rejects setup regardless;
+remove persistent configuration during the next normal reconciliation. Do not
+put the credential in a committed environment file.
 
 The `db:init` and `db:setup` commands deliberately refuse headless
 initialization: vault creation produces recovery material exactly once, and a
@@ -103,8 +106,11 @@ For Compose, a one-shot root preflight assigns the private bind mount to
 `0600`; the long-running application remains non-root. Review those IDs before
 starting on a shared host. A fresh bind mount or legacy conversion also requires
 the bootstrap credential and fails clearly without it. After successful setup,
-unset the host variable and force-recreate the Compose services so the credential
-is no longer stored in their configured environment. Browser setup tightens
+unset the host variable; the live app has already consumed its copy and does not
+need to be recreated. The next ordinary `docker compose up -d` without the
+variable reconciles the configured environment. An immediate force-recreate is
+optional hygiene, but locks the vault and requires a normal passphrase unlock.
+Browser setup tightens
 ordinary same-owner legacy `0755` directories and `0644` single-link files;
 wrong-owner paths, symlinks, hard links, and non-regular files still fail closed.
 

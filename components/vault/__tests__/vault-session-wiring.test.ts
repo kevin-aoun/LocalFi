@@ -12,8 +12,9 @@ describe("vault session expiry wiring", () => {
     expect(source).toContain('fetch("/api/vault/status"');
     expect(source).toContain('document.addEventListener("pointerdown"');
     expect(source).toContain('document.addEventListener("keydown"');
-    expect(source).toContain("setLocked(true)");
-    expect(source).toContain('router.replace("/vault")');
+    expect(source).toContain('useState<"checking" | "unlocked" | "locked">("checking")');
+    expect(source).toContain('setStatus("locked")');
+    expect(source).toContain('window.location.replace("/vault")');
     expect(source).toContain('className="fixed inset-0');
   });
 

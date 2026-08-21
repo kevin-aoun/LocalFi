@@ -35,8 +35,10 @@ the passphrase and recovery secret, and consumes it on success. Supported
 maintenance commands instead unlock an existing vault for one process through
 `LOCALFI_VAULT_PASSPHRASE` and release that authorization before exit. Compose
 uses a one-shot root permission preflight for the private bind mount, then runs
-the application itself as the configured non-root owner; the operator must
-remove the bootstrap token and recreate the service after setup.
+the application itself as the configured non-root owner. Setup consumes the live
+process credential; the operator removes the parent-shell copy, while a later
+ordinary Compose reconciliation drops the configured copy without making an
+immediate restart part of first-run setup.
 
 ## Dependency maintenance
 

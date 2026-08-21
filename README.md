@@ -199,10 +199,10 @@ bun run dev
 On the first run, open <http://localhost:1313>, enter the printed bootstrap
 credential, create the single-owner vault, and save the one-time recovery secret
 somewhere separate from the device. The bootstrap credential only authorizes
-that setup request; it is not the vault passphrase or recovery secret. Once setup
-succeeds, stop the development server, run `unset LOCALFI_VAULT_BOOTSTRAP_TOKEN`,
-and restart it normally. Never save the credential in `.env.local` or another
-committed file.
+that setup request; it is not the vault passphrase or recovery secret. Setup
+consumes it inside the running server, so keep the server running and remove the
+parent-shell copy with `unset LOCALFI_VAULT_BOOTSTRAP_TOKEN`. Never save the
+credential in `.env.local` or another committed file.
 
 Vault creation is intentionally UI-only: `bun run db:init` and
 `bun run db:setup` refuse headless setup because a recovery secret printed
@@ -223,13 +223,17 @@ docker compose up -d --build
 ```
 
 Open <http://localhost:1313>, enter the printed credential, finish setup, and
-save the recovery secret. Then remove the credential from both the host shell and
-the container configuration:
+save the recovery secret. Setup consumes the credential in the live application;
+do not recreate the container or unlock again. Remove only the parent-shell copy:
 
 ```bash
 unset LOCALFI_VAULT_BOOTSTRAP_TOKEN
-docker compose up -d --force-recreate
 ```
+
+The next ordinary `docker compose up -d` run with that variable absent reconciles
+the container configuration. If you specifically want to purge the now-useless
+configured value immediately, `docker compose up -d --force-recreate` is optional;
+it will lock the vault and require one normal passphrase unlock afterward.
 
 Verify with `docker compose ps -a`; `app` should be healthy and
 `data-permissions` should have exited successfully. A fresh bind mount or legacy
