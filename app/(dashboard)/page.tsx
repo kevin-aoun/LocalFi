@@ -52,6 +52,7 @@ import {
   withHidden,
 } from "@/components/dashboard/asset-table";
 import { AssetFilterNotice, AssetTable } from "@/components/dashboard/asset-table-card";
+import { fromDateKey, todayKey } from "@/lib/dates";
 
 export default function DashboardPage() {
   const {
@@ -175,7 +176,7 @@ export default function DashboardPage() {
   const { growthAmountCents, growthPercent, baselineCents } = computeCashGrowth(
     transactions,
     categories,
-    new Date(),
+    fromDateKey(todayKey()),
     selectedCashCurrency,
   );
 

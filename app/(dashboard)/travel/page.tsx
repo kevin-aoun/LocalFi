@@ -38,6 +38,10 @@ import {
 } from "@/components/ui/select";
 import { COUNTRIES, COUNTRIES_BY_ALPHA3 } from "@/lib/countries";
 import type { TravelCity } from "@/lib/db/schema";
+import {
+  countryGroupPresentation,
+  groupCitiesByCountry,
+} from "./travel-page-logic";
 
 const TravelMap = dynamic(() => import("./travel-map"), {
   ssr: false,
@@ -51,18 +55,6 @@ const TravelMap = dynamic(() => import("./travel-map"), {
 function Flag({ code }: { code: string }) {
   const Component = (Flags as Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>>)[code];
   return Component ? <Component className="h-auto w-5 shrink-0 rounded-sm" /> : null;
-}
-
-function groupCitiesByCountry(cities: readonly TravelCity[]) {
-  const groups = new Map<string, { countryName: string; cities: TravelCity[] }>();
-  for (const city of cities) {
-    const group = groups.get(city.countryCode);
-    if (group) group.cities.push(city);
-    else groups.set(city.countryCode, { countryName: city.countryName, cities: [city] });
-  }
-  return [...groups.entries()]
-    .map(([countryCode, group]) => ({ countryCode, ...group }))
-    .sort((left, right) => left.countryName.localeCompare(right.countryName));
 }
 
 function CityDialog({
@@ -313,6 +305,7 @@ export default function TravelPage() {
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
               {countryGroups.map((group) => {
                 const country = COUNTRIES_BY_ALPHA3.get(group.countryCode);
+                const presentation = countryGroupPresentation(group.cities);
                 return (
                   <details
                     key={group.countryCode}
@@ -321,10 +314,19 @@ export default function TravelPage() {
                     <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1 text-sm font-medium outline-none focus-visible:ring-1 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
                       <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-open/country:rotate-90" />
                       {country && <Flag code={country.alpha2} />}
-                      <span className="min-w-0 flex-1 truncate">{group.countryName}</span>
-                      <span className="text-xs font-normal text-muted-foreground">
-                        {group.cities.length}
+                      <span className="min-w-0 flex-1 truncate">
+                        {group.countryName}
+                        {presentation.cityName && (
+                          <span className="font-normal text-muted-foreground">
+                            {" · "}{presentation.cityName}
+                          </span>
+                        )}
                       </span>
+                      {presentation.countLabel && (
+                        <span className="text-xs font-normal text-muted-foreground">
+                          {presentation.countLabel}
+                        </span>
+                      )}
                     </summary>
 
                     <div className="mt-1 space-y-1 border-l border-blue-500/30 pl-2">

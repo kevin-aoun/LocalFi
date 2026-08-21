@@ -80,6 +80,16 @@ export function isDateKey(value: unknown): value is DateKey {
 
 
 export function todayKey(): DateKey {
+  const configured =
+    typeof process === "undefined" ? undefined : process.env.LOCALFI_TODAY_KEY?.trim();
+  if (configured) {
+    if (!isDateKey(configured)) {
+      throw new Error(
+        `Invalid LOCALFI_TODAY_KEY: expected a real 'YYYY-MM-DD' calendar day, received ${JSON.stringify(configured)}`,
+      );
+    }
+    return configured;
+  }
   return toDateKey(new Date());
 }
 
