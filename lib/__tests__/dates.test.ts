@@ -158,8 +158,28 @@ describe(`isDateKey / todayKey (TZ=${TZ})`, () => {
   });
 
   it("todayKey matches the local calendar day", () => {
-    expect(todayKey()).toBe(localKey(new Date()));
-    expect(isDateKey(todayKey())).toBe(true);
+    const previous = process.env.LOCALFI_TODAY_KEY;
+    delete process.env.LOCALFI_TODAY_KEY;
+    try {
+      expect(todayKey()).toBe(localKey(new Date()));
+      expect(isDateKey(todayKey())).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.LOCALFI_TODAY_KEY;
+      else process.env.LOCALFI_TODAY_KEY = previous;
+    }
+  });
+
+  it("uses an explicit validated calendar override for reproducible local runs", () => {
+    const previous = process.env.LOCALFI_TODAY_KEY;
+    try {
+      process.env.LOCALFI_TODAY_KEY = "2026-08-15";
+      expect(todayKey()).toBe("2026-08-15");
+      process.env.LOCALFI_TODAY_KEY = "2026-02-30";
+      expect(() => todayKey()).toThrow(/Invalid LOCALFI_TODAY_KEY/);
+    } finally {
+      if (previous === undefined) delete process.env.LOCALFI_TODAY_KEY;
+      else process.env.LOCALFI_TODAY_KEY = previous;
+    }
   });
 });
 
