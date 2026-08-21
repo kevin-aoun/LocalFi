@@ -12,7 +12,7 @@ import path from "node:path";
 
 import { sql } from "drizzle-orm";
 import initSqlJs from "sql.js";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   assertPlaintextFixturePath,
@@ -107,6 +107,28 @@ describe.sequential("encrypted sql.js client boundary", () => {
 
     await expect(readDb(() => null)).rejects.toBeInstanceOf(VaultLockedError);
     expect(readFileSync(dbPath)).toEqual(before);
+  });
+
+  it("shares vault authorization across server module instances", async () => {
+    const setup = await setupVaultDatabase({ dbPath, passphrase: PASSPHRASE });
+    destroyVaultKey(setup.key);
+    await authorize();
+    expect(await readDb((_db, raw) =>
+      Number(raw.exec("SELECT COUNT(*) FROM categories")[0].values[0][0])
+    )).toBe(15);
+    await closeDb();
+
+    vi.resetModules();
+    const secondClient = await import("../client");
+
+    expect(await secondClient.readDb((_db, raw) =>
+      Number(raw.exec("SELECT COUNT(*) FROM categories")[0].values[0][0])
+    )).toBe(15);
+    await secondClient.closeDb();
+
+    secondClient.destroyDatabaseVaultAuthorization(authorization!);
+    await expect(readDb(() => null)).rejects.toBeInstanceOf(VaultLockedError);
+    authorization = null;
   });
 
   it("encrypts live, automatic backup, and temporary persistence generations", async () => {

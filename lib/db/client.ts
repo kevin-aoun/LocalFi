@@ -83,7 +83,6 @@ export class DatabaseVaultAuthorization {
 }
 
 type VaultAuthorizationState = { key: UnlockedVaultKey; file: string };
-const vaultAuthorizationStates = new WeakMap<DatabaseVaultAuthorization, VaultAuthorizationState>();
 
 type VaultAuthorizationProvider = () =>
   | DatabaseVaultAuthorization
@@ -91,6 +90,7 @@ type VaultAuthorizationProvider = () =>
   | Promise<DatabaseVaultAuthorization | null>;
 type VaultRuntimeState = {
   provider: VaultAuthorizationProvider;
+  authorizationStates?: WeakMap<DatabaseVaultAuthorization, VaultAuthorizationState>;
 };
 
 const vaultRuntimeGlobals = globalThis as typeof globalThis & {
@@ -102,7 +102,10 @@ const requestVaultAuthorization: VaultAuthorizationProvider = async () => {
 };
 const vaultRuntime = (vaultRuntimeGlobals.__localfiVaultRuntime ??= {
   provider: requestVaultAuthorization,
+  authorizationStates: new WeakMap<DatabaseVaultAuthorization, VaultAuthorizationState>(),
 });
+const vaultAuthorizationStates = (vaultRuntime.authorizationStates ??=
+  new WeakMap<DatabaseVaultAuthorization, VaultAuthorizationState>());
 
 function canonicalPotentialPath(file: string): string {
   const resolved = path.resolve(file);

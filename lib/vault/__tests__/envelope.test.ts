@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import initSqlJs from "sql.js";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createVaultEnvelope,
@@ -120,5 +120,17 @@ describe.sequential("versioned vault envelope", () => {
     destroyVaultKey(unlocked.key);
     destroyVaultKey(created.key);
     destroyVaultKey(reset.key);
+  });
+
+  it("shares key state and destruction across server module instances", async () => {
+    const created = await createVaultEnvelope(sqliteImage, "cross chunk key state passphrase");
+
+    vi.resetModules();
+    const secondEnvelope = await import("../envelope");
+    secondEnvelope.destroyVaultKey(created.key);
+
+    expect(created.key.destroyed).toBe(true);
+    await expect(encryptVaultGeneration(sqliteImage, created.key))
+      .rejects.toBeInstanceOf(VaultAuthenticationError);
   });
 });

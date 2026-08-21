@@ -66,7 +66,16 @@ export class UnlockedVaultKey {
   }
 }
 
-const keyStates = new WeakMap<UnlockedVaultKey, KeyState>();
+type VaultKeyRuntimeState = {
+  keyStates?: WeakMap<UnlockedVaultKey, KeyState>;
+};
+const keyRuntimeGlobals = globalThis as typeof globalThis & {
+  __localfiVaultKeyRuntime?: VaultKeyRuntimeState;
+};
+const keyRuntime = (keyRuntimeGlobals.__localfiVaultKeyRuntime ??= {
+  keyStates: new WeakMap<UnlockedVaultKey, KeyState>(),
+});
+const keyStates = (keyRuntime.keyStates ??= new WeakMap<UnlockedVaultKey, KeyState>());
 let sodiumPromise: Promise<Sodium> | null = null;
 
 export type VaultEnvelopeInfo = {
