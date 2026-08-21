@@ -307,7 +307,7 @@ async function waitForShowcaseReady(
     state: "visible",
     timeout: 30_000,
   });
-  await page.getByText("Khalil Mansour", { exact: true }).waitFor({
+  await page.getByText("Khalil", { exact: true }).waitFor({
     state: "visible",
     timeout: 30_000,
   });
@@ -471,11 +471,11 @@ async function capturePages(
           });
         });
         const visibleText = await page.locator("body").innerText();
-        if (/\b(?:Demo|Fictional|Fixture)\b/i.test(visibleText)) {
+        if (/\b(?:Demo|Fictional|Fixture|Mansour)\b/i.test(visibleText)) {
           const matches = visibleText
             .split("\n")
             .map((line) => line.trim())
-            .filter((line) => /\b(?:Demo|Fictional|Fixture)\b/i.test(line));
+            .filter((line) => /\b(?:Demo|Fictional|Fixture|Mansour)\b/i.test(line));
           throw new DemoScreenshotError(
             `${showcase.path} exposes placeholder fixture language: ${matches.join(" | ")}`,
           );

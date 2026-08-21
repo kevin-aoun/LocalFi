@@ -126,6 +126,16 @@ describe("capture-demo-screenshots safety contract", () => {
     });
   });
 
+  it("waits for the exact public profile and rejects the retired surname", () => {
+    const source = readFileSync(
+      path.join(process.cwd(), "scripts", "capture-demo-screenshots.ts"),
+      "utf8",
+    );
+    expect(source).toContain('getByText("Khalil", { exact: true })');
+    expect(source).not.toContain('getByText("Khalil Mansour"');
+    expect(source).toMatch(/Demo\|Fictional\|Fixture\|Mansour/);
+  });
+
   it("fails closed when the same-origin Travel globe is blank", async () => {
     expect(TRAVEL_GLOBE_PATH).toBe(
       "/maps/natural-earth-countries-110m-v5.1.2.geojson",

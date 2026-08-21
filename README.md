@@ -28,34 +28,68 @@ derived from that shared history instead of maintaining competing totals.
 Every value below comes from the deterministic fictional demo generator. No
 personal database or real financial data is used to build these images.
 
+### Dashboard — Your whole financial picture
+
+See net worth, cash movement, holdings, liabilities, and recent activity together without stitching totals across tools.
+
 <p align="center">
-  <img src="docs/images/light/dashboard.png" width="49%" alt="LocalFi dashboard in light mode showing fictional net worth and cash history" />
-  <img src="docs/images/dark/dashboard.png" width="49%" alt="LocalFi dashboard in dark mode showing fictional net worth and cash history" />
+  <img src="docs/images/light/dashboard.png" width="49%" alt="LocalFi Dashboard in light mode with net-worth totals, history chart, liabilities, and cash overview" />
+  <img src="docs/images/dark/dashboard.png" width="49%" alt="LocalFi Dashboard in dark mode with net-worth totals, history chart, liabilities, and cash overview" />
 </p>
 
-<details>
-<summary><strong>Light theme feature gallery</strong></summary>
-<p align="center">
-  <img src="docs/images/light/accounts.png" width="49%" alt="LocalFi light-mode accounts view" />
-  <img src="docs/images/light/transactions.png" width="49%" alt="LocalFi light-mode transaction filters, totals, and pending queue" />
-  <img src="docs/images/light/budgets.png" width="49%" alt="LocalFi light-mode categories and budgets" />
-  <img src="docs/images/light/reports.png" width="49%" alt="LocalFi light-mode cash-flow reports" />
-  <img src="docs/images/light/ledger.png" width="49%" alt="LocalFi light-mode verified ledger explorer" />
-  <img src="docs/images/light/travel.png" width="49%" alt="LocalFi light-mode travel itinerary" />
-</p>
-</details>
+### Accounts — Balances with their history attached
 
-<details>
-<summary><strong>Dark theme feature gallery</strong></summary>
+Review assets and liabilities alongside the net-worth timeline derived from the same financial record.
+
 <p align="center">
-  <img src="docs/images/dark/accounts.png" width="49%" alt="LocalFi dark-mode accounts view" />
-  <img src="docs/images/dark/transactions.png" width="49%" alt="LocalFi dark-mode transaction filters, totals, and pending queue" />
-  <img src="docs/images/dark/budgets.png" width="49%" alt="LocalFi dark-mode categories and budgets" />
-  <img src="docs/images/dark/reports.png" width="49%" alt="LocalFi dark-mode cash-flow reports" />
-  <img src="docs/images/dark/ledger.png" width="49%" alt="LocalFi dark-mode verified ledger explorer" />
-  <img src="docs/images/dark/travel.png" width="49%" alt="LocalFi dark-mode travel itinerary" />
+  <img src="docs/images/light/accounts.png" width="49%" alt="LocalFi Accounts in light mode with net-worth totals and detailed asset and liability balance tables" />
+  <img src="docs/images/dark/accounts.png" width="49%" alt="LocalFi Accounts in dark mode with net-worth totals and detailed asset and liability balance tables" />
 </p>
-</details>
+
+### Transactions — Every movement, easy to trace
+
+Filter confirmed activity, inspect totals, and keep pending entries visible before they become financial facts.
+
+<p align="center">
+  <img src="docs/images/light/transactions.png" width="49%" alt="LocalFi Transactions in light mode with filters, totals, expense breakdown, and pending entries" />
+  <img src="docs/images/dark/transactions.png" width="49%" alt="LocalFi Transactions in dark mode with filters, totals, expense breakdown, and pending entries" />
+</p>
+
+### Budgets — Plans measured against reality
+
+Compare category limits with ledger-derived spending and move money between priorities without losing the audit trail.
+
+<p align="center">
+  <img src="docs/images/light/budgets.png" width="49%" alt="LocalFi Budgets in light mode with category spending, monthly limits, remaining amounts, and budget moves" />
+  <img src="docs/images/dark/budgets.png" width="49%" alt="LocalFi Budgets in dark mode with category spending, monthly limits, remaining amounts, and budget moves" />
+</p>
+
+### Reports — Cash flow you can explain
+
+Read income, expenses, savings rate, and category trends as projections of the same underlying ledger.
+
+<p align="center">
+  <img src="docs/images/light/reports.png" width="49%" alt="LocalFi Reports in light mode with cash-flow statement, savings rate, and spending breakdown" />
+  <img src="docs/images/dark/reports.png" width="49%" alt="LocalFi Reports in dark mode with cash-flow statement, savings rate, and spending breakdown" />
+</p>
+
+### Ledger — The immutable record behind every total
+
+Verify the hash-linked event chain and open any entry to inspect its balanced movements and provenance.
+
+<p align="center">
+  <img src="docs/images/light/ledger.png" width="49%" alt="LocalFi Ledger in light mode with verified hash-linked events and balanced movement details" />
+  <img src="docs/images/dark/ledger.png" width="49%" alt="LocalFi Ledger in dark mode with verified hash-linked events and balanced movement details" />
+</p>
+
+### Travel — A journey, not just a checklist
+
+Map visited cities, connect each stop to its origin, and keep the full itinerary useful beside the route.
+
+<p align="center">
+  <img src="docs/images/light/travel.png" width="49%" alt="LocalFi Travel in light mode with an offline world globe, connected city route, and 11-city itinerary" />
+  <img src="docs/images/dark/travel.png" width="49%" alt="LocalFi Travel in dark mode with an offline world globe, connected city route, and 11-city itinerary" />
+</p>
 
 ## Ports and services
 
