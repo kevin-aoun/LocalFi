@@ -84,7 +84,8 @@ describe("writer lease", () => {
   it("allows only one writer across independent Node processes", async ({ skip }) => {
     const dbPath = path.join(tempDirectory(), "budget.db");
     const contenderSource = `
-      import { acquireWriterLease } from './lib/db/writer-lease.ts';
+      import writerLease from './lib/db/writer-lease.ts';
+      const { acquireWriterLease } = writerLease;
       try {
         const lease = await acquireWriterLease(process.argv[1]);
         await lease.release();
@@ -96,19 +97,20 @@ describe("writer lease", () => {
     `;
     const orchestratorSource = `
       import { spawnSync } from 'node:child_process';
-      import { acquireWriterLease } from './lib/db/writer-lease.ts';
+      import writerLease from './lib/db/writer-lease.ts';
+      const { acquireWriterLease } = writerLease;
       const dbPath = process.argv[1];
       const contenderSource = process.argv[2];
       const lease = await acquireWriterLease(dbPath);
       const held = spawnSync(
         process.execPath,
-        ['--input-type=module', '--no-warnings', '-e', contenderSource, dbPath],
+        ['--import', 'tsx', '--input-type=module', '--no-warnings', '-e', contenderSource, dbPath],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
       await lease.release();
       const after = spawnSync(
         process.execPath,
-        ['--input-type=module', '--no-warnings', '-e', contenderSource, dbPath],
+        ['--import', 'tsx', '--input-type=module', '--no-warnings', '-e', contenderSource, dbPath],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
       console.log(JSON.stringify({
@@ -121,6 +123,8 @@ describe("writer lease", () => {
     const run = spawnSync(
       process.execPath,
       [
+        "--import",
+        "tsx",
         "--input-type=module",
         "--no-warnings",
         "-e",
