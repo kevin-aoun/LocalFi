@@ -66,7 +66,11 @@ export async function runDbRestore(args = process.argv.slice(2)) {
 
   const lease = await acquireWriterLease(options.dbPath);
   try {
-    const result = await restoreDatabase({ ...options, lease });
+    const result = await restoreDatabase({
+      ...options,
+      lease,
+      passphrase: process.env.LOCALFI_VAULT_PASSPHRASE,
+    });
     lease.assertOwned();
     console.log(`Validated restore source: ${result.sourcePath}`);
     console.log(`Target database: ${result.dbPath}`);

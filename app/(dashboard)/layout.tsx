@@ -1,10 +1,17 @@
 import { Sidebar } from "@/components/shared/sidebar";
+import { requireVaultRequestAuthorization } from "@/lib/vault/access";
+import { redirect } from "next/navigation";
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  try {
+    await requireVaultRequestAuthorization();
+  } catch {
+    redirect("/vault");
+  }
   return (
     <div className="flex h-screen">
       <Sidebar />

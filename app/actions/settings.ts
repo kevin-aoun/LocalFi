@@ -5,6 +5,11 @@ import { settings, quickCommands } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { assertCents, type Cents } from "@/lib/money";
 import { revalidate } from "@/lib/revalidate";
+import { parseInactivityTimeout } from "@/lib/vault/passphrase";
+import {
+  DEFAULT_INACTIVITY_MINUTES,
+  vaultSessionManager,
+} from "@/lib/vault/session";
 
 export type QuickCommand = {
   id: number;
@@ -20,6 +25,7 @@ export type Settings = {
   accentColor: string;
   theme: "light" | "dark" | "system";
   showLedger: boolean;
+  idleTimeoutMinutes: number;
   quickCommands: QuickCommand[];
 };
 
@@ -34,6 +40,7 @@ export async function getSettings(): Promise<Settings> {
           accentColor: "default",
           theme: "system" as const,
           showLedger: false,
+          idleTimeoutMinutes: DEFAULT_INACTIVITY_MINUTES,
         },
       commands: await db.select().from(quickCommands),
     };
@@ -44,6 +51,7 @@ export async function getSettings(): Promise<Settings> {
     accentColor: settingsRow.accentColor,
     theme: settingsRow.theme,
     showLedger: settingsRow.showLedger,
+    idleTimeoutMinutes: settingsRow.idleTimeoutMinutes,
     quickCommands: commands.map(cmd => ({
       id: cmd.id,
       command: cmd.command,
@@ -56,6 +64,8 @@ export async function getSettings(): Promise<Settings> {
 
 export async function updateSettings(newSettings: Settings) {
   try {
+
+    const idleTimeoutMinutes = parseInactivityTimeout(newSettings.idleTimeoutMinutes);
 
     for (const cmd of newSettings.quickCommands) {
       assertCents(cmd.amountCents, `quick command "${cmd.command}" amount`);
@@ -72,6 +82,7 @@ export async function updateSettings(newSettings: Settings) {
             accentColor: newSettings.accentColor,
             theme: newSettings.theme,
             showLedger: newSettings.showLedger,
+            idleTimeoutMinutes,
             updatedAt: new Date(),
           })
           .where(eq(settings.id, existingSettings[0].id));
@@ -81,6 +92,7 @@ export async function updateSettings(newSettings: Settings) {
           accentColor: newSettings.accentColor,
           theme: newSettings.theme,
           showLedger: newSettings.showLedger,
+          idleTimeoutMinutes,
         });
       }
 
@@ -98,6 +110,8 @@ export async function updateSettings(newSettings: Settings) {
         );
       }
     });
+
+    await vaultSessionManager.setInactivityTimeout(idleTimeoutMinutes);
 
     revalidate("/", "/settings", "/ledger");
     return { success: true };

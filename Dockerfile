@@ -13,8 +13,6 @@ RUN --mount=type=cache,id=localfi-bun-cache-v1,target=/root/.bun/install/cache \
 COPY --from=node-toolchain /usr/local/bin/node /usr/local/bin/node
 COPY . .
 
-RUN mkdir -p data
-RUN bun run db:setup
 RUN --mount=type=cache,id=localfi-next-cache,target=/app/.next/cache bun run build
 
 FROM node:20-alpine AS runner
@@ -28,11 +26,13 @@ RUN adduser --system --uid 1001 nextjs
 
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/data ./data
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle/migrations ./drizzle/migrations
 COPY --from=builder /app/node_modules/sql.js ./node_modules/sql.js
+COPY --from=builder /app/node_modules/libsodium-sumo ./node_modules/libsodium-sumo
+COPY --from=builder /app/node_modules/libsodium-wrappers-sumo ./node_modules/libsodium-wrappers-sumo
 
 RUN chmod -R a+rwX /app/.next
+RUN install -d -o nextjs -g nodejs -m 0700 /app/data
 
 USER nextjs
 

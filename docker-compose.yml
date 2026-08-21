@@ -1,9 +1,63 @@
 services:
+  data-permissions:
+    image: alpine:3.22
+    user: "0:0"
+    environment:
+      - LOCALFI_DATA_UID=${DOCKER_UID:-1000}
+      - LOCALFI_DATA_GID=${DOCKER_GID:-1000}
+      - LOCALFI_VAULT_BOOTSTRAP_TOKEN=${LOCALFI_VAULT_BOOTSTRAP_TOKEN:-}
+    volumes:
+      - ./data:/app/data
+    command:
+      - sh
+      - -euc
+      - |
+        case "$$LOCALFI_DATA_UID:$$LOCALFI_DATA_GID" in
+          *[!0-9:]*|:*|*:|*:*:*) echo "Invalid DOCKER_UID/DOCKER_GID" >&2; exit 1 ;;
+        esac
+        requires_bootstrap=1
+        if [ -f /app/data/budget.db ]; then
+          vault_magic="$$(od -An -tx1 -N8 /app/data/budget.db 2>/dev/null | tr -d ' \n')"
+          if [ "$$vault_magic" = "4c465641554c5400" ]; then requires_bootstrap=0; fi
+        fi
+        if [ "$$requires_bootstrap" -eq 1 ]; then
+          token_length=$${#LOCALFI_VAULT_BOOTSTRAP_TOKEN}
+          if [ "$$token_length" -lt 24 ] || [ "$$token_length" -gt 512 ]; then
+            echo "LOCALFI_VAULT_BOOTSTRAP_TOKEN must contain 24-512 characters for first-run setup or legacy conversion." >&2
+            exit 1
+          fi
+        fi
+        hardlink_marker=/tmp/localfi-hardlink-refused
+        rm -f "$$hardlink_marker"
+        find /app/data -xdev -type f -exec sh -euc '
+          marker=$$1
+          shift
+          for file do
+            links=$$(stat -c %h "$$file" 2>/dev/null) || links=invalid
+            if [ "$$links" != 1 ]; then
+              : > "$$marker"
+              break
+            fi
+          done
+        ' sh "$$hardlink_marker" {} +
+        if [ -e "$$hardlink_marker" ]; then
+          echo "Refusing data preflight: every regular file must have exactly one hard link." >&2
+          exit 1
+        fi
+        find /app/data -xdev -type d -exec chown "$$LOCALFI_DATA_UID:$$LOCALFI_DATA_GID" {} \;
+        find /app/data -xdev -type d -exec chmod 0700 {} \;
+        find /app/data -xdev -type f -exec chown "$$LOCALFI_DATA_UID:$$LOCALFI_DATA_GID" {} \;
+        find /app/data -xdev -type f -exec chmod 0600 {} \;
+    restart: "no"
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
     user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    depends_on:
+      data-permissions:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:1313:1313"
     environment:
@@ -12,6 +66,7 @@ services:
       - NEXT_PUBLIC_APP_URL=http://localhost:1313
       - NEEDLE_URL=http://needle:8765
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
+      - LOCALFI_VAULT_BOOTSTRAP_TOKEN=${LOCALFI_VAULT_BOOTSTRAP_TOKEN:-}
     volumes:
       - ./data:/app/data
     restart: unless-stopped

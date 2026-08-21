@@ -1,6 +1,8 @@
 
 import path from "node:path";
 
+import { authorizeDatabaseVaultFromEnvironment } from "../lib/db/client";
+
 function flag(argv: string[], name: string): boolean {
   return argv.includes(`--${name}`);
 }
@@ -23,6 +25,14 @@ async function main() {
   const dryRun = !apply;
 
   process.env.BUDGET_DB_PATH = dbPath;
+
+  if (flag(argv, "migrate") && process.env.LOCALFI_VAULT_TEST_MODE !== "plaintext") {
+    throw new Error(
+      "--migrate is a legacy plaintext-only path; run the encryption-aware db:upgrade command.",
+    );
+  }
+  const releaseAuthorization = await authorizeDatabaseVaultFromEnvironment();
+  try {
 
   console.log("Historical net-worth reconstruction");
   console.log(`  database:  ${dbPath}`);
@@ -92,6 +102,9 @@ async function main() {
       console.log("         (they will be marked source = 'reconstructed', and any day that already");
       console.log("          has a recorded snapshot will be skipped, not replaced).");
     }
+  }
+  } finally {
+    await releaseAuthorization();
   }
 }
 

@@ -4,20 +4,27 @@ import {
   existsSync,
   fsyncSync,
   mkdirSync,
-  mkdtempSync,
   openSync,
   readFileSync,
   renameSync,
-  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
   writeSync,
 } from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
+import initSqlJs, { type Database } from "sql.js";
 import type { WriterLease } from "./writer-lease";
+import {
+  decryptVaultGeneration,
+  destroyVaultKey,
+  encryptVaultGeneration,
+  isVaultEnvelope,
+  type UnlockedVaultKey,
+  unlockVaultEnvelope,
+} from "../vault/envelope";
+import { VaultLockedError } from "../vault/errors";
+import { readSensitiveGeneration, writeEncryptedGenerationAtomically } from "../vault/paths";
 
 export const SCHEMA_JOURNAL_TABLE = "localfi_schema_journal";
 
@@ -298,6 +305,8 @@ function migrationState(db: Database, idx: number): SchemaState {
         columns(db, "budgets").has("display_order"),
         indexExists(db, "budgets_display_order_idx"),
       ]);
+    case 16:
+      return columns(db, "settings").has("idle_timeout_minutes") ? "applied" : "absent";
     default:
       throw new Error(
         `Migration ${String(idx).padStart(4, "0")} has no upgrade verifier; ` +
@@ -474,47 +483,39 @@ function executeMigrationSql(db: Database, sql: string) {
 
 async function applyOwnedMigration(
   db: Database,
-  SQL: SqlJsStatic,
-  migrationIndex: 9 | 10 | 12,
+  migrationIndex: 12,
 ): Promise<Database> {
-  if (migrationIndex === 12) {
-    const entries = loadMigrationEntries();
-    const entry = entries.find((candidate) => candidate.idx === 12);
-    if (!entry) throw new Error("Migration 0012 is absent from the journal");
-    const { applyImmutableLedgerMigration } = await import("./migrate-to-immutable-ledger");
-    applyImmutableLedgerMigration(db, entry.sql);
-    return db;
-  }
-  const migrationId = String(migrationIndex).padStart(4, "0");
-  const stagingDirectory = mkdtempSync(path.join(os.tmpdir(), `localfi-upgrade-${migrationId}-`));
-  const stagingPath = path.join(stagingDirectory, "budget.db");
-  try {
-    writeFileSync(stagingPath, Buffer.from(db.export()), { mode: 0o600 });
-    if (migrationIndex === 9) {
-      const { migrateToLedgerSemantics } = await import("./migrate-to-ledger-semantics");
-      await migrateToLedgerSemantics({ dbPath: stagingPath });
-    } else {
-      const { migrateToCurrencySafeHoldings } = await import(
-        "./migrate-to-currency-safe-holdings"
-      );
-      await migrateToCurrencySafeHoldings({ dbPath: stagingPath });
-    }
-    const migrated = new SQL.Database(readFileSync(stagingPath));
-    db.close();
-    return migrated;
-  } finally {
-    rmSync(stagingDirectory, { recursive: true, force: true });
-  }
+  const entries = loadMigrationEntries();
+  const entry = entries.find((candidate) => candidate.idx === migrationIndex);
+  if (!entry) throw new Error("Migration 0012 is absent from the journal");
+  const { applyImmutableLedgerMigration } = await import("./migrate-to-immutable-ledger");
+  applyImmutableLedgerMigration(db, entry.sql);
+  return db;
 }
 
 async function applyMigration(
   db: Database,
-  SQL: SqlJsStatic,
   entry: MigrationEntry,
 ): Promise<Database> {
   const countsBefore = userTableCounts(db);
-  const migrated = entry.idx === 9 || entry.idx === 10 || entry.idx === 12
-    ? await applyOwnedMigration(db, SQL, entry.idx)
+  if (entry.idx === 9) {
+    const mixedTransfers = Number(db.exec(
+      `SELECT COUNT(*)
+         FROM transactions t
+         JOIN accounts source ON source.id = t.account_id
+         JOIN accounts destination ON destination.id = t.transfer_account_id
+        WHERE t.transfer_account_id IS NOT NULL
+          AND UPPER(TRIM(source.currency)) <> UPPER(TRIM(destination.currency))`,
+    )[0]?.values[0]?.[0] ?? 0);
+    if (mixedTransfers > 0) {
+      throw new Error(
+        `Migration 0009 found ${mixedTransfers} cross-currency transfer(s). ` +
+          "Resolve them before upgrading because LocalFi has no FX model.",
+      );
+    }
+  }
+  const migrated = entry.idx === 12
+    ? await applyOwnedMigration(db, entry.idx)
     : (executeMigrationSql(db, entry.sql), db);
   migrated.run("PRAGMA foreign_keys = ON");
   if (migrationState(migrated, entry.idx) !== "applied") {
@@ -654,11 +655,79 @@ function verifyReadyDatabase(db: Database, entries: MigrationEntry[]) {
   assertDatabaseHealthy(db);
 }
 
+export type UpgradeDatabaseImageResult = {
+  image: Uint8Array;
+  changed: boolean;
+  adopted: string[];
+  applied: string[];
+  pending: string[];
+};
+
+export async function upgradeDatabaseImage(
+  originalImage?: Uint8Array,
+): Promise<UpgradeDatabaseImageResult> {
+  const entries = loadMigrationEntries();
+  const SQL = await initSqlJs({
+    locateFile: (file) => path.resolve(process.cwd(), "node_modules/sql.js/dist", file),
+  });
+  let db: Database;
+  try {
+    db = originalImage && originalImage.byteLength > 0
+      ? new SQL.Database(Uint8Array.from(originalImage))
+      : new SQL.Database();
+    db.exec("SELECT name FROM sqlite_master LIMIT 1");
+  } catch (error) {
+    throw new Error(`Could not open SQLite image: ${(error as Error).message}`, { cause: error });
+  }
+
+  const adopted: string[] = [];
+  const applied: string[] = [];
+  try {
+    const hasJournal = tableExists(db, SCHEMA_JOURNAL_TABLE);
+    const normalizedLegacyBaseline = !hasJournal && normalizeLegacyBaseline(db);
+    const appliedCount = hasJournal
+      ? validateJournalPrefix(db, entries)
+      : detectAppliedPrefix(db, entries);
+    const pending = entries.slice(appliedCount);
+    const changed = !hasJournal || normalizedLegacyBaseline || pending.length > 0;
+
+    if (!hasJournal) {
+      createSchemaJournal(db);
+      for (const entry of entries.slice(0, appliedCount)) {
+        insertJournalEntry(db, entry, "adopted");
+        adopted.push(entry.tag);
+      }
+    }
+
+    for (const entry of pending) {
+      db = await applyMigration(db, entry);
+      applied.push(entry.tag);
+    }
+    verifyReadyDatabase(db, entries);
+    return {
+      image: changed ? Uint8Array.from(db.export()) : Uint8Array.from(originalImage ?? db.export()),
+      changed,
+      adopted,
+      applied,
+      pending: pending.map((entry) => entry.tag),
+    };
+  } finally {
+    try {
+      db.close();
+    } catch {
+
+    }
+  }
+}
+
 
 export async function upgradeDatabase(options: {
   dbPath: string;
   dryRun?: boolean;
   lease: WriterLease;
+  vaultKey?: UnlockedVaultKey;
+  passphrase?: string;
+  allowLegacyPlaintext?: boolean;
 }): Promise<UpgradeDatabaseResult> {
   const dbPath = path.resolve(options.dbPath);
   if (path.resolve(options.lease.dbPath) !== dbPath) {
@@ -673,83 +742,131 @@ export async function upgradeDatabase(options: {
   if (hadOriginal && !statSync(dbPath).isFile()) {
     throw new DatabaseUpgradeError(dbPath, null, "the target is not a regular file");
   }
-  const originalBytes = hadOriginal ? readFileSync(dbPath) : Buffer.alloc(0);
-  const SQL = await initSqlJs({
-    locateFile: (file) => path.resolve(process.cwd(), "node_modules/sql.js/dist", file),
-  });
-  let db: Database;
-  try {
-
-
-    db = originalBytes.length > 0
-      ? new SQL.Database(Uint8Array.from(originalBytes))
-      : new SQL.Database();
-    db.exec("SELECT name FROM sqlite_master LIMIT 1");
-  } catch (error) {
-    throw new DatabaseUpgradeError(dbPath, null, (error as Error).message);
+  let originalBytes = hadOriginal
+    ? readSensitiveGeneration(dbPath, { requireOwnerOnly: false })
+    : Buffer.alloc(0);
+  const encrypted = originalBytes.length > 0 && isVaultEnvelope(originalBytes);
+  if (encrypted) originalBytes = readSensitiveGeneration(dbPath);
+  const allowLegacyPlaintext = options.allowLegacyPlaintext === true ||
+    process.env.LOCALFI_VAULT_TEST_MODE === "plaintext";
+  if (!encrypted && !allowLegacyPlaintext) {
+    throw new DatabaseUpgradeError(
+      dbPath,
+      null,
+      originalBytes.length === 0
+        ? "an uninitialized vault must be created through the setup API"
+        : "legacy plaintext is accepted only by the explicit vault setup migration",
+    );
   }
-
+  let ownedKey: UnlockedVaultKey | null = null;
+  let plaintext = originalBytes;
+  if (encrypted) {
+    if (options.vaultKey) {
+      plaintext = Buffer.from(await decryptVaultGeneration(originalBytes, options.vaultKey));
+    } else if (options.passphrase !== undefined) {
+      const unlocked = await unlockVaultEnvelope(originalBytes, options.passphrase);
+      ownedKey = unlocked.key;
+      plaintext = Buffer.from(unlocked.plaintext);
+    } else {
+      throw new VaultLockedError("Database upgrade requires an unlocked vault key.");
+    }
+  }
   let backupPath: string | null = null;
-  const adopted: string[] = [];
-  const applied: string[] = [];
   try {
-    const hasJournal = tableExists(db, SCHEMA_JOURNAL_TABLE);
-    const normalizedLegacyBaseline = !hasJournal && normalizeLegacyBaseline(db);
-    const appliedCount = hasJournal
-      ? validateJournalPrefix(db, entries)
-      : detectAppliedPrefix(db, entries);
-    const pending = entries.slice(appliedCount);
-    const changed = !hasJournal || normalizedLegacyBaseline || pending.length > 0;
+    const result = await upgradeDatabaseImage(plaintext);
 
-    if (changed && originalBytes.length > 0 && !dryRun) {
+    if (result.changed && originalBytes.length > 0 && !dryRun && !encrypted) {
       options.lease.assertOwned();
       backupPath = createBackup(
         dbPath,
         originalBytes,
-        pending[0]?.tag ?? "schema-journal",
+        result.pending[0] ?? "schema-journal",
       );
     }
-
-    if (!hasJournal) {
-      createSchemaJournal(db);
-      for (const entry of entries.slice(0, appliedCount)) {
-        insertJournalEntry(db, entry, "adopted");
-        adopted.push(entry.tag);
+    if (result.changed && encrypted && !dryRun) {
+      const backupDirectory = path.join(path.dirname(dbPath), "backups");
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const basename = path.basename(dbPath, path.extname(dbPath));
+      backupPath = path.join(
+        backupDirectory,
+        `${basename}.${stamp}.${process.pid}.pre-upgrade-${result.pending[0] ?? "schema-journal"}.db`,
+      );
+      await writeEncryptedGenerationAtomically(backupPath, originalBytes, {
+        replace: false,
+        purpose: "pre-upgrade",
+      });
+    }
+    if (result.changed && !dryRun) {
+      options.lease.assertOwned();
+      const upgradedBytes = encrypted
+        ? Buffer.from(await encryptVaultGeneration(result.image, options.vaultKey ?? ownedKey!))
+        : Buffer.from(result.image);
+      if (encrypted) {
+        await writeEncryptedGenerationAtomically(dbPath, upgradedBytes, {
+          replace: true,
+          purpose: "upgrade",
+        });
+      } else {
+        writeBytesAtomically(dbPath, upgradedBytes);
       }
-    }
-
-    for (const entry of pending) {
-      db = await applyMigration(db, SQL, entry);
-      applied.push(entry.tag);
-    }
-    verifyReadyDatabase(db, entries);
-
-    if (changed && !dryRun) {
       options.lease.assertOwned();
-      const upgradedBytes = Buffer.from(db.export());
-      writeBytesAtomically(dbPath, upgradedBytes);
-      options.lease.assertOwned();
-      const persisted = new SQL.Database(readFileSync(dbPath));
-      try {
-        verifyReadyDatabase(persisted, entries);
-      } finally {
-        persisted.close();
+      if (encrypted) {
+        const verified = await decryptVaultGeneration(
+          readSensitiveGeneration(dbPath),
+          options.vaultKey ?? ownedKey!,
+        );
+        await upgradeDatabaseImage(verified).then((check) => {
+          if (check.changed) throw new Error("Persisted encrypted database still needs migrations");
+        });
+        verified.fill(0);
+      } else {
+        const SQL = await initSqlJs({
+          locateFile: (file) => path.resolve(process.cwd(), "node_modules/sql.js/dist", file),
+        });
+        const persisted = new SQL.Database(readFileSync(dbPath));
+        try {
+          verifyReadyDatabase(persisted, entries);
+        } finally {
+          persisted.close();
+        }
       }
     }
 
     return {
       dbPath,
       backupPath,
-      changed,
+      changed: result.changed,
       dryRun,
-      adopted,
-      applied,
-      pending: pending.map((entry) => entry.tag),
+      adopted: result.adopted,
+      applied: result.applied,
+      pending: result.pending,
     };
   } catch (error) {
     if (!dryRun) {
       try {
-        if (hadOriginal) {
+        if (hadOriginal && !backupPath) {
+          if (encrypted) {
+            const backupDirectory = path.join(path.dirname(dbPath), "backups");
+            const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+            const basename = path.basename(dbPath, path.extname(dbPath));
+            backupPath = path.join(
+              backupDirectory,
+              `${basename}.${stamp}.${process.pid}.failed-upgrade.db`,
+            );
+            await writeEncryptedGenerationAtomically(backupPath, originalBytes, {
+              replace: false,
+              purpose: "failed-upgrade",
+            });
+          } else {
+            backupPath = createBackup(dbPath, originalBytes, "failed-upgrade");
+          }
+        }
+        if (hadOriginal && encrypted) {
+          await writeEncryptedGenerationAtomically(dbPath, originalBytes, {
+            replace: true,
+            purpose: "upgrade-recovery",
+          });
+        } else if (hadOriginal) {
           const recoveryBytes = backupPath ? readFileSync(backupPath) : originalBytes;
           writeBytesAtomically(dbPath, recoveryBytes);
         } else if (existsSync(dbPath)) {
@@ -765,10 +882,7 @@ export async function upgradeDatabase(options: {
     }
     throw new DatabaseUpgradeError(dbPath, backupPath, (error as Error).message);
   } finally {
-    try {
-      db.close();
-    } catch {
-
-    }
+    plaintext.fill(0);
+    if (ownedKey) destroyVaultKey(ownedKey);
   }
 }

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -15,6 +16,12 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { runDbUpgrade } from "../../../scripts/db-upgrade";
 import { toDateKey } from "../../dates";
+import {
+  createVaultEnvelope,
+  destroyVaultKey,
+  isVaultEnvelope,
+  unlockVaultEnvelope,
+} from "../../vault/envelope";
 import {
   DatabaseUpgradeError,
   SCHEMA_JOURNAL_TABLE,
@@ -122,16 +129,75 @@ function open(file: string): Database {
   return new SQL.Database(readFileSync(file));
 }
 
-async function runUpgrade(dbPath: string, dryRun = false) {
+async function runUpgrade(dbPath: string, dryRun = false, passphrase?: string) {
   const lease = await acquireWriterLease(dbPath);
   try {
-    return await upgradeDatabase({ dbPath, dryRun, lease });
+    return await upgradeDatabase({ dbPath, dryRun, lease, passphrase });
   } finally {
     await lease.release();
   }
 }
 
 describe("journaled pre-open upgrade", () => {
+  it("adds the bounded inactivity-timeout setting with its 15-minute default", async () => {
+    const dbPath = tempDbPath();
+    const db = new SQL.Database();
+    replayThrough(db, 15);
+    db.run(
+      "INSERT INTO settings (user_name, accent_color, theme, show_ledger) " +
+        "VALUES ('Existing owner', 'default', 'system', 0)",
+    );
+    createJournalThrough(db, 15);
+    writeFileSync(dbPath, Buffer.from(db.export()));
+    db.close();
+
+    await expect(runUpgrade(dbPath)).resolves.toMatchObject({
+      applied: ["0016_vault-settings"],
+    });
+
+    const upgraded = open(dbPath);
+    try {
+      expect(
+        upgraded.exec(
+          "SELECT user_name, idle_timeout_minutes FROM settings",
+        )[0].values,
+      ).toEqual([["Existing owner", 15]]);
+      expect(
+        upgraded.exec(
+          `SELECT tag, origin FROM ${SCHEMA_JOURNAL_TABLE} WHERE idx = 16`,
+        )[0].values,
+      ).toEqual([["0016_vault-settings", "applied"]]);
+    } finally {
+      upgraded.close();
+    }
+  });
+
+  it("upgrades encrypted generations without persisting SQLite plaintext", async () => {
+    const passphrase = "disposable encrypted upgrade passphrase";
+    const dbPath = writePre0009Fixture();
+    const originalPlaintext = readFileSync(dbPath);
+    const created = await createVaultEnvelope(originalPlaintext, passphrase);
+    writeFileSync(dbPath, created.envelope);
+    chmodSync(dbPath, 0o600);
+    destroyVaultKey(created.key);
+
+    const result = await runUpgrade(dbPath, false, passphrase);
+
+    expect(result.changed).toBe(true);
+    expect(isVaultEnvelope(readFileSync(dbPath))).toBe(true);
+    expect(result.backupPath && isVaultEnvelope(readFileSync(result.backupPath))).toBe(true);
+    const unlocked = await unlockVaultEnvelope(readFileSync(dbPath), passphrase);
+    try {
+      const db = new SQL.Database(unlocked.plaintext);
+      expect(db.exec(`SELECT COUNT(*) FROM ${SCHEMA_JOURNAL_TABLE}`)[0].values[0][0])
+        .toBe(migrationEntries().length);
+      db.close();
+    } finally {
+      unlocked.plaintext.fill(0);
+      destroyVaultKey(unlocked.key);
+    }
+  });
+
   it("accepts the pinned pre-correction 0009 checksum and repairs its generated date", async () => {
     const previousTimezone = process.env.TZ;
     process.env.TZ = "Pacific/Niue";
@@ -160,6 +226,7 @@ describe("journaled pre-open upgrade", () => {
           "0013_ledger-explorer",
           "0014_category-order",
           "0015_budget-order",
+          "0016_vault-settings",
         ],
       });
       const upgraded = open(dbPath);
@@ -266,6 +333,7 @@ describe("journaled pre-open upgrade", () => {
       expect(journalRows[13]).toEqual([13, "0013_ledger-explorer", "applied"]);
       expect(journalRows[14]).toEqual([14, "0014_category-order", "applied"]);
       expect(journalRows[15]).toEqual([15, "0015_budget-order", "applied"]);
+      expect(journalRows[16]).toEqual([16, "0016_vault-settings", "applied"]);
       for (const [idx, tag] of [[9, "0009_ledger-semantics"], [12, "0012_immutable-ledger"]] as const) {
         const expectedChecksum = createHash("sha256")
           .update(readFileSync(path.join(MIGRATIONS, `${tag}.sql`), "utf8"))
@@ -322,6 +390,9 @@ describe("journaled pre-open upgrade", () => {
       expect(
         (db.exec("PRAGMA table_info(transactions)")[0]?.values ?? []).map((row) => row[1]),
       ).toEqual(expect.arrayContaining(["direction", "currency"]));
+      expect(
+        (db.exec("PRAGMA table_info(settings)")[0]?.values ?? []).map((row) => row[1]),
+      ).toContain("idle_timeout_minutes");
     } finally {
       db.close();
     }

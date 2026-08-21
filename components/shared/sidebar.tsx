@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Home,
   ArrowLeftRight,
@@ -18,6 +18,7 @@ import {
   Info,
   SlidersHorizontal,
   ListTree,
+  LockKeyhole,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useState } from "react";
@@ -35,6 +36,7 @@ import {
 import { ThemeToggle } from "./theme-toggle";
 import { PrivacyToggle } from "./privacy-toggle";
 import { buildSidebarView, type SidebarAssetRow } from "./sidebar-assets";
+import { VaultSessionCoordinator } from "@/components/vault/vault-session-coordinator";
 
 const navigation = [
   { name: "Home", href: "/", icon: Home },
@@ -50,6 +52,7 @@ const navigation = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [netWorth, setNetWorth] = useState<NetWorthView | null>(null);
   const [accounts, setAccounts] = useState<AccountWithBalance[]>([]);
@@ -59,6 +62,7 @@ export function Sidebar() {
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [locking, setLocking] = useState(false);
 
   const load = useCallback(async () => {
 
@@ -116,8 +120,28 @@ export function Sidebar() {
 
   const view = netWorth ? buildSidebarView({ netWorth, accounts, assets }) : null;
 
+  const lockVault = async () => {
+    setLocking(true);
+    try {
+      const response = await fetch("/api/vault/lock", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      if (!response.ok) throw new Error("Could not contact the vault lock endpoint.");
+      router.push("/vault");
+      router.refresh();
+    } catch (error) {
+      console.error("Failed to lock the vault:", error);
+      setLoadError(error instanceof Error ? error.message : "Could not lock the vault.");
+      setLocking(false);
+    }
+  };
+
   return (
     <div className="flex h-screen w-72 flex-col border-r bg-card">
+      <VaultSessionCoordinator />
       {}
       <div className="flex h-14 items-center gap-2 border-b px-4">
         <BadgeDollarSign className="h-6 w-6 text-primary" aria-hidden="true" />
@@ -376,6 +400,16 @@ export function Sidebar() {
           <div className="flex items-center gap-1">
             <PrivacyToggle />
             <ThemeToggle />
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Lock LocalFi"
+              title="Lock LocalFi"
+              disabled={locking}
+              onClick={() => void lockVault()}
+            >
+              <LockKeyhole className="h-4 w-4" aria-hidden="true" />
+            </Button>
           </div>
         </div>
         <div data-privacy-content className="flex items-center gap-3 rounded-lg bg-muted/50 p-3">

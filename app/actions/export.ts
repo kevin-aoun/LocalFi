@@ -1,9 +1,12 @@
 "use server";
 
 import { statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 
-import { readDb, resolveDbPath } from "@/lib/db/client";
+import {
+  readDb,
+  resolveDbPath,
+  snapshotEncryptedDatabaseGeneration,
+} from "@/lib/db/client";
 import {
   accounts,
   assetHistory,
@@ -20,6 +23,7 @@ import {
 } from "@/lib/db/schema";
 import { isDateKey, toDateKey, todayKey, type DateKey } from "@/lib/dates";
 import type { Cents } from "@/lib/money";
+import { inspectVaultEnvelope, isVaultEnvelope } from "@/lib/vault/envelope";
 import {
   buildTransactionsCsv,
   centsToDecimalString,
@@ -28,8 +32,6 @@ import {
 } from "@/lib/reports";
 
 export type ExportResult<T> = { success: true; data: T } | { error: string };
-
-const SQLITE_MAGIC = "SQLite format 3\0";
 
 function assertRangeKeys(fromKey: string, toKey: string): { fromKey: DateKey; toKey: DateKey } {
   if (!isDateKey(fromKey)) throw new Error(`Invalid start date: expected 'YYYY-MM-DD', got ${String(fromKey)}`);
@@ -198,7 +200,7 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
     const payload = {
       meta: {
         app: "budget",
-        kind: "full-backup",
+        kind: "data-export",
         formatVersion: 1,
         exportedAt: new Date().toISOString(),
 
@@ -210,7 +212,6 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
           amounts:
             "transaction amounts are MAGNITUDES; the direction comes from the category type, or from transferTo for a transfer",
         },
-        sourceFile: resolveDbPath(),
       },
       accounts: raw.accounts.map((row) => ({
         id: row.id,
@@ -313,6 +314,7 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
         accentColor: row.accentColor,
         theme: row.theme,
         showLedger: row.showLedger,
+        idleTimeoutMinutes: row.idleTimeoutMinutes,
         createdAt: instant(row.createdAt),
         updatedAt: instant(row.updatedAt),
       })),
@@ -349,7 +351,7 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
     return {
       success: true,
       data: {
-        fileName: `budget-backup-${todayKey()}.json`,
+        fileName: `budget-data-export-${todayKey()}.json`,
         json,
         byteLength: Buffer.byteLength(json, "utf-8"),
         counts,
@@ -379,23 +381,23 @@ export type DatabaseLocation = {
 
 export async function describeDatabaseLocation(): Promise<ExportResult<DatabaseLocation>> {
   try {
-    const path = resolveDbPath();
-    const backupPath = `${path}.bak`;
-    try {
-      const stat = statSync(path);
-      return {
-        success: true,
-        data: {
+    const data = await readDb(async () => {
+      const path = resolveDbPath();
+      const backupPath = `${path}.bak`;
+      try {
+        const stat = statSync(path);
+        return {
           path,
           backupPath,
           exists: stat.isFile(),
           byteLength: stat.size,
           savedAt: new Date(stat.mtimeMs).toISOString(),
-        },
-      };
-    } catch {
-      return { success: true, data: { path, backupPath, exists: false, byteLength: 0, savedAt: null } };
-    }
+        };
+      } catch {
+        return { path, backupPath, exists: false, byteLength: 0, savedAt: null };
+      }
+    });
+    return { success: true, data };
   } catch (error) {
     console.error("Failed to locate the database file:", error);
     return { error: (error as Error).message || "Failed to locate the database file" };
@@ -407,39 +409,26 @@ export type DatabaseFileData = {
 
   base64: string;
   byteLength: number;
-  path: string;
-
-  savedAt: string | null;
 };
 
 
 export async function exportDatabaseFile(): Promise<ExportResult<DatabaseFileData>> {
   try {
-    const result = await readDb(async () => {
-      const path = resolveDbPath();
-      const stat = statSync(path);
-      if (!stat.isFile()) throw new Error(`${path} is not a regular file`);
+    const snapshot = await snapshotEncryptedDatabaseGeneration();
+    if (!isVaultEnvelope(snapshot.bytes)) {
+      throw new Error("Database snapshot is not a LocalFi vault envelope; refusing to export it.");
+    }
+    await inspectVaultEnvelope(snapshot.bytes);
 
-      const buffer = await readFile(path);
-      if (buffer.length < 512) {
-        throw new Error(`${path} is only ${buffer.length} bytes, which is not a usable database`);
-      }
-      if (buffer.subarray(0, SQLITE_MAGIC.length).toString("binary") !== SQLITE_MAGIC) {
-        throw new Error(`${path} is not a valid SQLite database (bad header): refusing to hand it over as a backup`);
-      }
-
-      return {
-        fileName: `budget-${todayKey()}.db`,
-        base64: buffer.toString("base64"),
-        byteLength: buffer.length,
-        path,
-        savedAt: new Date(stat.mtimeMs).toISOString(),
-      };
-    });
+    const result = {
+      fileName: snapshot.fileName,
+      base64: Buffer.from(snapshot.bytes).toString("base64"),
+      byteLength: snapshot.bytes.byteLength,
+    };
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Failed to read the database file:", error);
-    return { error: (error as Error).message || "Failed to read the database file" };
+    console.error("Failed to export the encrypted database generation:", error);
+    return { error: (error as Error).message || "Failed to export the encrypted database generation" };
   }
 }
