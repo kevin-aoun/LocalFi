@@ -1,4 +1,6 @@
-# LocalFi
+<h1 align="center">
+  <img src="docs/images/localfi-title.png" alt="LocalFi — local-first finance with an immutable ledger" />
+</h1>
 
 LocalFi is a local-first personal finance app for accounts, liabilities,
 transactions, budgets, assets, investments, travel, and net-worth history.
@@ -120,6 +122,45 @@ at the profile's anchor day, binds a child server to an isolated `127.0.0.1`
 port, and builds and starts LocalFi in production mode. It validates all 14
 light/dark images in a temporary staging directory before publishing them, then
 removes only the temporary directory it created.
+
+## Customize your LocalFi
+
+LocalFi is designed to be extended locally: rearrange the dashboard, add a
+report, adapt a workflow, or build a feature for the way you manage money. Start
+your coding agent in the repository root and replace the bracketed text below:
+
+> Understand this LocalFi repository, then help me customize it by **[describe
+> the outcome you want]**. Before editing, read `AGENTS.md`, every scoped rule
+> it identifies for the files you expect to touch, and the relevant parts of
+> `README.md`, `docs/REFERENCE.md`, and `docs/DECISIONS.md`. Trace the existing
+> implementation, its callers, data flow, and nearby tests. Summarize the
+> constraints you found and propose the smallest coherent plan; ask only about
+> choices that would materially change the result. Preserve the local-only
+> privacy model, integer-cents money, local calendar dates, and append-only
+> ledger. Never inspect or derive examples from `data/` or my real database;
+> use fictional fixtures and explicit temporary database paths. Add or update
+> regression tests, then validate every changed path with
+> `bun run validate:agent -- <changed paths>` and run the full validator when
+> the rules require it. Finish by reporting what changed, what was validated,
+> and any remaining risks. Do not commit or push unless I explicitly ask.
+
+That prompt is the handshake, not the rulebook. `AGENTS.md` and the matching
+files in `.claude/rules/` remain the durable constraints as the change crosses
+different parts of the repository.
+
+Common starting points:
+
+| Goal | Start here |
+| --- | --- |
+| Change dashboard composition or visual language | `app/(dashboard)/`, `components/dashboard/`, `.claude/rules/frontend.md` |
+| Add a report or financial calculation | `app/actions/`, `lib/`, `.claude/rules/financial-domain.md` |
+| Extend accounts, transactions, budgets, or investments | `docs/REFERENCE.md`, `lib/db/schema/`, `lib/ledger/` |
+| Add a local integration or provider | Existing service in `lib/`, its Server Action boundary, and the local-only product constraints |
+
+Make customizations on a branch, keep your database and `.bak` recovery copy
+outside Git, and review generated migrations before running them against a real
+profile. If a customization is broadly useful, follow
+[CONTRIBUTING.md](CONTRIBUTING.md) to propose it upstream.
 
 ## Verification
 
