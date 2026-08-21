@@ -77,11 +77,11 @@ misparse while the user still remembers the purchase.
 
 > **Only one process may ever open `data/budget.db`.**
 
-`lib/db/client.ts` serializes writers with an **in-process** FIFO promise chain.
-That lock does not exist across processes, and `saveDb()` rewrites the *entire*
-file via temp→fsync→rename. Two processes writing means last-writer-wins on the
-whole database — not a row. That is the lost-update bug this codebase already
-fixed once, and it would come back worse at the process boundary.
+`lib/db/client.ts` serializes work with an in-process FIFO promise chain and
+holds a cross-process writer lease while the SQLite image is open. Persistence
+still publishes a complete encrypted generation via temp→fsync→rename, so the
+lease is a hard boundary: a CLI, app process, or maintenance command that targets
+an already-open database fails rather than competing for the whole image.
 
 So:
 

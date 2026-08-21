@@ -11,12 +11,13 @@ reasons behind its architecture. Keep this document current when code moves.
 | App shell | `app/layout.tsx`, `app/providers.tsx`, `app/(dashboard)/layout.tsx` | Global styles, providers, sidebar, and page frame |
 | Dashboard routes | `app/(dashboard)/` | Route composition; server pages load data and pass it to client components |
 | Server Actions | `app/actions/` | The application’s read/write boundary for UI features |
-| Feature UI | `components/{accounts,assets,budgets,dashboard,ledger,recurring,reports,settings,transactions}/` | Rendering and local interaction state |
+| Feature UI | `components/{accounts,assets,budgets,dashboard,exports,ledger,recurring,reports,settings,transactions}/` | Rendering and local interaction state; export disclosures live in `components/exports/` |
 | UI primitives | `components/ui/` | shadcn and mapcn components; avoid feature logic here |
 | Domain rules | `lib/{money,dates,cash-balance,budgets,recurrence,reports,prices}.ts` | Pure calculations and validation |
 | Ledger | `lib/ledger/` | Canonical event construction, reads, integrity checks, and projections |
 | Investments | `lib/investments/` | Instrument identity, positions, observations, and purchases |
 | Database | `lib/db/` | sql.js client, migration startup, recovery, schema utilities |
+| Vault | `lib/vault/` | Envelope encryption, owner-only paths, passphrase/recovery, and in-memory sessions |
 | Schema | `lib/db/schema/` | Drizzle table definitions |
 | Migrations | `drizzle/migrations/` | Ordered SQL journal and snapshots; generated, not hand-edited |
 | Tests | `**/__tests__/` | Unit and action/database regression coverage |
@@ -34,7 +35,7 @@ reasons behind its architecture. Keep this document current when code moves.
 | `/reports` | `app/(dashboard)/reports/` | Cash-flow and investment performance |
 | `/travel` | `app/(dashboard)/travel/` | Visited-city map and route history |
 | `/ledger` | `app/(dashboard)/ledger/` | Optional read-only ledger explorer |
-| `/settings` | `app/(dashboard)/settings/page.tsx` | Local preferences and developer controls |
+| `/settings` | `app/(dashboard)/settings/page.tsx` | Local preferences, inactivity timeout, and developer controls |
 
 ## HTTP surface
 
@@ -42,6 +43,11 @@ reasons behind its architecture. Keep this document current when code moves.
 | --- | --- | --- |
 | `GET` | `/api/snapshot` | Confirm the configured snapshot endpoint is available |
 | `POST` | `/api/snapshot` | Record the current daily snapshot |
+| `GET` | `/api/vault/status` | Read the local vault state without unlocking it |
+| `POST` | `/api/vault/setup` | Create or explicitly convert the single-owner vault |
+| `POST` | `/api/vault/unlock` | Unlock with the vault passphrase and issue an opaque local session |
+| `POST` | `/api/vault/lock` | Lock, close the in-memory database, and clear the session |
+| `POST` | `/api/vault/recovery` | Reset the passphrase with the recovery secret and rotate recovery material |
 
 The product UI uses Server Actions rather than a public REST API. Route handlers
 exist only for operations that need an external caller. The snapshot route
@@ -83,6 +89,13 @@ requires a configured `AGENT_API_TOKEN` bearer token.
 | Database upgrades | `lib/db/upgrade.ts`, `bun run db:upgrade` |
 | Rebuildable projections | `lib/ledger/rebuild.ts`, `bun run ledger:rebuild` |
 | Local database path | `BUDGET_DB_PATH`, default `data/budget.db` |
+| Vault envelope and permissions | `lib/vault/envelope.ts`, `lib/vault/paths.ts` |
+| Vault session and timeout | `lib/vault/session.ts`, `settings.idle_timeout_minutes` |
+| Export disclosure boundary | `components/exports/export-disclosure.tsx`, `app/actions/export.ts` |
+| Owner setup | Browser `/vault` flow with one-use `LOCALFI_VAULT_BOOTSTRAP_TOKEN`; `db:init` and `db:setup` refuse headless creation |
+| Headless authorization | `authorizeDatabaseVaultFromEnvironment` around supported CLI callers |
+| Compose permissions | `data-permissions` one-shot service in `docker-compose.yml` |
 
-The default deployment is intentionally unauthenticated and loopback-only.
-Never expose it directly to the internet.
+The default deployment is single-owner, vault-gated, and loopback-only. The
+vault is not a hardened multi-user or internet authentication layer; never
+expose LocalFi directly to the internet. See [SECURITY.md](SECURITY.md).

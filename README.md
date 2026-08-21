@@ -20,15 +20,17 @@
 
 LocalFi is a local-first personal finance app for accounts, liabilities,
 transactions, budgets, assets, investments, travel, and net-worth history.
-Canonical application state lives in one portable SQLite file that stays on
-your machine. LocalFi also maintains a `<database>.bak` recovery copy beside it;
-both files contain private financial data. Confirmed financial facts enter one
+Canonical application state is one portable SQLite image stored on your
+machine as an authenticated encrypted LocalFi vault generation. LocalFi also
+maintains an encrypted `<database>.bak` recovery generation beside it; both
+files still contain sensitive financial data. Confirmed financial facts enter one
 append-only, hash-linked ledger; balances, budgets, reports, and positions are
 derived from that shared history instead of maintaining competing totals.
 
-> **Local-only by design.** LocalFi has no authentication. Keep it on your
-> machine or a trusted network; the default Docker setup binds only to
-> `127.0.0.1`.
+> **Local-only by design.** A single-owner vault passphrase protects access and
+> encrypts the database at rest. Keep LocalFi on your machine; the default
+> Docker setup binds only to `127.0.0.1`, and the vault is not a substitute for
+> full-disk encryption or a hardened multi-user service.
 
 ## Customize your LocalFi
 
@@ -93,7 +95,7 @@ different parts of the repository.
 | Accounts, transactions, budgets, or investments | `docs/REFERENCE.md`, `lib/db/schema/`, `lib/ledger/` |
 | A local integration or provider | The nearest service in `lib/`, its Server Action boundary, and the local-only product constraints |
 
-Make customizations on a branch, keep your database and `.bak` recovery copy
+Make customizations on a branch, keep your encrypted database and `.bak` recovery copy
 outside Git, and review generated migrations before running them against a real
 profile. If a customization is broadly useful, follow
 [CONTRIBUTING.md](CONTRIBUTING.md) to propose it upstream.
@@ -173,7 +175,6 @@ Map visited cities, connect each stop to its origin, and keep the full itinerary
 | Service | Port | Purpose |
 | --- | --- | --- |
 | LocalFi | `1313` | Next.js UI and Server Actions |
-| Drizzle Studio | `4983` | Optional SQLite browser via `bun run db:studio` |
 
 ## Prerequisites
 
@@ -190,21 +191,55 @@ Map visited cities, connect each stop to its origin, and keep the full itinerary
 ```bash
 bun install --frozen-lockfile
 cp .env.example .env.local
-bun run db:setup
+export LOCALFI_VAULT_BOOTSTRAP_TOKEN="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')"
+printf 'One-time setup credential: %s\n' "$LOCALFI_VAULT_BOOTSTRAP_TOKEN"
 bun run dev
 ```
 
-Open <http://localhost:1313>.
+On the first run, open <http://localhost:1313>, enter the printed bootstrap
+credential, create the single-owner vault, and save the one-time recovery secret
+somewhere separate from the device. The bootstrap credential only authorizes
+that setup request; it is not the vault passphrase or recovery secret. Once setup
+succeeds, stop the development server, run `unset LOCALFI_VAULT_BOOTSTRAP_TOKEN`,
+and restart it normally. Never save the credential in `.env.local` or another
+committed file.
+
+Vault creation is intentionally UI-only: `bun run db:init` and
+`bun run db:setup` refuse headless setup because a recovery secret printed
+nowhere cannot be retrieved later. An existing encrypted vault does not require
+a bootstrap credential when the application starts.
+
+Existing plaintext databases are converted by this explicit setup flow after
+validation. Setup tightens ordinary same-owner legacy directory/file modes to
+`0700`/`0600`. Wrong-owner paths, symlinks, hard links, and non-regular database
+files fail closed without changing data.
 
 ### Docker
 
 ```bash
+export LOCALFI_VAULT_BOOTSTRAP_TOKEN="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')"
+printf 'One-time setup credential: %s\n' "$LOCALFI_VAULT_BOOTSTRAP_TOKEN"
 docker compose up -d --build
 ```
 
-Open <http://localhost:1313>. Verify with `docker compose ps`; `app` should
-be healthy. The bind-mounted `data/` directory is your live database and is
-ignored by Git and Docker build context.
+Open <http://localhost:1313>, enter the printed credential, finish setup, and
+save the recovery secret. Then remove the credential from both the host shell and
+the container configuration:
+
+```bash
+unset LOCALFI_VAULT_BOOTSTRAP_TOKEN
+docker compose up -d --force-recreate
+```
+
+Verify with `docker compose ps -a`; `app` should be healthy and
+`data-permissions` should have exited successfully. A fresh bind mount or legacy
+conversion fails clearly when the credential is missing; an encrypted vault can
+restart without it. Compose first runs that one-shot root preflight to assign the
+bind-mounted `data/` directory to `${DOCKER_UID:-1000}:${DOCKER_GID:-1000}`, set
+directories to `0700`, and set regular files to `0600`; the application then runs
+as that non-root owner. Set `DOCKER_UID` and `DOCKER_GID` to the host IDs that
+should own these private files. The directory holds encrypted live and recovery
+generations, remains sensitive, and is ignored by Git and Docker build context.
 
 ### Fictional demo
 
@@ -216,6 +251,8 @@ LOCALFI_DEMO_DB="$LOCALFI_DEMO_DIR/localfi-demo.db"
 bun run db:demo -- --output "$LOCALFI_DEMO_DB"
 BUDGET_DB_PATH="$LOCALFI_DEMO_DB" \
   DATABASE_URL="file:$LOCALFI_DEMO_DB" \
+  LOCALFI_VAULT_TEST_MODE=plaintext \
+  LOCALFI_DEMO_GENERATOR=1 \
   bun run dev
 ```
 
@@ -246,6 +283,21 @@ bun run build
 Run `bun run test:tz` when changing calendar or ledger behavior. Run
 `bun audit --prod --audit-level=high` before a release.
 
+### Database command boundaries
+
+Owner-vault maintenance commands require the app and Docker stack to be stopped,
+and `LOCALFI_VAULT_PASSPHRASE` scoped to that one process. Confirm the displayed
+or reported database path before proceeding; `BUDGET_DB_PATH` may override the
+default owner path. `bun run agent`, `agent:once`, `db:seed`, `db:sample`, `db:upgrade`,
+`db:restore`, `ledger:verify`, `ledger:rebuild`, and history backfill acquire the
+same authorization seam and release it before exit. They fail nonzero when the
+passphrase is absent, invalid, or the writer lease is held.
+
+LocalFi does not expose Drizzle Studio or `db:push`: both bypass the vault,
+writer lease, encrypted publication, and committed migration history. Change
+the schema, generate and review a migration with `bun run db:generate`, then use
+the managed upgrade path.
+
 ## Architecture
 
 ```mermaid
@@ -258,8 +310,8 @@ flowchart LR
   Ledger --> DB[SQLite through Drizzle and sql.js]
   Projections --> DB
   Metadata --> DB
-  DB --> File[(one canonical SQLite file)]
-  File -. recoverable copy .-> Backup[(private .bak file)]
+  DB --> Vault[(authenticated encrypted vault generation)]
+  Vault -. encrypted recovery copy .-> Backup[(private .bak generation)]
 ```
 
 | Layer | Location | Role |
@@ -293,7 +345,7 @@ flowchart LR
   facts; mutable tables are metadata, drafts, or rebuildable projections.
 - Transfers are not income or expense.
 - One LocalFi process writes a database file at a time.
-- `data/` is personal data, including SQLite recovery backups. Never commit,
+- `data/` is personal data, including encrypted recovery generations. Never commit,
   copy it into an image, or overwrite it during development.
 
 ## Configuration
@@ -302,11 +354,34 @@ flowchart LR
 | --- | --- | --- |
 | `DATABASE_URL` | No | SQLite URL; defaults to `file:./data/budget.db` |
 | `BUDGET_DB_PATH` | No | Direct database-file override for scripts and tests |
+| `LOCALFI_VAULT_BOOTSTRAP_TOKEN` | First setup or legacy conversion only | Random 24–512 character credential that authorizes browser setup once; it is not the vault passphrase and must be unset after setup |
+| `LOCALFI_VAULT_PASSPHRASE` | Headless database commands | Passphrase boundary for explicit CLI operations; prefer a one-command environment assignment and remove it immediately afterward |
 | `NEXT_PUBLIC_APP_URL` | No | LocalFi URL; defaults to `http://localhost:1313` |
 | `DOCKER_UID` / `DOCKER_GID` | No | Host user IDs for the Docker bind mount |
 | `NOMINATIM_URL` | No | Geocoding endpoint for travel locations |
 | `NOMINATIM_USER_AGENT` | No | User agent for that geocoding endpoint |
 | `AGENT_API_TOKEN` | For `/api/snapshot` | Bearer token for the optional snapshot scheduler |
+
+## Security and recovery
+
+- LocalFi encrypts the owner database and managed recovery generations at rest,
+  and enforces owner-only `0700` directories and `0600` sensitive files on
+  supported Unix filesystems.
+- The vault locks on restart, explicit lock, or inactivity. The persisted
+  timeout defaults to 15 minutes and can be set from 1–120 minutes in Settings;
+  activity extends the current session.
+- Save the one-time recovery secret offline and separate from the database. A
+  recovery resets the passphrase and rotates recovery material across managed
+  generations.
+- Reports CSV and JSON downloads are plaintext outside vault protection. CSV is
+  readable by Excel and similar tools. Database downloads remain encrypted but
+  are still sensitive.
+- Use full-disk encryption as defense in depth. An administrator/root process,
+  debugger, or compromised process running while the vault is unlocked can
+  access decrypted data in memory.
+
+See the [security boundary and recovery guide](docs/SECURITY.md) before exposing
+LocalFi beyond its loopback-only default or running database maintenance tools.
 
 ## Docs
 
@@ -315,7 +390,8 @@ flowchart LR
 - [docs/DECISIONS.md](docs/DECISIONS.md) — durable architectural decisions and
   rejected alternatives.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — contribution workflow.
-- [SECURITY.md](SECURITY.md) — reporting and deployment boundary.
+- [SECURITY.md](SECURITY.md) — vulnerability-reporting policy.
+- [docs/SECURITY.md](docs/SECURITY.md) — vault, recovery, exports, and operational boundaries.
 
 The schema files and migration journal define persisted structure. The
 append-only ledger is the source of truth for confirmed financial facts. The

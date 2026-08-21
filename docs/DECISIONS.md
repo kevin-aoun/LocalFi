@@ -10,6 +10,34 @@ their absence must not prevent the core app from starting. This preserves the
 local-only alpha boundary and keeps deferred AI infrastructure out of the
 default runtime.
 
+## Single-owner encrypted vault
+
+The canonical SQLite image and managed recovery generations are authenticated
+encrypted vault envelopes at rest. A passphrase-backed local session keeps the
+decryption key only while unlocked; restart, explicit lock, or a persisted
+1–120 minute inactivity timeout clears that access. Owner-only filesystem modes
+(`0700` directories and `0600` sensitive files) reduce accidental local
+disclosure but do not replace full-disk encryption. Root/administrator access or
+a compromised process can still inspect decrypted state while LocalFi is
+unlocked.
+
+Recovery uses separately wrapped key material so a saved one-time recovery
+secret can rotate both the passphrase and recovery material across managed
+generations. Plaintext CSV and JSON downloads deliberately cross the vault
+boundary and require an explicit per-download warning. A database download is
+the validated encrypted generation, not a plaintext SQLite copy.
+
+Owner-vault creation and legacy conversion begin in the browser so the one-time
+recovery secret can be shown and acknowledged exactly once; the advertised
+`db:init` and `db:setup` commands refuse headless creation. Browser setup also
+requires a random, process-scoped `LOCALFI_VAULT_BOOTSTRAP_TOKEN`, distinct from
+the passphrase and recovery secret, and consumes it on success. Supported
+maintenance commands instead unlock an existing vault for one process through
+`LOCALFI_VAULT_PASSPHRASE` and release that authorization before exit. Compose
+uses a one-shot root permission preflight for the private bind mount, then runs
+the application itself as the configured non-root owner; the operator must
+remove the bootstrap token and recreate the service after setup.
+
 ## Dependency maintenance
 
 Production dependency updates are applied through reviewed lockfile changes
@@ -114,19 +142,20 @@ to avoid accidental highlighting during interaction and dragging.
 | Decision | Why | Rejected alternative |
 | --- | --- | --- |
 | sql.js (WebAssembly SQLite) | No native compilation, no `node-gyp`, identical behaviour on Windows/macOS/Linux and inside Alpine. | `better-sqlite3` — faster and supports real transactions, but needs a native build per platform. |
-| One cached in-memory image, flushed atomically per mutation | Trivially correct for one user; the database stays a single portable file you can copy, back up, or email to yourself. SQLite transactions provide the atomic commit boundary before the file flush. See [SQLite atomic commit](https://sqlite.org/atomiccommit.html) and [SQLite transactions](https://sqlite.org/transactional.html). | A long-lived connection with WAL — better concurrency the app doesn't need. |
+| One cached in-memory SQLite image, published as an encrypted vault generation per mutation | Correct for one owner and one writer; SQLite transactions provide the logical atomic commit boundary, then LocalFi validates and atomically publishes an authenticated encrypted envelope. See [SQLite atomic commit](https://sqlite.org/atomiccommit.html) and [SQLite transactions](https://sqlite.org/transactional.html). | A long-lived connection with WAL — better concurrency the app doesn't need and incompatible with the one-generation vault boundary. |
 | Money as integer cents, everywhere | Float money drifts at the cent (`2.675 * 100 === 267.49999999999994`). Parsing is done on strings, so the drift is structurally impossible rather than merely unlikely. | `real` columns and rounding at the edges — which is what 0002 migrated away from. |
 | Calendar days as `'YYYY-MM-DD'` strings | Sorts in calendar order, compares without a timezone, and cannot be shifted by `toISOString()`. A budget month and a report month are then the same month by construction. | Timestamps everywhere — which had already put a Beirut user's 28th into the 27th. |
 | One `accounts` table for assets *and* liabilities | Net worth is `sum(assets) − sum(liabilities)`: one query over one table, so the halves cannot drift. | A parallel `liabilities` table — two inventories of money to reconcile by hand. |
 | Transfers as first-class transactions | A transfer is not income or expense. Modelling it as a category ("Transfer") makes every total wrong in a way nobody notices. | Two mirrored transactions, or a magic category. |
 | Server Actions instead of a REST/tRPC API | No client/server type drift, no fetch layer, no second surface to keep in sync. Note this does *not* mean "nothing to authenticate" — they are POST endpoints. | Route handlers under `app/api/` — needed only if a second client appears. |
-| No authentication (for now) | Single user, loopback binding, one file on their own disk. Adding a real auth story is a project, not a checkbox, and a half-done one is worse than a documented absence. | Basic auth or a shared secret — security theatre that would invite exposing the port. |
+| Single-owner vault session, not multi-user authentication | A passphrase gates the in-memory decryption key and the encrypted-at-rest database while preserving the loopback-only, one-owner product boundary. Restart, lock, and inactivity clear the active authorization. | Basic auth or a shared network secret — neither protects the database at rest nor makes the service safe for internet exposure. |
 | Balance derived from the ledger, in one module | One source of truth, so the dashboard, `/accounts`, `/budgets` and `/reports` cannot disagree. `reports.test.ts` asserts `flowInRange(...).netCents === deriveCashBalanceCents(...)` over the same rows. | Re-deriving totals per page — which is exactly how the dashboard chart once contradicted its own headline. |
 | Compatibility transaction amounts stay positive; direction is snapshotted | The compatibility row stores a positive magnitude plus its historical direction; journal movements carry the signs. | Signed amounts in the compatibility transaction row. |
 | Keyless price providers (SwissQuote, CoinGecko) | No API key, no signup, no secret to leak in an open-source repo, and the app stays runnable by anyone who clones it. | A keyed provider (metals-api and similar). |
 | Pricing keyed by *symbol*, not by commodity type | BTC and ETH are not commodities and are not on a forex feed. Widening "commodity" until it meant "anything with a price" was the alternative. | `commodityTypes += "Bitcoin"` — a lie in the schema and a broken request to SwissQuote. |
 | Zustand only for view state | Server Actions own server data; stores hold dialog/filter/sort state so pages don't drown in `useState`. | Caching server data client-side, which would fight `revalidatePath()`. |
-| Drizzle migrations, replayed by a custom script | `drizzle-kit migrate` doesn't target sql.js, so `lib/db/init.ts` walks the journal itself. | `db:push` for schema sync — convenient, but leaves no migration history. |
+| Drizzle migrations, replayed by the managed vault lifecycle | `drizzle-kit migrate` doesn't target sql.js, so the database lifecycle walks the committed journal under the writer lease and republishes a validated encrypted generation. | `db:push` or Drizzle Studio — they bypass migration history, vault authorization, encrypted publication, backups, and the single-writer lease, so LocalFi does not expose them. |
+| Per-download export disclosure | CSV and JSON are useful interoperable plaintext; the database export remains a portable encrypted vault generation. Each download must state its actual boundary before any builder or browser Blob runs. | A blanket “exports are secure” label or a dismissible warning — both hide materially different protection levels. |
 | Component logic extracted to `*-logic.ts` | There is no jsdom, so components cannot be rendered in a test. Extracting the logic makes the interesting part testable and keeps the `.tsx` as wiring. | Adding jsdom + Testing Library — a large dependency and a slower suite for behaviour that is mostly arithmetic. |
 | One global append-only ledger with SQLite sequence/hash links | The app is single-owner and local-only; SQLite supplies atomic transactions while Node supplies SHA-256 via [`crypto`](https://nodejs.org/api/crypto.html). A single journal keeps balances and corrections auditable without another runtime. | [immudb](https://docs.immudb.io/master/immudb.html) adds a database/runtime; [Dolt](https://dolthub.com/docs/concepts/dolt/git/) adds branching/version-control semantics; [Hyperledger ordering](https://hyperledger-fabric.readthedocs.io/en/latest/orderer/ordering_service.html) and Solidity add multi-party consensus/smart-contract infrastructure. |
 | Durable links are database sequence plus `previous_hash` | The linked structure survives reloads and can be verified from SQLite rows; the explorer only renders those rows. | A duplicate JavaScript linked list, which would be non-durable and drift-prone. |
