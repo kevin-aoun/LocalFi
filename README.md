@@ -43,16 +43,31 @@ Start your coding agent in the repository root with a concrete outcome. The
 repository guidance will lead it through the relevant architecture, safety
 rules, tests, and validation commands.
 
-<p align="center"><strong>Use your preferred repository-aware coding agent</strong></p>
-
 <p align="center">
-  <img src="https://img.shields.io/badge/OpenAI_Codex-412991?style=for-the-badge&amp;logo=openai&amp;logoColor=white" alt="OpenAI Codex" />
-  <img src="https://img.shields.io/badge/Claude-D97757?style=for-the-badge&amp;logo=anthropic&amp;logoColor=white" alt="Claude" />
-  <img src="https://img.shields.io/badge/Gemini-8E75B2?style=for-the-badge&amp;logo=googlegemini&amp;logoColor=white" alt="Google Gemini" />
-  <br />
-  <img src="https://img.shields.io/badge/Cursor-000000?style=for-the-badge&amp;logo=cursor&amp;logoColor=white" alt="Cursor" />
-  <img src="https://img.shields.io/badge/GitHub_Copilot-000000?style=for-the-badge&amp;logo=githubcopilot&amp;logoColor=white" alt="GitHub Copilot" />
-  <img src="https://img.shields.io/badge/Windsurf-0B100F?style=for-the-badge&amp;logo=windsurf&amp;logoColor=white" alt="Windsurf" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/openai.png" />
+    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/openai.png" width="48" height="48" alt="OpenAI" title="OpenAI" />
+  </picture>&nbsp;&nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/claude-color.png" />
+    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/claude-color.png" width="48" height="48" alt="Claude" title="Claude" />
+  </picture>&nbsp;&nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/gemini-color.png" />
+    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/gemini-color.png" width="48" height="48" alt="Google Gemini" title="Google Gemini" />
+  </picture>&nbsp;&nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/cursor.png" />
+    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/cursor.png" width="48" height="48" alt="Cursor" title="Cursor" />
+  </picture>&nbsp;&nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/windsurf.png" />
+    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/windsurf.png" width="48" height="48" alt="Windsurf" title="Windsurf" />
+  </picture>&nbsp;&nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/githubcopilot.png" />
+    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/githubcopilot.png" width="48" height="48" alt="GitHub Copilot" title="GitHub Copilot" />
+  </picture>
 </p>
 
 ```text
