@@ -2,9 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   chmodSync,
+  closeSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -42,8 +44,12 @@ async function makeImage(setup: (db: Database) => void): Promise<Buffer> {
 }
 
 async function readNames(file: string, table = "items"): Promise<string[]> {
+  return readNamesFromImage(readFileSync(file), table);
+}
+
+async function readNamesFromImage(image: Uint8Array, table = "items"): Promise<string[]> {
   const S = await sqlJs();
-  const db = new S.Database(readFileSync(file));
+  const db = new S.Database(image);
   try {
     const res = db.exec(`SELECT name FROM ${table} ORDER BY name`);
     return (res[0]?.values ?? []).map((row) => String(row[0]));
@@ -141,18 +147,23 @@ describe("concurrent mutations (lost-update regression)", () => {
 describe("atomic, durable writes", () => {
   it("leaves no temp file behind and replaces the target by rename", async () => {
     await seedItemsDb(["seed"]);
-    const before = statSync(dbPath).ino;
+    const previousFile = openSync(dbPath, "r");
+    try {
+      await withDb((_db, raw) => {
+        raw.run("INSERT INTO items (name) VALUES ('written')");
+      });
 
-    await withDb((_db, raw) => {
-      raw.run("INSERT INTO items (name) VALUES ('written')");
-    });
+      // A descriptor opened before the write still sees the previous image.
+      // That directly proves rename replacement without assuming the filesystem
+      // will not immediately recycle the old inode number.
+      expect(await readNamesFromImage(readFileSync(previousFile))).toEqual(["seed"]);
+    } finally {
+      closeSync(previousFile);
+    }
 
     const entries = readdirSync(tmpDir);
     expect(entries.filter((f) => f.includes(".tmp"))).toEqual([]);
     expect(entries).toContain("budget.db");
-    // A rename swapped a brand-new inode into place instead of rewriting the
-    // live file in place, which is what makes the write atomic.
-    expect(statSync(dbPath).ino).not.toBe(before);
     expect(readFileSync(dbPath).subarray(0, 16).toString("binary")).toBe(SQLITE_HEADER);
     expect(await readNames(dbPath)).toEqual(["seed", "written"]);
   });

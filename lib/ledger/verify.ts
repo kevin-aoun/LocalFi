@@ -418,9 +418,19 @@ export function verifyLedgerRaw(raw: Database): LedgerVerificationResult {
         failure(failures, "projection.transaction_movements");
       }
       const eventRow = eventsById.get(item.eventId);
+      const projectedInstant = new Date(snapshot.date * 1000);
+      const localDateKey = Number.isSafeInteger(snapshot.date)
+        ? toDateKey(projectedInstant)
+        : null;
+      const utcDateKey = Number.isSafeInteger(snapshot.date)
+        ? projectedInstant.toISOString().slice(0, 10)
+        : null;
+      const effectiveDate = eventRow ? String(eventRow.effective_date) : null;
+      // Transaction calendar days have historically been encoded as local-midnight epochs.
+      // UTC-normalized portable databases use the equally valid UTC calendar interpretation.
       if (
         !Number.isSafeInteger(snapshot.date) || !eventRow ||
-        String(eventRow.effective_date) !== toDateKey(new Date(snapshot.date * 1000))
+        (effectiveDate !== localDateKey && effectiveDate !== utcDateKey)
       ) {
         failure(failures, "projection.transaction_effective_date");
       }
