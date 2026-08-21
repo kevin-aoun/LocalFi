@@ -14,7 +14,74 @@ derived from that shared history instead of maintaining competing totals.
 > machine or a trusted network; the default Docker setup binds only to
 > `127.0.0.1`.
 
-## What it does
+## Customize your LocalFi
+
+🛠️ **Every single component is customizable.** Change the dashboard layout,
+cards, colors, categories, reports, charts, budget behavior, transaction
+workflows, travel map, data model, ledger projections, or local integrations.
+LocalFi is intentionally source-first, so you can shape the whole experience
+around the way you manage money instead of adapting your finances to a fixed
+product.
+
+Start your coding agent in the repository root with a concrete outcome. The
+repository guidance will lead it through the relevant architecture, safety
+rules, tests, and validation commands.
+
+<details>
+<summary><strong>🤖 Copy the repository-aware customization prompt</strong></summary>
+
+> Understand this LocalFi repository, then help me customize it by **[describe
+> the outcome you want]**. Before editing, read `AGENTS.md`, every scoped rule
+> it identifies for the files you expect to touch, and the relevant parts of
+> `README.md`, `docs/REFERENCE.md`, and `docs/DECISIONS.md`. Trace the existing
+> implementation, its callers, data flow, and nearby tests. Summarize the
+> constraints you found and propose the smallest coherent plan; ask only about
+> choices that would materially change the result. Preserve the local-only
+> privacy model, integer-cents money, local calendar dates, and append-only
+> ledger. Never inspect or derive examples from `data/` or my real database;
+> use fictional fixtures and explicit temporary database paths. Add or update
+> regression tests, then validate every changed path with
+> `bun run validate:agent -- <changed paths>` and run the full validator when
+> the rules require it. Finish by reporting what changed, what was validated,
+> and any remaining risks. Do not commit or push unless I explicitly ask.
+
+</details>
+
+That prompt is the handshake, not the rulebook. `AGENTS.md` and the matching
+files in `.claude/rules/` remain the durable constraints as a change crosses
+different parts of the repository.
+
+| What you want to customize | Start here |
+| --- | --- |
+| Dashboard composition, components, or visual language | `app/(dashboard)/`, `components/dashboard/`, `.claude/rules/frontend.md` |
+| Reports or financial calculations | `app/actions/`, `lib/`, `.claude/rules/financial-domain.md` |
+| Accounts, transactions, budgets, or investments | `docs/REFERENCE.md`, `lib/db/schema/`, `lib/ledger/` |
+| A local integration or provider | The nearest service in `lib/`, its Server Action boundary, and the local-only product constraints |
+
+Make customizations on a branch, keep your database and `.bak` recovery copy
+outside Git, and review generated migrations before running them against a real
+profile. If a customization is broadly useful, follow
+[CONTRIBUTING.md](CONTRIBUTING.md) to propose it upstream.
+
+## Built with 🧰
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Next.js-16.3-000000?style=for-the-badge&amp;logo=nextdotjs&amp;logoColor=white" alt="Next.js 16.3" />
+  <img src="https://img.shields.io/badge/React-19.2-61DAFB?style=for-the-badge&amp;logo=react&amp;logoColor=082032" alt="React 19.2" />
+  <img src="https://img.shields.io/badge/TypeScript-5.7-3178C6?style=for-the-badge&amp;logo=typescript&amp;logoColor=white" alt="TypeScript 5.7" />
+  <img src="https://img.shields.io/badge/Tailwind_CSS-3.4-06B6D4?style=for-the-badge&amp;logo=tailwindcss&amp;logoColor=white" alt="Tailwind CSS 3.4" />
+  <br />
+  <img src="https://img.shields.io/badge/SQLite-Portable-003B57?style=for-the-badge&amp;logo=sqlite&amp;logoColor=white" alt="SQLite" />
+  <img src="https://img.shields.io/badge/Drizzle_ORM-0.45-C5F74F?style=for-the-badge&amp;logo=drizzle&amp;logoColor=1A1A1A" alt="Drizzle ORM 0.45" />
+  <img src="https://img.shields.io/badge/Bun-1.3-FBF0DF?style=for-the-badge&amp;logo=bun&amp;logoColor=14151A" alt="Bun 1.3" />
+  <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&amp;logo=docker&amp;logoColor=white" alt="Docker Compose" />
+</p>
+
+The interface pairs **shadcn/ui** and **Radix UI** primitives with
+**Recharts** and **MapLibre GL**. **Vitest** covers deterministic behavior,
+while **Playwright** drives the isolated light/dark showcase capture.
+
+## What it does ✨
 
 - Tracks assets and liabilities from one account model.
 - Records transactions, transfers, recurring rules, and monthly budget moves.
@@ -23,7 +90,7 @@ derived from that shared history instead of maintaining competing totals.
   crypto pricing.
 - Provides reports, privacy mode, and a developer ledger explorer.
 
-## Showcase
+## Showcase 🖼️
 
 Every value below comes from the deterministic fictional demo generator. No
 personal database or real financial data is used to build these images.
@@ -106,7 +173,7 @@ Map visited cities, connect each stop to its origin, and keep the full itinerary
 | Bun | 1.3.14 | `bun --version` |
 | Docker Compose | Current | `docker compose version` |
 
-## Getting started
+## Getting started 🚀
 
 ### Local development
 
@@ -129,7 +196,7 @@ Open <http://localhost:1313>. Verify with `docker compose ps`; `app` should
 be healthy. The bind-mounted `data/` directory is your live database and is
 ignored by Git and Docker build context.
 
-### Fictional demo
+### Fictional demo 🎭
 
 Explore a populated app without using or replacing your own database:
 
@@ -157,46 +224,7 @@ port, and builds and starts LocalFi in production mode. It validates all 14
 light/dark images in a temporary staging directory before publishing them, then
 removes only the temporary directory it created.
 
-## Customize your LocalFi
-
-LocalFi is designed to be extended locally: rearrange the dashboard, add a
-report, adapt a workflow, or build a feature for the way you manage money. Start
-your coding agent in the repository root and replace the bracketed text below:
-
-> Understand this LocalFi repository, then help me customize it by **[describe
-> the outcome you want]**. Before editing, read `AGENTS.md`, every scoped rule
-> it identifies for the files you expect to touch, and the relevant parts of
-> `README.md`, `docs/REFERENCE.md`, and `docs/DECISIONS.md`. Trace the existing
-> implementation, its callers, data flow, and nearby tests. Summarize the
-> constraints you found and propose the smallest coherent plan; ask only about
-> choices that would materially change the result. Preserve the local-only
-> privacy model, integer-cents money, local calendar dates, and append-only
-> ledger. Never inspect or derive examples from `data/` or my real database;
-> use fictional fixtures and explicit temporary database paths. Add or update
-> regression tests, then validate every changed path with
-> `bun run validate:agent -- <changed paths>` and run the full validator when
-> the rules require it. Finish by reporting what changed, what was validated,
-> and any remaining risks. Do not commit or push unless I explicitly ask.
-
-That prompt is the handshake, not the rulebook. `AGENTS.md` and the matching
-files in `.claude/rules/` remain the durable constraints as the change crosses
-different parts of the repository.
-
-Common starting points:
-
-| Goal | Start here |
-| --- | --- |
-| Change dashboard composition or visual language | `app/(dashboard)/`, `components/dashboard/`, `.claude/rules/frontend.md` |
-| Add a report or financial calculation | `app/actions/`, `lib/`, `.claude/rules/financial-domain.md` |
-| Extend accounts, transactions, budgets, or investments | `docs/REFERENCE.md`, `lib/db/schema/`, `lib/ledger/` |
-| Add a local integration or provider | Existing service in `lib/`, its Server Action boundary, and the local-only product constraints |
-
-Make customizations on a branch, keep your database and `.bak` recovery copy
-outside Git, and review generated migrations before running them against a real
-profile. If a customization is broadly useful, follow
-[CONTRIBUTING.md](CONTRIBUTING.md) to propose it upstream.
-
-## Verification
+## Verification ✅
 
 ```bash
 bun run lint
@@ -208,7 +236,7 @@ bun run build
 Run `bun run test:tz` when changing calendar or ledger behavior. Run
 `bun audit --prod --audit-level=high` before a release.
 
-## Architecture
+## Architecture 🧭
 
 ```mermaid
 flowchart LR
@@ -245,7 +273,7 @@ flowchart LR
 | Add a schema field | `lib/db/schema/` then `bun run db:generate` | `schema/budgets.ts` |
 | Add a migration check | `lib/db/upgrade.ts` and `lib/db/__tests__/` | `migration-0015.test.ts` |
 
-## Invariants
+## Invariants 🔒
 
 - Money is stored and calculated as integer cents.
 - Calendar days use local `YYYY-MM-DD` keys; never derive them with
@@ -270,7 +298,7 @@ flowchart LR
 | `NOMINATIM_USER_AGENT` | No | User agent for that geocoding endpoint |
 | `AGENT_API_TOKEN` | For `/api/snapshot` | Bearer token for the optional snapshot scheduler |
 
-## Docs
+## Docs 📚
 
 - [docs/REFERENCE.md](docs/REFERENCE.md) — code map, routes, extension points,
   and operational boundaries. Keep this in sync when structure changes.
