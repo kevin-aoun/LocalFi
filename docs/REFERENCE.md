@@ -9,6 +9,7 @@ reasons behind its architecture. Keep this document current when code moves.
 | Area | Location | Boundary |
 | --- | --- | --- |
 | App shell | `app/layout.tsx`, `app/providers.tsx`, `app/(dashboard)/layout.tsx` | Global styles, providers, sidebar, and page frame |
+| Dashboard request gate | `proxy.ts`, `lib/vault/proxy-session.ts` | Optimistic stale-session redirect before Server Component rendering; never replaces route/action/database authorization |
 | Dashboard routes | `app/(dashboard)/` | Route composition; server pages load data and pass it to client components |
 | Server Actions | `app/actions/` | The application’s read/write boundary for UI features |
 | Feature UI | `components/{accounts,assets,budgets,dashboard,exports,ledger,recurring,reports,settings,transactions}/` | Rendering and local interaction state; export disclosures live in `components/exports/` |
@@ -91,6 +92,7 @@ requires a configured `AGENT_API_TOKEN` bearer token.
 | Local database path | `BUDGET_DB_PATH`, default `data/budget.db` |
 | Vault envelope and permissions | `lib/vault/envelope.ts`, `lib/vault/paths.ts` |
 | Vault session and timeout | `lib/vault/session.ts`, `settings.idle_timeout_minutes` |
+| Pre-render stale-session redirect | `proxy.ts`, backed by the loopback-only `GET /api/vault/status` check |
 | Export disclosure boundary | `components/exports/export-disclosure.tsx`, `app/actions/export.ts` |
 | Owner setup | Browser `/vault` flow with one-use `LOCALFI_VAULT_BOOTSTRAP_TOKEN`; `db:init` and `db:setup` refuse headless creation |
 | Headless authorization | `authorizeDatabaseVaultFromEnvironment` around supported CLI callers |

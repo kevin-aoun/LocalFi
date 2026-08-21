@@ -114,6 +114,12 @@ Browser setup tightens
 ordinary same-owner legacy `0755` directories and `0644` single-link files;
 wrong-owner paths, symlinks, hard links, and non-regular files still fail closed.
 
+Dashboard page requests use a loopback status check in `proxy.ts` to redirect a
+missing or stale browser session before Server Components render. This prevents
+already-rendered financial UI from lingering after a process restart. It is not
+an authorization substitute: every route, action, and database access boundary
+continues to validate the active vault session independently.
+
 ## Network boundary
 
 The default app binds to `127.0.0.1:1313`. Keep that loopback boundary: vault

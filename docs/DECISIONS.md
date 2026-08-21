@@ -40,6 +40,14 @@ process credential; the operator removes the parent-shell copy, while a later
 ordinary Compose reconciliation drops the configured copy without making an
 immediate restart part of first-run setup.
 
+Dashboard page requests also pass through a narrow Next.js request proxy before
+Server Components render. It validates the opaque cookie through LocalFi's
+loopback-only status route and redirects missing or stale sessions to `/vault`.
+This prevents parallel page rendering from exposing a stale dashboard or a
+production React error after a restart. The proxy is only an optimistic UX gate:
+the layout, Server Actions, route handlers, and database authorization seam still
+fail closed independently.
+
 ## Dependency maintenance
 
 Production dependency updates are applied through reviewed lockfile changes

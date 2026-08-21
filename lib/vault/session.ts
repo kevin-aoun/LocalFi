@@ -32,7 +32,7 @@ import {
 } from "./paths";
 import { parseInactivityTimeout } from "./passphrase";
 
-export const VAULT_SESSION_COOKIE = "localfi_vault_session";
+export { VAULT_SESSION_COOKIE } from "./constants";
 export const DEFAULT_INACTIVITY_MINUTES = 15;
 
 export type VaultStatus = "uninitialized" | "locked" | "unlocked";
