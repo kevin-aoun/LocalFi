@@ -43,6 +43,18 @@ Start your coding agent in the repository root with a concrete outcome. The
 repository guidance will lead it through the relevant architecture, safety
 rules, tests, and validation commands.
 
+<p align="center"><strong>Use your preferred repository-aware coding agent</strong></p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/OpenAI_Codex-412991?style=for-the-badge&amp;logo=openai&amp;logoColor=white" alt="OpenAI Codex" />
+  <img src="https://img.shields.io/badge/Claude-D97757?style=for-the-badge&amp;logo=anthropic&amp;logoColor=white" alt="Claude" />
+  <img src="https://img.shields.io/badge/Gemini-8E75B2?style=for-the-badge&amp;logo=googlegemini&amp;logoColor=white" alt="Google Gemini" />
+  <br />
+  <img src="https://img.shields.io/badge/Cursor-000000?style=for-the-badge&amp;logo=cursor&amp;logoColor=white" alt="Cursor" />
+  <img src="https://img.shields.io/badge/GitHub_Copilot-000000?style=for-the-badge&amp;logo=githubcopilot&amp;logoColor=white" alt="GitHub Copilot" />
+  <img src="https://img.shields.io/badge/Windsurf-0B100F?style=for-the-badge&amp;logo=windsurf&amp;logoColor=white" alt="Windsurf" />
+</p>
+
 ```text
 Understand this LocalFi repository, then help me customize it by [describe the outcome you want]. Before editing, read AGENTS.md, every scoped rule it identifies for the files you expect to touch, and the relevant parts of README.md, docs/REFERENCE.md, and docs/DECISIONS.md. Trace the existing implementation, its callers, data flow, and nearby tests. Summarize the constraints you found and propose the smallest coherent plan; ask only about choices that would materially change the result. Preserve the local-only privacy model, integer-cents money, local calendar dates, and append-only ledger. Never inspect or derive examples from data/ or my real database; use fictional fixtures and explicit temporary database paths. Add or update regression tests, then validate every changed path with bun run validate:agent -- <changed paths> and run the full validator when the rules require it. Finish by reporting what changed, what was validated, and any remaining risks. Do not commit or push unless I explicitly ask.
 ```
@@ -82,8 +94,7 @@ personal database or real financial data is used to build these images.
 See net worth, cash movement, holdings, liabilities, and recent activity together without stitching totals across tools.
 
 <p align="center">
-  <img src="docs/images/light/dashboard.png" width="49%" alt="LocalFi Dashboard in light mode with net-worth totals, history chart, liabilities, and cash overview" />
-  <img src="docs/images/dark/dashboard.png" width="49%" alt="LocalFi Dashboard in dark mode with net-worth totals, history chart, liabilities, and cash overview" />
+  <img src="docs/images/dark/dashboard.png" width="100%" alt="LocalFi Dashboard in dark mode with net-worth totals, history chart, liabilities, and cash overview" />
 </p>
 
 ### Accounts — Balances with their history attached
@@ -91,8 +102,7 @@ See net worth, cash movement, holdings, liabilities, and recent activity togethe
 Review assets and liabilities alongside the net-worth timeline derived from the same financial record.
 
 <p align="center">
-  <img src="docs/images/light/accounts.png" width="49%" alt="LocalFi Accounts in light mode with net-worth totals and detailed asset and liability balance tables" />
-  <img src="docs/images/dark/accounts.png" width="49%" alt="LocalFi Accounts in dark mode with net-worth totals and detailed asset and liability balance tables" />
+  <img src="docs/images/light/accounts.png" width="100%" alt="LocalFi Accounts in light mode with net-worth totals and detailed asset and liability balance tables" />
 </p>
 
 ### Transactions — Every movement, easy to trace
@@ -100,8 +110,7 @@ Review assets and liabilities alongside the net-worth timeline derived from the 
 Filter confirmed activity, inspect totals, and keep pending entries visible before they become financial facts.
 
 <p align="center">
-  <img src="docs/images/light/transactions.png" width="49%" alt="LocalFi Transactions in light mode with filters, totals, expense breakdown, and pending entries" />
-  <img src="docs/images/dark/transactions.png" width="49%" alt="LocalFi Transactions in dark mode with filters, totals, expense breakdown, and pending entries" />
+  <img src="docs/images/dark/transactions.png" width="100%" alt="LocalFi Transactions in dark mode with filters, totals, expense breakdown, and pending entries" />
 </p>
 
 ### Budgets — Plans measured against reality
@@ -109,8 +118,7 @@ Filter confirmed activity, inspect totals, and keep pending entries visible befo
 Compare category limits with ledger-derived spending and move money between priorities without losing the audit trail.
 
 <p align="center">
-  <img src="docs/images/light/budgets.png" width="49%" alt="LocalFi Budgets in light mode with category spending, monthly limits, remaining amounts, and budget moves" />
-  <img src="docs/images/dark/budgets.png" width="49%" alt="LocalFi Budgets in dark mode with category spending, monthly limits, remaining amounts, and budget moves" />
+  <img src="docs/images/light/budgets.png" width="100%" alt="LocalFi Budgets in light mode with category spending, monthly limits, remaining amounts, and budget moves" />
 </p>
 
 ### Reports — Cash flow you can explain
@@ -118,8 +126,7 @@ Compare category limits with ledger-derived spending and move money between prio
 Read income, expenses, savings rate, and category trends as projections of the same underlying ledger.
 
 <p align="center">
-  <img src="docs/images/light/reports.png" width="49%" alt="LocalFi Reports in light mode with cash-flow statement, savings rate, and spending breakdown" />
-  <img src="docs/images/dark/reports.png" width="49%" alt="LocalFi Reports in dark mode with cash-flow statement, savings rate, and spending breakdown" />
+  <img src="docs/images/dark/reports.png" width="100%" alt="LocalFi Reports in dark mode with cash-flow statement, savings rate, and spending breakdown" />
 </p>
 
 ### Ledger — The immutable record behind every total
@@ -127,8 +134,7 @@ Read income, expenses, savings rate, and category trends as projections of the s
 Verify the hash-linked event chain and open any entry to inspect its balanced movements and provenance.
 
 <p align="center">
-  <img src="docs/images/light/ledger.png" width="49%" alt="LocalFi Ledger in light mode with verified hash-linked events and balanced movement details" />
-  <img src="docs/images/dark/ledger.png" width="49%" alt="LocalFi Ledger in dark mode with verified hash-linked events and balanced movement details" />
+  <img src="docs/images/dark/ledger.png" width="100%" alt="LocalFi Ledger in dark mode with verified hash-linked events and balanced movement details" />
 </p>
 
 ### Travel — A journey, not just a checklist
@@ -136,8 +142,7 @@ Verify the hash-linked event chain and open any entry to inspect its balanced mo
 Map visited cities, connect each stop to its origin, and keep the full itinerary useful beside the route.
 
 <p align="center">
-  <img src="docs/images/light/travel.png" width="49%" alt="LocalFi Travel in light mode with an offline world globe, connected city route, and 11-city itinerary" />
-  <img src="docs/images/dark/travel.png" width="49%" alt="LocalFi Travel in dark mode with an offline world globe, connected city route, and 11-city itinerary" />
+  <img src="docs/images/dark/travel.png" width="100%" alt="LocalFi Travel in dark mode with an offline world globe, connected city route, and 11-city itinerary" />
 </p>
 
 ## Ports and services
