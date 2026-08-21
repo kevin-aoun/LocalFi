@@ -163,14 +163,18 @@ export async function setupVaultDatabase(options: {
         if (isVaultEnvelope(stored)) {
           const unlocked = await unlockVaultEnvelope(stored, options.passphrase);
           destroyVaultKey(unlocked.key);
-          await validateSqliteImage(unlocked.plaintext, `Vault generation ${generationPath}`);
+          if (generationPath === dbPath) {
+            await validateSqliteImage(unlocked.plaintext, `Vault generation ${generationPath}`);
+          }
           plaintexts.push({
             path: generationPath,
             image: unlocked.plaintext,
             live: generationPath === dbPath,
           });
         } else if (isLegacySqliteImage(stored)) {
-          await validateSqliteImage(stored, `Legacy generation ${generationPath}`);
+          if (generationPath === dbPath) {
+            await validateSqliteImage(stored, `Legacy generation ${generationPath}`);
+          }
           plaintexts.push({
             path: generationPath,
             image: Uint8Array.from(stored),
@@ -224,7 +228,9 @@ export async function setupVaultDatabase(options: {
       const persisted = readSensitiveGeneration(write.path);
       const verified = await decryptVaultGeneration(persisted, key);
       try {
-        await validateSqliteImage(verified, `Persisted vault generation ${write.path}`);
+        if (write.path === dbPath) {
+          await validateSqliteImage(verified, `Persisted vault generation ${write.path}`);
+        }
       } finally {
         verified.fill(0);
       }

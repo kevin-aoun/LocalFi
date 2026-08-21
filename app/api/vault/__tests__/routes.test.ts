@@ -5,8 +5,16 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { readDb, withDb } from "@/lib/db/client";
+import { DatabaseUpgradeError } from "@/lib/db/upgrade";
+import { WriterLeaseError } from "@/lib/db/writer-lease";
 import { withVaultSessionToken } from "@/lib/vault/access";
-import { VaultLockedError } from "@/lib/vault/errors";
+import {
+  VaultAuthenticationError,
+  VaultLegacyMigrationError,
+  VaultLockedError,
+  VaultPathError,
+} from "@/lib/vault/errors";
+import { setupFailureDetail } from "@/lib/vault/setup-failure";
 import { VAULT_SESSION_COOKIE, vaultSessionManager } from "@/lib/vault/session";
 import { POST as setup } from "../setup/route";
 import { GET as status, POST as touchStatus } from "../status/route";
@@ -62,6 +70,21 @@ function tokenFrom(response: Response): string {
 }
 
 describe.sequential("vault setup route", () => {
+  it("maps setup failures to actionable details without exposing private paths", () => {
+    const privatePath = "/private/owner/budget.db";
+    const details = [
+      setupFailureDetail(new WriterLeaseError(privatePath, `${privatePath}.lock`)),
+      setupFailureDetail(new VaultPathError(`unsafe ${privatePath}`)),
+      setupFailureDetail(new VaultAuthenticationError()),
+      setupFailureDetail(new VaultLegacyMigrationError(`invalid ${privatePath}`)),
+      setupFailureDetail(new DatabaseUpgradeError(privatePath, null, "failed")),
+    ];
+
+    expect(details.every(Boolean)).toBe(true);
+    expect(details.join(" ")).not.toContain(privatePath);
+    expect(setupFailureDetail(new Error(`unknown ${privatePath}`))).toBeUndefined();
+  });
+
   it("rejects weak acknowledgement bypasses and DNS-rebound origins before setup", async () => {
     const weak = await setup(setupRequest({
       bootstrapCredential: BOOTSTRAP,

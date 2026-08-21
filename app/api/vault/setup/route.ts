@@ -5,6 +5,7 @@ import {
 } from "@/lib/vault/bootstrap";
 import { validatePassphraseSubmission } from "@/lib/vault/passphrase";
 import { vaultSessionManager } from "@/lib/vault/session";
+import { setupFailureDetail } from "@/lib/vault/setup-failure";
 import {
   failureKey,
   json,
@@ -45,8 +46,12 @@ export async function POST(request: Request): Promise<Response> {
       200,
       { "set-cookie": vaultCookie(result.token, request) },
     );
-  } catch {
+  } catch (error) {
     vaultFailureLimiter.fail(key);
-    return json({ error: "unable_to_setup" }, 400);
+    const detail = setupFailureDetail(error);
+    console.error("[vault] setup failed", {
+      category: error instanceof Error ? error.name : "UnknownError",
+    });
+    return json({ error: "unable_to_setup", ...(detail ? { detail } : {}) }, 400);
   }
 }

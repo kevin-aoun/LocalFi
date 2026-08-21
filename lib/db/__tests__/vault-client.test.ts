@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -10,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { sql } from "drizzle-orm";
+import initSqlJs from "sql.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -23,7 +25,12 @@ import {
   withDb,
 } from "../client";
 import { buildInitialDatabaseImage, setupVaultDatabase } from "../init";
-import { destroyVaultKey, isLegacySqliteImage, isVaultEnvelope } from "../../vault/envelope";
+import {
+  decryptVaultGeneration,
+  destroyVaultKey,
+  isLegacySqliteImage,
+  isVaultEnvelope,
+} from "../../vault/envelope";
 import {
   VaultAuthenticationError,
   VaultLockedError,
@@ -151,6 +158,40 @@ describe.sequential("encrypted sql.js client boundary", () => {
       expect(isVaultEnvelope(bytes)).toBe(true);
       expect(Buffer.from(bytes).includes(legacy.subarray(0, 32))).toBe(false);
       expect(statSync(generation).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it("encrypts historical SQLite backups without applying current live-database checks", async () => {
+    writeFileSync(dbPath, await buildInitialDatabaseImage(), { mode: 0o600 });
+    const backupDirectory = path.join(directory, "backups");
+    mkdirSync(backupDirectory, { mode: 0o700 });
+    const backupPath = path.join(backupDirectory, "budget.historical.db");
+    const runtime = await initSqlJs({
+      locateFile: (file) => path.join(process.cwd(), "node_modules/sql.js/dist", file),
+    });
+    const historicalDb = new runtime.Database();
+    historicalDb.run(`
+      PRAGMA foreign_keys = OFF;
+      CREATE TABLE parent (id INTEGER PRIMARY KEY);
+      CREATE TABLE child (
+        id INTEGER PRIMARY KEY,
+        parent_id INTEGER NOT NULL REFERENCES parent(id)
+      );
+      INSERT INTO child (id, parent_id) VALUES (1, 999);
+    `);
+    const historical = Uint8Array.from(historicalDb.export());
+    historicalDb.close();
+    writeFileSync(backupPath, historical, { mode: 0o600 });
+
+    const setup = await setupVaultDatabase({ dbPath, passphrase: PASSPHRASE });
+    const decrypted = await decryptVaultGeneration(readFileSync(backupPath), setup.key);
+    try {
+      expect(decrypted).toEqual(historical);
+      expect(isVaultEnvelope(readFileSync(backupPath))).toBe(true);
+    } finally {
+      decrypted.fill(0);
+      historical.fill(0);
+      destroyVaultKey(setup.key);
     }
   });
 
