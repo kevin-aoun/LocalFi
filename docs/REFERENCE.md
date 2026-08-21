@@ -1,26 +1,26 @@
 # LocalFi code reference
 
-This is the map of the codebase, not a second product manual. Start with the
-[README](../README.md) to run LocalFi and [DECISIONS.md](DECISIONS.md) for the
-reasons behind its architecture. Keep this document current when code moves.
+Use the [README](../README.md) to run LocalFi and
+[DECISIONS.md](DECISIONS.md) for architecture rationale. Update this map when
+code moves.
 
 ## Code map
 
 | Area | Location | Boundary |
 | --- | --- | --- |
-| App shell | `app/layout.tsx`, `app/providers.tsx`, `app/(dashboard)/layout.tsx` | Global styles, providers, sidebar, and page frame |
-| Dashboard request gate | `proxy.ts`, `lib/vault/proxy-session.ts` | Optimistic stale-session redirect before Server Component rendering; never replaces route/action/database authorization |
-| Dashboard routes | `app/(dashboard)/` | Route composition; server pages load data and pass it to client components |
-| Server Actions | `app/actions/` | The application’s read/write boundary for UI features |
-| Feature UI | `components/{accounts,assets,budgets,dashboard,exports,ledger,recurring,reports,settings,transactions}/` | Rendering and local interaction state; export disclosures live in `components/exports/` |
+| App shell | `app/layout.tsx`, `app/providers.tsx`, `app/(dashboard)/layout.tsx` | Providers, sidebar, and page frame |
+| Request gate | `proxy.ts`, `lib/vault/proxy-session.ts` | Optimistic stale-session redirect; not authorization |
+| Dashboard routes | `app/(dashboard)/` | Data loading and page composition |
+| Server Actions | `app/actions/` | UI read/write boundary |
+| Feature UI | `components/<feature>/` | Rendering and local interaction |
 | UI primitives | `components/ui/` | shadcn and mapcn components; avoid feature logic here |
-| Domain rules | `lib/{money,dates,cash-balance,budgets,recurrence,reports,prices}.ts` | Pure calculations and validation |
-| Ledger | `lib/ledger/` | Canonical event construction, reads, integrity checks, and projections |
-| Investments | `lib/investments/` | Instrument identity, positions, observations, and purchases |
-| Database | `lib/db/` | sql.js client, migration startup, recovery, schema utilities |
-| Vault | `lib/vault/` | Envelope encryption, owner-only paths, passphrase/recovery, and in-memory sessions |
+| Domain rules | `lib/` | Pure calculations and validation |
+| Ledger | `lib/ledger/` | Events, movements, integrity, and projections |
+| Investments | `lib/investments/` | Instruments, positions, observations, and purchases |
+| Database | `lib/db/` | Client, migrations, recovery, and schema utilities |
+| Vault | `lib/vault/` | Encryption, paths, secrets, and sessions |
 | Schema | `lib/db/schema/` | Drizzle table definitions |
-| Migrations | `drizzle/migrations/` | Ordered SQL journal and snapshots; generated, not hand-edited |
+| Migrations | `drizzle/migrations/` | Generated SQL journal and snapshots |
 | Tests | `**/__tests__/` | Unit and action/database regression coverage |
 | Scripts | `scripts/` | Explicit maintenance and recovery commands |
 
@@ -50,35 +50,16 @@ reasons behind its architecture. Keep this document current when code moves.
 | `POST` | `/api/vault/lock` | Lock, close the in-memory database, and clear the session |
 | `POST` | `/api/vault/recovery` | Reset the passphrase with the recovery secret and rotate recovery material |
 
-The product UI uses Server Actions rather than a public REST API. Route handlers
-exist only for operations that need an external caller. The snapshot route
-requires a configured `AGENT_API_TOKEN` bearer token.
+The UI uses Server Actions, not a public REST API. `/api/snapshot` requires an
+`AGENT_API_TOKEN` bearer token.
 
-## Extension checklists
+## Extension checklist
 
-### Add a persisted field
-
-1. Update the appropriate table in `lib/db/schema/`.
-2. Generate a migration with `bun run db:generate`.
-3. Add an upgrade verifier in `lib/db/upgrade.ts`.
-4. Add a migration test in `lib/db/__tests__/`.
-5. Update the action, form logic, UI, and nearby tests.
-
-### Add a financial behavior
-
-1. Put arithmetic and validation in a pure `lib/` module.
-2. Call it from an action; do not recreate the rule in a page or component.
-3. If it changes a confirmed fact, post a ledger event rather than mutating the
-   event history.
-4. Add action and pure-logic tests.
-
-### Add a feature UI
-
-1. Keep the route focused on data loading and composition.
-2. Put controls and dialogs in `components/<feature>/`.
-3. Extract non-render logic into a nearby `*-logic.ts` module when it needs
-   tests.
-4. Reuse `components/ui/` primitives and the shared privacy behavior.
+| Change | Required work |
+| --- | --- |
+| Persisted field | Update `lib/db/schema/`; generate and review a migration; add an upgrade verifier and migration test; wire actions and UI. |
+| Financial behavior | Put the rule in a pure `lib/` module; call it from an action; append ledger events for confirmed facts; test logic and action. |
+| Feature UI | Keep routes for loading/composition; put controls in `components/<feature>/`; extract testable `*-logic.ts`; reuse shared primitives and privacy behavior. |
 
 ## Operational boundaries
 
@@ -92,12 +73,11 @@ requires a configured `AGENT_API_TOKEN` bearer token.
 | Local database path | `BUDGET_DB_PATH`, default `data/budget.db` |
 | Vault envelope and permissions | `lib/vault/envelope.ts`, `lib/vault/paths.ts` |
 | Vault session and timeout | `lib/vault/session.ts`, `settings.idle_timeout_minutes` |
-| Pre-render stale-session redirect | `proxy.ts`, backed by the loopback-only `GET /api/vault/status` check |
+| Stale-session redirect | `proxy.ts`, `GET /api/vault/status` |
 | Export disclosure boundary | `components/exports/export-disclosure.tsx`, `app/actions/export.ts` |
-| Owner setup | Browser `/vault` flow with one-use `LOCALFI_VAULT_BOOTSTRAP_TOKEN`; `db:init` and `db:setup` refuse headless creation |
+| Owner setup | Browser `/vault` flow with one-use `LOCALFI_VAULT_BOOTSTRAP_TOKEN` |
 | Headless authorization | `authorizeDatabaseVaultFromEnvironment` around supported CLI callers |
 | Compose permissions | `data-permissions` one-shot service in `docker-compose.yml` |
 
-The default deployment is single-owner, vault-gated, and loopback-only. The
-vault is not a hardened multi-user or internet authentication layer; never
-expose LocalFi directly to the internet. See [SECURITY.md](SECURITY.md).
+LocalFi is single-owner and loopback-only, not an internet authentication
+system. See [SECURITY.md](SECURITY.md).
