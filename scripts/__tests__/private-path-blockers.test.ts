@@ -40,6 +40,7 @@ describe("private financial path blockers", () => {
       "Shell(docker)",
       "Shell(/usr/bin/docker)",
       "Shell(sqlite3)",
+      "Shell(./setup.sh)",
     ]));
 
     const hooks = readJson<{
@@ -80,6 +81,7 @@ describe("private financial path blockers", () => {
       "Bash(/usr/bin/docker *)",
       "Bash(sqlite3)",
       "Bash(sqlite3 *)",
+      "Bash(./setup.sh)",
     ]));
     expect(config.sandbox).toMatchObject({ enabled: true, failIfUnavailable: true });
     expect(config.sandbox.filesystem.denyRead).toContain("./data");
@@ -97,6 +99,7 @@ describe("private financial path blockers", () => {
     expect(config).toContain('"data" = "deny"');
     expect(config).toContain('"**/*.db" = "deny"');
     expect(config).toContain('"**/*.xlsx" = "deny"');
+    expect(config).toContain('"setup.sh" = "read"');
     expect(config).toContain('[permissions.localfi-source.network]');
     expect(config).toContain("enabled = false");
     expect(config).toContain("[mcp_servers.shadcn]");
@@ -179,6 +182,7 @@ describe("private financial path blockers", () => {
     }
     for (const file of [
       "AGENTS.md",
+      "setup.sh",
       "scripts/agent-private-path-guard.mjs",
       "scripts/agent-private-path-guard.sh",
     ]) {

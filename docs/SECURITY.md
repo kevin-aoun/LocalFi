@@ -55,16 +55,16 @@ The three secrets have separate jobs:
 
 | Secret | Purpose |
 | --- | --- |
-| Bootstrap token | Authorizes browser setup once; consumed after success |
+| Bootstrap token | Authorizes browser setup once; rejected after initialization |
 | Passphrase | Unlocks the vault |
 | Recovery secret | Resets a lost passphrase and rotates recovery material |
 
-Compose generates an owner-only bootstrap credential file and prints a one-time
-setup link. The browser reads the credential from the URL fragment, removes the
-fragment from the address bar, and the server deletes the file after successful
-setup. Local development may instead set `LOCALFI_VAULT_BOOTSTRAP_TOKEN` only in
-the server process. Never commit either credential. Initialized vaults reject
-setup even if a supervisor later restores one.
+`./setup.sh` generates the Docker bootstrap token in an ignored, owner-only
+`.env`. Compose validates it and prints a one-time setup link. The browser reads
+the token from the URL fragment and removes the fragment from the address bar.
+Local development exports the same variable only to the server process. Never
+commit or share the token. Initialized vaults reject setup even when the variable
+remains configured, so cleanup and a container restart are unnecessary.
 
 Setup is browser-only because the recovery secret is shown once. Store it
 offline, apart from the passphrase and database. Recovery issues a replacement;

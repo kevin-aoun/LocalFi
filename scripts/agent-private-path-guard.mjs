@@ -16,6 +16,7 @@ const POLICY_ROOTS = new Set([
 ]);
 const POLICY_FILES = new Set([
   "AGENTS.md",
+  "setup.sh",
   "scripts/agent-private-path-guard.mjs",
   "scripts/agent-private-path-guard.sh",
 ]);
@@ -59,7 +60,7 @@ function commandReason(command, cwd) {
   const escapedCwd = normalizedPath(cwd).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const privateRoot = "(?:data|backups|exports|\\.agent)";
   const policyRoot = "(?:\\.claude|\\.clinerules|\\.codex|\\.cursor|\\.gemini|\\.opencode|\\.pi|\\.windsurf)";
-  const policyFile = "(?:AGENTS\\.md|scripts/agent-private-path-guard\\.(?:mjs|sh))";
+  const policyFile = "(?:AGENTS\\.md|setup\\.sh|scripts/agent-private-path-guard\\.(?:mjs|sh))";
   const boundary = "(?:^|[\\s\\\"'`=,;|&<>(])";
 
   if (new RegExp(`${boundary}(?:\\./|\\$PWD/|\\$\\{PWD\\}/)?${privateRoot}(?:/|$)`, "i").test(value) ||

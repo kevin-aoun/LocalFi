@@ -17,6 +17,7 @@ describe("agent private-path guard", () => {
     { agent_action_name: "pre_run_command", tool_info: { command_line: "docker compose exec app sh" }, cwd: ROOT },
     { hook_event_name: "preToolUse", tool_name: "Write", tool_input: { path: ".cursor/hooks.json" }, cwd: ROOT },
     { toolName: "write_file", tool_input: { path: "scripts/agent-private-path-guard.mjs" }, cwd: ROOT },
+    { tool_name: "Shell", tool_input: { command: "./setup.sh" }, cwd: ROOT },
     { tool_name: "mcp_filesystem_read", tool_input: { arbitrary: "exports/owner.csv" }, cwd: ROOT },
   ])("blocks a private target %#", (input) => {
     expect(evaluateAgentToolInput(input, ROOT).allowed).toBe(false);
