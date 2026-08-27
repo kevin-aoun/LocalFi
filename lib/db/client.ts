@@ -145,8 +145,8 @@ export function assertPlaintextFixturePath(file: string): void {
 function plaintextFixtureMode(file: string): boolean {
   if (process.env.LOCALFI_VAULT_TEST_MODE !== "plaintext") return false;
   assertPlaintextFixturePath(file);
-  if (process.env.NODE_ENV !== "test" && process.env.LOCALFI_DEMO_GENERATOR !== "1") {
-    throw new VaultLockedError("Plaintext fixture mode is restricted to tests and demo generation.");
+  if (process.env.NODE_ENV !== "test") {
+    throw new VaultLockedError("Plaintext fixture mode is restricted to automated tests.");
   }
   return true;
 }

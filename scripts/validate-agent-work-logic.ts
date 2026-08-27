@@ -102,7 +102,7 @@ function isDateOrLedgerPath(file: string): boolean {
 }
 
 function isComposePath(file: string): boolean {
-  return file === "Dockerfile" || file === "docker-compose.yml" || file === "agent/Dockerfile";
+  return file === "Dockerfile" || file === "docker-compose.yml";
 }
 
 function testCandidates(file: string): string[] {
@@ -130,11 +130,7 @@ function testCandidates(file: string): string[] {
     }
   }
 
-  if (parts[0] === "app" && parts[1] === "api" && parts[2] === "agent") {
-    return ["lib/agent/__tests__"];
-  }
-
-  if (parts[0] === "lib" && ["agent", "db", "history", "ledger"].includes(parts[1] ?? "")) {
+  if (parts[0] === "lib" && ["db", "history", "ledger", "snapshot"].includes(parts[1] ?? "")) {
     return [`lib/${parts[1]}/__tests__`];
   }
 
@@ -149,7 +145,6 @@ function testCandidates(file: string): string[] {
     return [`lib/__tests__/${stem}.test.ts`, `lib/__tests__/${stem}.test.tsx`];
   }
 
-  if (file === "scripts/agent-cli.ts") return ["lib/agent/__tests__"];
   if (/^scripts\/ledger-/.test(file)) return ["lib/ledger/__tests__"];
 
   if (parts[0] === "scripts" && parts.length === 2) {
@@ -159,11 +154,6 @@ function testCandidates(file: string): string[] {
     ];
   }
 
-  if (parts[0] === "agent" && file.endsWith(".py")) {
-    return ["lib/agent/__tests__/needle-client.test.ts"];
-  }
-
-  if (parts[0] === "eval") return ["eval/__tests__"];
   return [];
 }
 
@@ -208,7 +198,6 @@ export function planValidation(
   const pythonFiles = existingFiles.filter((file) => file.endsWith(".py"));
   const databaseChanged = files.some(isDatabasePath);
   const dateOrLedgerChanged = files.some(isDateOrLedgerPath);
-  const evalCorpusChanged = files.some((file) => file.startsWith("eval/") && file.endsWith(".jsonl"));
   const nonDocumentationChanged = files.some((file) => !isDocumentation(file));
 
   if (toolingChanged) {
@@ -250,8 +239,6 @@ export function planValidation(
       }
     }
     if (databaseChanged && exists("lib/db/__tests__")) candidates.add("lib/db/__tests__");
-    if (evalCorpusChanged && exists("eval/__tests__")) candidates.add("eval/__tests__");
-
     const testTargets = uniqueSorted(candidates);
     const testableCodeChanged = files.some((file) => /\.(?:[cm]?[jt]s|tsx|sql|jsonl)$/i.test(file));
     if (testTargets.length > 0) {

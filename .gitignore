@@ -56,12 +56,12 @@ next-env.d.ts
 /backups/
 /exports/
 
-# Local agent state can contain ledger details
+# Local coordination state can contain ledger details
 /.agent/
 /CLAUDE.local.md
 /.claude/settings.local.json
 
-# python sidecar (agent/needle_sidecar.py)
+# Python caches
 __pycache__/
 *.py[cod]
 

@@ -857,7 +857,7 @@ describe("the Budgets UI keeps the house conventions", () => {
   });
 
   it("the create/update actions refuse an Income budget themselves", () => {
-    // The UI is not the only caller: POST /api/agent and the CLI reach these
+    // The UI is not the only caller: server-side projections reach these
     // actions directly, so the gate has to live here.
     const source = stripComments(read("app/actions/budgets/mutations.ts"));
     expect(source).toMatch(/incomeBudgetRefusal/);

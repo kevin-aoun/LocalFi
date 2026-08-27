@@ -55,6 +55,9 @@ This file records durable choices and rejected alternatives. See the
   output runs on Node 20. CI uses webpack and packages migration files.
 - **Reviewed dependencies.** Dependabot updates need green CI and production
   audit review; exceptions require a documented reachability decision.
+- **Source-only coding sandboxes.** Automated coding starts from a clean,
+  tracked-only snapshot in a Docker microVM. Owner data, ignored files, shared
+  skills, credentials, and the host Docker daemon do not cross that boundary.
 
 ## UI and integrations
 

@@ -361,7 +361,7 @@ describe("updateBudget / deleteBudget", () => {
 /**
  * Regressions for two defects found while building the budgets UI.
  *
- * Both were reported by the UI agent rather than hit by a user, and neither was
+ * Both were found by automated review rather than hit by a user, and neither was
  * covered: the guard bug produced a confusing internal error message, and the
  * coverage bug made a real limit the user had set unreachable from the app.
  */
