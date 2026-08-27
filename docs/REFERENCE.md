@@ -23,6 +23,7 @@ code moves.
 | Migrations | `drizzle/migrations/` | Generated SQL journal and snapshots |
 | Tests | `**/__tests__/` | Unit and action/database regression coverage |
 | Scripts | `scripts/` | Explicit maintenance and recovery commands |
+| Snapshot API | `lib/snapshot/`, `app/api/snapshot/` | Optional authenticated daily snapshot scheduler |
 
 ## Routes
 
@@ -50,8 +51,8 @@ code moves.
 | `POST` | `/api/vault/lock` | Lock, close the in-memory database, and clear the session |
 | `POST` | `/api/vault/recovery` | Reset the passphrase with the recovery secret and rotate recovery material |
 
-The UI uses Server Actions, not a public REST API. `/api/snapshot` requires an
-`AGENT_API_TOKEN` bearer token.
+The UI uses Server Actions, not a public REST API. `/api/snapshot` requires a
+`SNAPSHOT_API_TOKEN` bearer token.
 
 ## Extension checklist
 
@@ -78,6 +79,7 @@ The UI uses Server Actions, not a public REST API. `/api/snapshot` requires an
 | Owner setup | Browser `/vault` flow with one-use `LOCALFI_VAULT_BOOTSTRAP_TOKEN` |
 | Headless authorization | `authorizeDatabaseVaultFromEnvironment` around supported CLI callers |
 | Compose permissions | `data-permissions` one-shot service in `docker-compose.yml` |
+| Source-only coding sandbox | `scripts/source-sandbox.ts`, `bun run sandbox:source -- <template>` |
 
 LocalFi is single-owner and loopback-only, not an internet authentication
 system. See [SECURITY.md](SECURITY.md).

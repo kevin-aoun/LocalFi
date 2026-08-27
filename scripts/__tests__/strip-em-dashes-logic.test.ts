@@ -128,7 +128,7 @@ describe("rule 4: label separator -> colon", () => {
     expect(run(source, "f.tsx")).toContain('placeholder="Optional: e.g. monthly savings"');
   });
 
-  // lib/agent/resolve.ts:15 — a numbered documentation list
+  // A numbered documentation list.
   it("rewrites a documentation bullet", () => {
     const source = "/**\n *   1. exact       — case-insensitive, whitespace-trimmed\n */\n";
     expect(run(source)).toBe("/**\n *   1. exact: case-insensitive, whitespace-trimmed\n */\n");
@@ -247,7 +247,7 @@ describe("rule 2: ranges", () => {
     expect(rulesOf(source)).toEqual(["range"]);
   });
 
-  // lib/agent/slash.ts:505 — the same shape, but an EM dash, which is a label
+  // The same shape with an EM dash is a label.
   it("treats an em dash between two interpolated values as a label separator", () => {
     const source = "lines.push(`${spec.usage} — ${spec.summary}`);\n";
     expect(run(source)).toBe("lines.push(`${spec.usage}: ${spec.summary}`);\n");
@@ -392,7 +392,7 @@ describe("never corrupts code", () => {
   });
 
   it("leaves a regular expression alone", () => {
-    // lib/agent/__tests__/slash.test.ts:426
+    // A regular expression may contain prose punctuation literally.
     const source = "expect(help).not.toMatch(/\\/budget — Rent/);\n";
     const plan = planSource(source, "f.ts");
     expect(plan.transformed).toBe(source);
@@ -465,8 +465,7 @@ describe("dashes used as a value, not as punctuation", () => {
   });
 
   it("leaves a separator constant alone", () => {
-    // lib/agent/slash.ts:92 — rewriting this would break three assertions in
-    // lib/agent/__tests__/slash.test.ts.
+    // Separator constants are intentional glyphs, not prose punctuation.
     const source = 'const NOTE_SEPARATOR = " — ";\n';
     expect(run(source)).toBe(source);
     expect(skipsOf(source)).toEqual(["glyph"]);

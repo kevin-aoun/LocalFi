@@ -29,58 +29,24 @@ hash-linked ledger that drives balances, budgets, reports, and positions.
 ## Customize your LocalFi
 
 **Every component is customizable:** layout, colors, categories, reports,
-workflows, data model, ledger projections, and local integrations. Start your
-coding agent at the repository root with a concrete outcome:
+workflows, data model, ledger projections, and local integrations.
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/openai.png" />
-    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/openai.png" width="48" height="48" alt="OpenAI" title="OpenAI" />
-  </picture>&nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/claude-color.png" />
-    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/claude-color.png" width="48" height="48" alt="Claude" title="Claude" />
-  </picture>&nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/gemini-color.png" />
-    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/gemini-color.png" width="48" height="48" alt="Google Gemini" title="Google Gemini" />
-  </picture>&nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/cursor.png" />
-    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/cursor.png" width="48" height="48" alt="Cursor" title="Cursor" />
-  </picture>&nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/windsurf.png" />
-    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/windsurf.png" width="48" height="48" alt="Windsurf" title="Windsurf" />
-  </picture>&nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/githubcopilot.png" />
-    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/githubcopilot.png" width="48" height="48" alt="GitHub Copilot" title="GitHub Copilot" />
-  </picture>&nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/opencode.png" />
-    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/opencode.png" width="48" height="48" alt="OpenCode" title="OpenCode" />
-  </picture>&nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/dark/pi.png" />
-    <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-png/light/pi.png" width="48" height="48" alt="Pi" title="Pi" />
-  </picture>
-</p>
+For automated coding, use a source-only [Docker Sandbox](https://docs.docker.com/ai/sandboxes/):
 
-```text
-Understand this LocalFi repository, then help me customize it by [describe the outcome you want]. Before editing, read AGENTS.md, every scoped rule it identifies for the files you expect to touch, and the relevant parts of README.md, docs/REFERENCE.md, and docs/DECISIONS.md. Trace the existing implementation, its callers, data flow, and nearby tests. Summarize the constraints you found and propose the smallest coherent plan; ask only about choices that would materially change the result. Preserve the local-only privacy model, integer-cents money, local calendar dates, and append-only ledger. Never inspect or derive examples from data/ or my real database; use fictional fixtures and explicit temporary database paths. Add or update regression tests, then validate every changed path with bun run validate:agent -- <changed paths> and run the full validator when the rules require it. Finish by reporting what changed, what was validated, and any remaining risks. Do not commit or push unless I explicitly ask.
+```bash
+bun run sandbox:source -- codex
 ```
 
-| What you want to customize | Start here |
-| --- | --- |
-| Dashboard composition, components, or visual language | `app/(dashboard)/`, `components/dashboard/`, `.claude/rules/frontend.md` |
-| Reports or financial calculations | `app/actions/`, `lib/`, `.claude/rules/financial-domain.md` |
-| Accounts, transactions, budgets, or investments | `docs/REFERENCE.md`, `lib/db/schema/`, `lib/ledger/` |
-| A local integration or provider | The nearest service in `lib/`, its Server Action boundary, and the local-only product constraints |
+The launcher requires a clean commit, copies only tracked source to a separate
+directory, then enables clone isolation and disables shared skills. It never
+mounts the owner checkout, databases, exports, backups, environment files, or
+the host Docker socket. Do not run `sbx` directly from this checkout: even its
+clone mode exposes ignored files in the source directory read-only.
 
-`AGENTS.md` and `.claude/rules/` hold the durable constraints. Work on a branch,
-keep vault files outside Git, and review generated migrations before using them.
-See [CONTRIBUTING.md](CONTRIBUTING.md) to propose a change upstream.
+Install `sbx` from Docker's [installation guide](https://docs.docker.com/ai/sandboxes/install/).
+Replace `codex` with another supported template when needed. Commit work inside
+the sandbox before removing it. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+project invariants and validation commands.
 
 ## What it does
 
@@ -91,7 +57,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to propose a change upstream.
 
 ## Showcase
 
-All values come from the fictional fixture, never a personal database.
+All displayed values are synthetic and contain no personal database content.
 
 ### Dashboard — Your whole financial picture
 
@@ -156,6 +122,7 @@ Map a chronological itinerary with connected stops and country flags.
 | Node.js | 20+ | `node --version` |
 | Bun | 1.3.14 | `bun --version` |
 | Docker Compose | Current | `docker compose version` |
+| Docker Sandboxes | Optional | `sbx version` |
 
 LocalFi serves the UI and Server Actions at `127.0.0.1:1313`.
 
@@ -201,24 +168,6 @@ Verify with `docker compose ps -a`: `app` should be healthy and
 `data/` to `${DOCKER_UID:-1000}:${DOCKER_GID:-1000}` and enforces private modes;
 the app runs as that non-root owner. The next ordinary Compose start drops the
 unset token from container configuration.
-
-### Fictional demo
-
-Explore a populated app without using or replacing your own database:
-
-```bash
-LOCALFI_DEMO_DIR="$(mktemp -d)"
-LOCALFI_DEMO_DB="$LOCALFI_DEMO_DIR/localfi-demo.db"
-bun run db:demo -- --output "$LOCALFI_DEMO_DB"
-BUDGET_DB_PATH="$LOCALFI_DEMO_DB" \
-  DATABASE_URL="file:$LOCALFI_DEMO_DB" \
-  LOCALFI_VAULT_TEST_MODE=plaintext \
-  LOCALFI_DEMO_GENERATOR=1 \
-  bun run dev
-```
-
-The deterministic generator verifies its fictional ledger and refuses owner or
-existing database paths.
 
 ## Verification
 
@@ -290,7 +239,7 @@ flowchart LR
 | `DOCKER_UID` / `DOCKER_GID` | No | Host user IDs for the Docker bind mount |
 | `NOMINATIM_URL` | No | Geocoding endpoint for travel locations |
 | `NOMINATIM_USER_AGENT` | No | Geocoding user agent |
-| `AGENT_API_TOKEN` | For `/api/snapshot` | Bearer token for the optional snapshot scheduler |
+| `SNAPSHOT_API_TOKEN` | For `/api/snapshot` | Bearer token for the optional snapshot scheduler |
 
 ## Security and recovery
 

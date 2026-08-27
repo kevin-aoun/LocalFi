@@ -19,6 +19,7 @@ import {
   closeDb,
   destroyDatabaseVaultAuthorization,
   installDatabaseVaultAuthorizationProvider,
+  plaintextFixtureAccessAllowed,
   readDb,
   snapshotEncryptedDatabaseGeneration,
   unlockDatabaseVault,
@@ -80,6 +81,18 @@ describe.sequential("encrypted sql.js client boundary", () => {
     process.env.BUDGET_DB_PATH = defaultPath;
     expect(() => assertPlaintextFixturePath(defaultPath)).toThrow(/explicit non-default path/i);
     process.env.BUDGET_DB_PATH = dbPath;
+  });
+
+  it("never enables plaintext fixture access outside the test process", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("LOCALFI_VAULT_TEST_MODE", "plaintext");
+    vi.stubEnv("LOCALFI_DEMO_GENERATOR", "1");
+
+    try {
+      expect(() => plaintextFixtureAccessAllowed(dbPath)).toThrow(/restricted to automated tests/i);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("sets up a usable encrypted first generation with default categories", async () => {

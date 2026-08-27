@@ -64,8 +64,7 @@ services:
       - NODE_ENV=production
       - DATABASE_URL=file:./data/budget.db
       - NEXT_PUBLIC_APP_URL=http://localhost:1313
-      - NEEDLE_URL=http://needle:8765
-      - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
+      - SNAPSHOT_API_TOKEN=${SNAPSHOT_API_TOKEN:-}
       - LOCALFI_VAULT_BOOTSTRAP_TOKEN=${LOCALFI_VAULT_BOOTSTRAP_TOKEN:-}
     volumes:
       - ./data:/app/data
@@ -77,22 +76,6 @@ services:
       retries: 3
       start_period: 40s
 
-  needle:
-    profiles: [ai]
-    build:
-      context: .
-      dockerfile: agent/Dockerfile
-    environment:
-      - NEEDLE_HOST=0.0.0.0
-      - NEEDLE_PORT=8765
-      - NEEDLE_PLATFORM=cpu
-      - NEEDLE_ALLOW_NON_LOOPBACK=1
-      - NEEDLE_CHECKPOINT=${NEEDLE_CHECKPOINT:-}
-    volumes:
-      - ${NEEDLE_MODELS_DIR:-~/.local/share/cactus-needle/checkpoints}:/opt/needle-src/checkpoints:ro
-      - needle-jax-cache:/tmp/jax-cache
-    restart: unless-stopped
-
   snapshot:
     profiles: [scheduler]
     image: alpine:latest
@@ -100,27 +83,23 @@ services:
       app:
         condition: service_healthy
     environment:
-      - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
+      - SNAPSHOT_API_TOKEN=${SNAPSHOT_API_TOKEN:-}
       - SNAPSHOT_INTERVAL_HOURS=${SNAPSHOT_INTERVAL_HOURS:-6}
     command:
       - sh
       - -c
       - |
         apk add --no-cache curl >/dev/null 2>&1
-        if [ -z "$$AGENT_API_TOKEN" ]; then
-          echo "snapshot: AGENT_API_TOKEN is unset; refusing to run (the endpoint would 503 anyway)."
+        if [ -z "$$SNAPSHOT_API_TOKEN" ]; then
+          echo "snapshot: SNAPSHOT_API_TOKEN is unset; refusing to run (the endpoint would 503 anyway)."
           exit 1
         fi
         echo "snapshot: recording every $$SNAPSHOT_INTERVAL_HOURS h (idempotent per day)"
         while true; do
           RESP=$$(curl -s --max-time 30 -X POST http://app:1313/api/snapshot \
-                    -H "Authorization: Bearer $$AGENT_API_TOKEN" \
+                    -H "Authorization: Bearer $$SNAPSHOT_API_TOKEN" \
                     -H 'Content-Type: application/json' 2>&1)
           echo "$$(date -u '+%Y-%m-%dT%H:%M:%SZ') $$RESP"
           sleep $$(( $$SNAPSHOT_INTERVAL_HOURS * 3600 ))
         done
     restart: unless-stopped
-
-volumes:
-  needle-jax-cache:
-    driver: local

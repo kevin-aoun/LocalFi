@@ -7,8 +7,8 @@ Only the latest `main` is supported. Keep backups before upgrades.
 ## Reporting a vulnerability
 
 Use the repository's private security-advisory form. Include impact, affected
-versions, and reproduction steps using fictional data. Do not open a public
-issue.
+versions, and minimal reproduction steps without attaching a database, export,
+backup, or credential. Do not open a public issue.
 
 ## Security posture
 
