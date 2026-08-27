@@ -28,20 +28,40 @@ hash-linked ledger that drives balances, budgets, reports, and positions.
 
 ## Run LocalFi
 
+### Docker
+
 Install [Git](https://git-scm.com/downloads) and [Docker Desktop](https://www.docker.com/products/docker-desktop/), then run:
 
 ```bash
 git clone https://github.com/kevin-aoun/LocalFi.git
 cd LocalFi
+./setup.sh
 docker compose up --build
 ```
 
-On first start, the terminal prints a **LocalFi first-run setup** link. Open it,
-choose a passphrase, and save the recovery secret somewhere off this computer.
-Later starts use the same Compose command and only ask for your passphrase.
+`./setup.sh` creates an owner-only `.env` with the required one-time setup key
+and prints the next command. Compose then prints a **LocalFi first-run setup**
+link. Open it, choose a passphrase, and save the recovery secret off-device.
 
 Open <http://localhost:1313>. Keep the terminal open while LocalFi is running;
-press `Ctrl+C` there to stop it.
+press `Ctrl+C` to stop it. Later starts only need `docker compose up --build`.
+If the setup link scrolls away, run `docker compose logs data-permissions`.
+
+### Local development
+
+Install Node.js 20+ and Bun 1.3.14, then run:
+
+```bash
+bun install --frozen-lockfile
+cp .env.example .env.local
+export LOCALFI_VAULT_BOOTSTRAP_TOKEN="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')"
+printf 'One-time setup credential: %s\n' "$LOCALFI_VAULT_BOOTSTRAP_TOKEN"
+bun run dev
+```
+
+Open <http://localhost:1313>, enter the printed credential, choose a
+passphrase, and save the recovery secret off-device. The export is only needed
+for first setup; no server restart is required afterward.
 
 ## Customize your LocalFi
 
@@ -140,33 +160,6 @@ Map a chronological itinerary with connected stops and country flags.
 
 LocalFi serves the UI and Server Actions at `127.0.0.1:1313`.
 
-## Development
-
-### Local development
-
-```bash
-bun install --frozen-lockfile
-cp .env.example .env.local
-export LOCALFI_VAULT_BOOTSTRAP_TOKEN="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')"
-printf 'One-time setup credential: %s\n' "$LOCALFI_VAULT_BOOTSTRAP_TOKEN"
-bun run dev
-```
-
-Open <http://localhost:1313>, enter the printed setup credential, choose a vault
-passphrase, and save the one-time recovery secret off-device. The credential
-authorizes setup once; it is not your passphrase. After setup, keep the server
-running and run `unset LOCALFI_VAULT_BOOTSTRAP_TOKEN`. Never save the token in a
-committed file. Existing vaults start without it.
-
-Setup is browser-only so LocalFi can show the recovery secret exactly once. It
-also converts valid same-owner legacy databases and tightens permissions to
-`0700` directories and `0600` files. Unsafe paths fail closed.
-
-For Docker diagnostics, `docker compose ps -a` should show `app` healthy and
-`data-permissions` exited successfully. That one-shot service prepares private
-file permissions and creates the one-use setup link only when no encrypted
-vault exists. If you missed the link, run `docker compose logs data-permissions`.
-
 ## Verification
 
 ```bash
@@ -231,8 +224,7 @@ flowchart LR
 | --- | --- | --- |
 | `DATABASE_URL` | No | SQLite URL; defaults to `file:./data/budget.db` |
 | `BUDGET_DB_PATH` | No | Direct database-file override for scripts and tests |
-| `LOCALFI_VAULT_BOOTSTRAP_TOKEN` | Local development setup | Optional explicit one-use browser setup credential |
-| `LOCALFI_VAULT_BOOTSTRAP_TOKEN_FILE` | Docker setup | Owner-only credential file generated and consumed by Compose |
+| `LOCALFI_VAULT_BOOTSTRAP_TOKEN` | First setup | One-use browser setup key; `./setup.sh` writes it to `.env` for Docker |
 | `LOCALFI_VAULT_PASSPHRASE` | Headless database commands | One-process vault authorization |
 | `NEXT_PUBLIC_APP_URL` | No | LocalFi URL; defaults to `http://localhost:1313` |
 | `DOCKER_UID` / `DOCKER_GID` | No | Host user IDs for the Docker bind mount |

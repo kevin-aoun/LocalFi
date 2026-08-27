@@ -28,6 +28,7 @@ glob_scan_max_depth = 8
 ".pi" = "read"
 ".windsurf" = "read"
 "AGENTS.md" = "read"
+"setup.sh" = "read"
 "scripts/agent-private-path-guard.mjs" = "read"
 "scripts/agent-private-path-guard.sh" = "read"
 "**/*.db" = "deny"

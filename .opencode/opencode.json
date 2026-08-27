@@ -43,6 +43,7 @@
     { "action": "edit", "resource": ".pi/*", "effect": "deny" },
     { "action": "edit", "resource": ".windsurf/*", "effect": "deny" },
     { "action": "edit", "resource": "AGENTS.md", "effect": "deny" },
+    { "action": "edit", "resource": "setup.sh", "effect": "deny" },
     { "action": "edit", "resource": "scripts/agent-private-path-guard.mjs", "effect": "deny" },
     { "action": "edit", "resource": "scripts/agent-private-path-guard.sh", "effect": "deny" },
     { "action": "edit", "resource": "*.db", "effect": "deny" },
