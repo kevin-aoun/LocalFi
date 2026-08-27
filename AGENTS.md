@@ -20,10 +20,12 @@ client does not auto-load Claude rules.
   encrypted but sensitive.
 - Treat `data/`, database files, exports, backups, credentials, and real ledger
   values as private. Never inspect, copy, log, seed from, or commit them.
-- Run coding tools only through `bun run sandbox:source -- <template>`. The
-  launcher exposes committed source through a disposable Docker Sandbox; never
-  mount the owner checkout, a database, export, backup, environment file, shared
-  skill store, or host Docker socket into that environment.
+- Keep coding agents away from owner data. Repository harness policies and
+  pre-tool hooks must block private paths, database/export suffixes, Docker, and
+  SQLite access. Never disable or weaken those controls during an agent session.
+- Harness controls are defense in depth, not OS isolation. Never give an agent
+  a passphrase, recovery secret, database, export, backup, credential, host
+  Docker socket, or an external tool that can retrieve them.
 - Preserve pre-existing work. Check `git status` before editing and do not rewrite
   unrelated changes in a dirty worktree.
 

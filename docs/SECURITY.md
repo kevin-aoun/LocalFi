@@ -17,6 +17,38 @@ An unlocked process holds decrypted data in memory. Root, debuggers, compromised
 same-user processes, swap, or crash dumps may expose it. Use full-disk encryption
 and lock both the screen and vault when away.
 
+## Agent access
+
+The shared `scripts/agent-private-path-guard.mjs` rejects direct tool, shell,
+and MCP attempts involving `data/`, backups, exports, credentials, database
+suffixes, Docker, SQLite, or the guard configuration itself. Each supported
+harness uses its documented project control:
+
+| Harness | Project control | One-time user action |
+| --- | --- | --- |
+| [Cursor](https://docs.cursor.com/cli/reference/permissions) | `.cursor/cli.json`, `.cursor/hooks.json` | Trust the project and keep hooks enabled |
+| [Claude Code](https://code.claude.com/docs/en/hooks) | `.claude/settings.json` deny rules, sandbox, and `PreToolUse` | Approve the project hook; never use bypass-permissions mode |
+| [Codex](https://learn.chatgpt.com/docs/permissions) | `.codex/config.toml` filesystem permission profile | Trust the project so project config loads |
+| [Gemini CLI](https://geminicli.com/docs/hooks/reference/) | `.gemini/settings.json` `BeforeTool` hook | Trust the folder; verify it in `/hooks panel` |
+| [OpenCode](https://opencode.ai/v2/docs/permissions) | `.opencode/opencode.json` V2 permissions | Keep project configuration enabled; shell is denied |
+| [Windsurf](https://docs.windsurf.com/windsurf/cascade/hooks) | `.windsurf/hooks.json` pre-read/write/command/MCP hooks | Trust the workspace hooks |
+| [Cline](https://docs.cline.bot/customization/hooks) | `.clinerules/hooks/PreToolUse` | Enable Hooks in Cline, or run `cline config set hooks-enabled=true` |
+| [Pi](https://pi.dev/docs/latest/extensions) | `.pi/extensions/private-finance-guard.ts` tool interceptor | Trust the project so the extension loads |
+
+Install Node.js 20+ before opening the repository in a harness; hooks fail
+closed when Node is unavailable where the harness supports fail-closed hooks.
+On Windows, use WSL or put Git's `sh` on `PATH`; Cline also includes a PowerShell hook.
+Test the active harness by asking it to read `data/blocked-canary.db`. It must
+refuse before any file operation. Do not create that file or use a real path for
+the test.
+
+These controls govern harness tools, not every process running as your OS user.
+A same-user shell, disabled hook, ungoverned extension, or external MCP server
+can bypass project policy. Never give an agent a passphrase, recovery secret,
+database, export, backup, host Docker access, or a tool that can retrieve them.
+For a hard boundary, use a separate OS account, VM, or container that never
+receives owner data.
+
 ## Setup, secrets, and recovery
 
 The three secrets have separate jobs:
@@ -27,10 +59,12 @@ The three secrets have separate jobs:
 | Passphrase | Unlocks the vault |
 | Recovery secret | Resets a lost passphrase and rotates recovery material |
 
-Generate the 24–512 character `LOCALFI_VAULT_BOOTSTRAP_TOKEN` before first start,
-pass it only to the server process, and enter it in `/vault`. Remove the shell
-copy after setup without restarting. Never commit it. Initialized vaults reject
-setup even if a supervisor later restores the variable.
+Compose generates an owner-only bootstrap credential file and prints a one-time
+setup link. The browser reads the credential from the URL fragment, removes the
+fragment from the address bar, and the server deletes the file after successful
+setup. Local development may instead set `LOCALFI_VAULT_BOOTSTRAP_TOKEN` only in
+the server process. Never commit either credential. Initialized vaults reject
+setup even if a supervisor later restores one.
 
 Setup is browser-only because the recovery secret is shown once. Store it
 offline, apart from the passphrase and database. Recovery issues a replacement;

@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "pre_read_code": [
+      {
+        "command": "sh scripts/agent-private-path-guard.sh windsurf",
+        "show_output": true
+      }
+    ],
+    "pre_write_code": [
+      {
+        "command": "sh scripts/agent-private-path-guard.sh windsurf",
+        "show_output": true
+      }
+    ],
+    "pre_run_command": [
+      {
+        "command": "sh scripts/agent-private-path-guard.sh windsurf",
+        "show_output": true
+      }
+    ],
+    "pre_mcp_tool_use": [
+      {
+        "command": "sh scripts/agent-private-path-guard.sh windsurf",
+        "show_output": true
+      }
+    ]
+  }
+}

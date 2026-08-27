@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "sh scripts/agent-private-path-guard.sh cursor",
+        "matcher": "Shell|Read|Write|MCP: .*",
+        "failClosed": true
+      }
+    ],
+    "beforeReadFile": [
+      {
+        "command": "sh scripts/agent-private-path-guard.sh cursor",
+        "failClosed": true
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "sh scripts/agent-private-path-guard.sh cursor",
+        "failClosed": true
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "sh scripts/agent-private-path-guard.sh cursor",
+        "failClosed": true
+      }
+    ],
+    "beforeTabFileRead": [
+      {
+        "command": "sh scripts/agent-private-path-guard.sh cursor",
+        "failClosed": true
+      }
+    ]
+  }
+}

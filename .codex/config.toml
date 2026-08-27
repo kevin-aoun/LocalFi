@@ -1,3 +1,53 @@
+default_permissions = "localfi-source"
+
+[permissions.localfi-source]
+description = "Edit LocalFi source without access to owner data or the host filesystem."
+extends = ":workspace"
+
+[permissions.localfi-source.filesystem]
+":root" = "deny"
+":minimal" = "read"
+glob_scan_max_depth = 8
+
+[permissions.localfi-source.filesystem.":workspace_roots"]
+"." = "write"
+"data" = "deny"
+"backups" = "deny"
+"exports" = "deny"
+".agent" = "deny"
+".env" = "deny"
+".env.*" = "deny"
+".env.example" = "read"
+"credentials*.json" = "deny"
+".claude" = "read"
+".clinerules" = "read"
+".codex" = "read"
+".cursor" = "read"
+".gemini" = "read"
+".opencode" = "read"
+".pi" = "read"
+".windsurf" = "read"
+"AGENTS.md" = "read"
+"scripts/agent-private-path-guard.mjs" = "read"
+"scripts/agent-private-path-guard.sh" = "read"
+"**/*.db" = "deny"
+"**/*.db-*" = "deny"
+"**/*.sqlite" = "deny"
+"**/*.sqlite3" = "deny"
+"**/*.bak" = "deny"
+"**/*.backup" = "deny"
+"**/*.csv" = "deny"
+"**/*.tsv" = "deny"
+"**/*.xls" = "deny"
+"**/*.xlsx" = "deny"
+"**/*.ods" = "deny"
+"**/*.ofx" = "deny"
+"**/*.qfx" = "deny"
+"**/*.qif" = "deny"
+
+[permissions.localfi-source.network]
+enabled = false
+
 [mcp_servers.shadcn]
 command = "npx"
 args = [

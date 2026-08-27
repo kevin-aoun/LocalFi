@@ -11,8 +11,8 @@ This file records durable choices and rejected alternatives. See the
 - **Encrypted vault.** The live database and managed backups are authenticated
   encrypted generations. A passphrase-backed session holds the key only while
   unlocked. Restart, lock, or 1–120 minutes of inactivity clears it.
-- **Three distinct secrets.** A process-scoped bootstrap token authorizes one
-  browser setup, the passphrase unlocks, and the separately wrapped recovery
+- **Three distinct secrets.** A one-use bootstrap credential authorizes browser
+  setup, the passphrase unlocks, and the separately wrapped recovery
   secret resets the passphrase. Browser setup shows recovery material once;
   headless setup is refused.
 - **Defense in depth.** Owner-only modes reduce accidental exposure but do not
@@ -55,9 +55,10 @@ This file records durable choices and rejected alternatives. See the
   output runs on Node 20. CI uses webpack and packages migration files.
 - **Reviewed dependencies.** Dependabot updates need green CI and production
   audit review; exceptions require a documented reachability decision.
-- **Source-only coding sandboxes.** Automated coding starts from a clean,
-  tracked-only snapshot in a Docker microVM. Owner data, ignored files, shared
-  skills, credentials, and the host Docker daemon do not cross that boundary.
+- **Harness-native agent guards.** Project hooks and permission profiles reject
+  direct access to owner data, financial file types, Docker, SQLite, and their
+  own policy files. They are deterministic defense in depth, not OS isolation;
+  same-user processes still require an encrypted vault and careful tool access.
 
 ## UI and integrations
 
