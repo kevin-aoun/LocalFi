@@ -69,7 +69,7 @@
     "recharts": "^2.15.4",
     "sql.js": "^1.13.0",
     "tailwind-merge": "^2.6.0",
-    "zod": "^3.25.76",
+    "zod": "^4.4.3",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
