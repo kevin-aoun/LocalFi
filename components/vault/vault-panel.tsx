@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { KeyRound, LockKeyhole, ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -14,6 +14,7 @@ import type { VaultStatus } from "@/lib/vault/session";
 import {
   canContinueAfterRecovery,
   initialVaultPanelMode,
+  setupCredentialFromFragment,
   type VaultPanelMode,
 } from "./vault-panel-logic";
 
@@ -43,6 +44,7 @@ export function VaultPanel({ initialStatus, initialError }: VaultPanelProps) {
   const [mode, setMode] = useState<VaultPanelMode>(initialVaultPanelMode(initialStatus));
   const [passphrase, setPassphrase] = useState("");
   const [bootstrapCredential, setBootstrapCredential] = useState("");
+  const [bootstrapCredentialFromLink, setBootstrapCredentialFromLink] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const [recoverySecret, setRecoverySecret] = useState("");
   const [nextRecoverySecret, setNextRecoverySecret] = useState<string | null>(null);
@@ -51,6 +53,15 @@ export function VaultPanel({ initialStatus, initialError }: VaultPanelProps) {
   const [error, setError] = useState<string | null>(initialError ?? null);
   const [submitting, setSubmitting] = useState(false);
   const assessment = useMemo(() => assessPassphrase(passphrase), [passphrase]);
+
+  useEffect(() => {
+    if (initialStatus !== "uninitialized") return;
+    const credential = setupCredentialFromFragment(window.location.hash);
+    if (!credential) return;
+    setBootstrapCredential(credential);
+    setBootstrapCredentialFromLink(true);
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  }, [initialStatus]);
 
   const continueToLocalFi = () => {
     router.push("/");
@@ -61,6 +72,7 @@ export function VaultPanel({ initialStatus, initialError }: VaultPanelProps) {
     setMode(next);
     setPassphrase("");
     setBootstrapCredential("");
+    setBootstrapCredentialFromLink(false);
     setConfirmation("");
     setRecoverySecret("");
     setAcknowledgeWeak(false);
@@ -157,7 +169,10 @@ export function VaultPanel({ initialStatus, initialError }: VaultPanelProps) {
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={submit}>
-            {mode === "setup" && (
+            {mode === "setup" && bootstrapCredentialFromLink && (
+              <p className="text-sm text-muted-foreground">First-run setup link verified.</p>
+            )}
+            {mode === "setup" && !bootstrapCredentialFromLink && (
               <div className="space-y-2">
                 <Label htmlFor="vault-bootstrap-credential">One-time setup credential</Label>
                 <Input
@@ -169,8 +184,7 @@ export function VaultPanel({ initialStatus, initialError }: VaultPanelProps) {
                   required
                 />
                 <p className="text-sm text-muted-foreground">
-                  Enter the value configured as LOCALFI_VAULT_BOOTSTRAP_TOKEN when this server was
-                  started. It is accepted only for first-run setup.
+                  Open the one-time link printed by Docker to fill this automatically.
                 </p>
               </div>
             )}
