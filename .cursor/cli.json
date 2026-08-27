@@ -36,6 +36,7 @@
       "Write(.pi/**)",
       "Write(.windsurf/**)",
       "Write(AGENTS.md)",
+      "Write(setup.sh)",
       "Write(scripts/agent-private-path-guard.mjs)",
       "Write(scripts/agent-private-path-guard.sh)",
       "Write(**/*.db)",
@@ -55,7 +56,9 @@
       "Shell(docker)",
       "Shell(/usr/bin/docker)",
       "Shell(podman)",
-      "Shell(sqlite3)"
+      "Shell(sqlite3)",
+      "Shell(setup.sh)",
+      "Shell(./setup.sh)"
     ]
   }
 }

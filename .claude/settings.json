@@ -38,6 +38,7 @@
       "Edit(.pi/**)",
       "Edit(.windsurf/**)",
       "Edit(AGENTS.md)",
+      "Edit(setup.sh)",
       "Edit(scripts/agent-private-path-guard.mjs)",
       "Edit(scripts/agent-private-path-guard.sh)",
       "Edit(**/*.db)",
@@ -69,6 +70,7 @@
       "Write(.pi/**)",
       "Write(.windsurf/**)",
       "Write(AGENTS.md)",
+      "Write(setup.sh)",
       "Write(scripts/agent-private-path-guard.mjs)",
       "Write(scripts/agent-private-path-guard.sh)",
       "Write(**/*.db)",
@@ -92,7 +94,9 @@
       "Bash(podman)",
       "Bash(podman *)",
       "Bash(sqlite3)",
-      "Bash(sqlite3 *)"
+      "Bash(sqlite3 *)",
+      "Bash(setup.sh)",
+      "Bash(./setup.sh)"
     ]
   },
   "hooks": {
