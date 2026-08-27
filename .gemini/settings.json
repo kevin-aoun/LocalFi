@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": ".*",
+        "sequential": true,
+        "hooks": [
+          {
+            "name": "localfi-private-path-guard",
+            "type": "command",
+            "command": "sh scripts/agent-private-path-guard.sh gemini",
+            "timeout": 5000,
+            "description": "Block access to LocalFi owner financial data and safety policies."
+          }
+        ]
+      }
+    ]
+  }
+}

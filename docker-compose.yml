@@ -5,7 +5,6 @@ services:
     environment:
       - LOCALFI_DATA_UID=${DOCKER_UID:-1000}
       - LOCALFI_DATA_GID=${DOCKER_GID:-1000}
-      - LOCALFI_VAULT_BOOTSTRAP_TOKEN=${LOCALFI_VAULT_BOOTSTRAP_TOKEN:-}
     volumes:
       - ./data:/app/data
     command:
@@ -16,16 +15,36 @@ services:
           *[!0-9:]*|:*|*:|*:*:*) echo "Invalid DOCKER_UID/DOCKER_GID" >&2; exit 1 ;;
         esac
         requires_bootstrap=1
-        if [ -f /app/data/budget.db ]; then
+        bootstrap_file=/app/data/.localfi-bootstrap-token
+        setup_url=
+        if [ -L /app/data/budget.db ]; then
+          echo "Refusing data preflight: budget.db must not be a symbolic link." >&2
+          exit 1
+        elif [ -e /app/data/budget.db ] && [ ! -f /app/data/budget.db ]; then
+          echo "Refusing data preflight: budget.db must be a regular file." >&2
+          exit 1
+        elif [ -f /app/data/budget.db ]; then
+          budget_links="$$(stat -c %h /app/data/budget.db 2>/dev/null)" || budget_links=invalid
+          if [ "$$budget_links" != 1 ]; then
+            echo "Refusing data preflight: budget.db must have exactly one hard link." >&2
+            exit 1
+          fi
           vault_magic="$$(od -An -tx1 -N8 /app/data/budget.db 2>/dev/null | tr -d ' \n')"
           if [ "$$vault_magic" = "4c465641554c5400" ]; then requires_bootstrap=0; fi
         fi
         if [ "$$requires_bootstrap" -eq 1 ]; then
-          token_length=$${#LOCALFI_VAULT_BOOTSTRAP_TOKEN}
-          if [ "$$token_length" -lt 24 ] || [ "$$token_length" -gt 512 ]; then
-            echo "LOCALFI_VAULT_BOOTSTRAP_TOKEN must contain 24-512 characters for first-run setup or legacy conversion." >&2
+          if [ -L "$$bootstrap_file" ] || { [ -e "$$bootstrap_file" ] && [ ! -f "$$bootstrap_file" ]; }; then
+            echo "Refusing unsafe bootstrap credential path." >&2
             exit 1
           fi
+          token="$$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
+          token_temp="$$(mktemp /app/data/.localfi-bootstrap-token.XXXXXX)"
+          chmod 0600 "$$token_temp"
+          printf '%s\n' "$$token" > "$$token_temp"
+          mv -f "$$token_temp" "$$bootstrap_file"
+          setup_url="http://localhost:1313/vault#setup=$$token"
+        else
+          rm -f "$$bootstrap_file"
         fi
         hardlink_marker=/tmp/localfi-hardlink-refused
         rm -f "$$hardlink_marker"
@@ -48,6 +67,13 @@ services:
         find /app/data -xdev -type d -exec chmod 0700 {} \;
         find /app/data -xdev -type f -exec chown "$$LOCALFI_DATA_UID:$$LOCALFI_DATA_GID" {} \;
         find /app/data -xdev -type f -exec chmod 0600 {} \;
+        if [ -n "$$setup_url" ]; then
+          echo
+          echo "LocalFi first-run setup"
+          echo "Open this one-time link after the app is ready:"
+          echo "$$setup_url"
+          echo
+        fi
     restart: "no"
 
   app:
@@ -65,7 +91,7 @@ services:
       - DATABASE_URL=file:./data/budget.db
       - NEXT_PUBLIC_APP_URL=http://localhost:1313
       - SNAPSHOT_API_TOKEN=${SNAPSHOT_API_TOKEN:-}
-      - LOCALFI_VAULT_BOOTSTRAP_TOKEN=${LOCALFI_VAULT_BOOTSTRAP_TOKEN:-}
+      - LOCALFI_VAULT_BOOTSTRAP_TOKEN_FILE=/app/data/.localfi-bootstrap-token
     volumes:
       - ./data:/app/data
     restart: unless-stopped

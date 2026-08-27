@@ -37,15 +37,18 @@ describe("operational CLI boundaries", () => {
   it("keeps Compose permission preparation separate from the non-root app", () => {
     const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
     expect(compose).toMatch(/data-permissions:[\s\S]*user: "0:0"/);
-    expect(compose).toMatch(/requires_bootstrap[\s\S]*LOCALFI_VAULT_BOOTSTRAP_TOKEN/);
-    expect(compose).toMatch(/token_length[\s\S]*-lt 24[\s\S]*-gt 512/);
+    expect(compose).toMatch(/requires_bootstrap[\s\S]*\/dev\/urandom/);
+    expect(compose).toMatch(/budget\.db must not be a symbolic link[\s\S]*stat -c %h/);
+    expect(compose).toMatch(/mktemp[\s\S]*chmod 0600[\s\S]*\.localfi-bootstrap-token/);
+    expect(compose).toContain("http://localhost:1313/vault#setup=$$token");
     expect(compose).toMatch(/hardlink_marker[\s\S]*stat -c %h[\s\S]*links.*!= 1/);
     expect(compose.indexOf("hardlink_marker")).toBeLessThan(compose.indexOf("-exec chown"));
     expect(compose).toMatch(/find \/app\/data[\s\S]*chmod 0700/);
     expect(compose).toMatch(/find \/app\/data[\s\S]*chmod 0600/);
     expect(compose).toMatch(/app:[\s\S]*condition: service_completed_successfully/);
     expect(compose).toContain('user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"');
-    expect(compose.match(/LOCALFI_VAULT_BOOTSTRAP_TOKEN=/g)).toHaveLength(2);
+    expect(compose).toContain("LOCALFI_VAULT_BOOTSTRAP_TOKEN_FILE=/app/data/.localfi-bootstrap-token");
+    expect(compose).not.toMatch(/\$\{LOCALFI_VAULT_BOOTSTRAP_TOKEN/);
     expect(compose).not.toMatch(/\bneedle:/);
   });
 });

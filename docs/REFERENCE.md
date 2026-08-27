@@ -76,10 +76,10 @@ The UI uses Server Actions, not a public REST API. `/api/snapshot` requires a
 | Vault session and timeout | `lib/vault/session.ts`, `settings.idle_timeout_minutes` |
 | Stale-session redirect | `proxy.ts`, `GET /api/vault/status` |
 | Export disclosure boundary | `components/exports/export-disclosure.tsx`, `app/actions/export.ts` |
-| Owner setup | Browser `/vault` flow with one-use `LOCALFI_VAULT_BOOTSTRAP_TOKEN` |
+| Owner setup | Browser `/vault`; Compose generates a one-use setup link, while local development may set `LOCALFI_VAULT_BOOTSTRAP_TOKEN` |
 | Headless authorization | `authorizeDatabaseVaultFromEnvironment` around supported CLI callers |
 | Compose permissions | `data-permissions` one-shot service in `docker-compose.yml` |
-| Source-only coding sandbox | `scripts/source-sandbox.ts`, `bun run sandbox:source -- <template>` |
+| Coding-tool private path blocks | `scripts/agent-private-path-guard.mjs` plus `.cursor/`, `.claude/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.clinerules/`, and `.pi/` |
 
 LocalFi is single-owner and loopback-only, not an internet authentication
 system. See [SECURITY.md](SECURITY.md).
