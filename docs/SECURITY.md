@@ -57,7 +57,7 @@ authorize through the vault and release key state on exit.
 - `bun run db:upgrade -- --db <path>` applies and verifies committed migrations.
 - `bun run db:restore -- --from <backup> --db <target>` previews; add `--apply`
   only after checking both paths.
-- Ledger, agent, seed, sample, and history commands use the same boundary.
+- Ledger, seed, sample, and history commands use the same boundary.
 
 LocalFi omits `db:push` and Drizzle Studio because they bypass migration history,
 the vault, backups, and the writer lease. Use `bun run db:generate`, review the
@@ -73,6 +73,6 @@ UX guard only; routes, actions, and database access still authorize independentl
 
 ## Network boundary
 
-Keep the default `127.0.0.1:1313` binding. Review AI, scheduler, geocoding,
-pricing, proxy, and snapshot integrations before enabling them. Do not send
-financial data to external services by default.
+Keep the default `127.0.0.1:1313` binding. Review scheduler, geocoding, pricing,
+proxy, and snapshot integrations before enabling them. Do not send financial
+data to external services by default.

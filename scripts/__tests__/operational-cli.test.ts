@@ -27,11 +27,7 @@ describe("operational CLI boundaries", () => {
   });
 
   it("wraps every advertised direct database caller in headless authorization cleanup", () => {
-    for (const file of [
-      "scripts/agent-cli.ts",
-      "lib/db/seed.ts",
-      "lib/db/sample-data.ts",
-    ]) {
+    for (const file of ["lib/db/seed.ts", "lib/db/sample-data.ts"]) {
       const source = readFileSync(path.join(ROOT, file), "utf8");
       expect(source).toContain("authorizeDatabaseVaultFromEnvironment");
       expect(source).toMatch(/finally\s*{[\s\S]*await releaseAuthorization\(\)/);
@@ -50,5 +46,6 @@ describe("operational CLI boundaries", () => {
     expect(compose).toMatch(/app:[\s\S]*condition: service_completed_successfully/);
     expect(compose).toContain('user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"');
     expect(compose.match(/LOCALFI_VAULT_BOOTSTRAP_TOKEN=/g)).toHaveLength(2);
+    expect(compose).not.toMatch(/\bneedle:/);
   });
 });

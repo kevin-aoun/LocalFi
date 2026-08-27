@@ -1,7 +1,0 @@
----
-description: Local chat-capture routing, trust boundary, and sidecar rules
-globs: "lib/agent/**/*.ts,app/api/agent/**/*.ts,agent/**/*.py,agent/Dockerfile,scripts/agent-cli.ts,eval/**/*,docs/AGENT.md"
-alwaysApply: false
----
-
-Follow the canonical rule in @.claude/rules/agent-runtime.md.

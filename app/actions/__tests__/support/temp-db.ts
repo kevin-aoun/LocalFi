@@ -101,7 +101,7 @@ function isTable(value: unknown): value is SQLiteTable {
  *
  * The journal is the source of truth for the REAL database, but during
  * development the TypeScript schema legitimately runs ahead of the migration
- * that implements it (a second agent may be adding tables right now). Drizzle
+ * that implements it (another branch may be adding tables right now). Drizzle
  * names every column of a table in its INSERT statements, so a column that
  * exists in TS but not in the file breaks every insert with
  * "table X has no column named Y" — a fixture problem, not a bug in the code

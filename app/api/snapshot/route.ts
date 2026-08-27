@@ -3,10 +3,10 @@ import { recordNetWorthToday } from "@/app/actions/accounts";
 import { todayKey } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import {
-  agentAuthConfigured,
-  agentAuthDisabledResponse,
-  authorizeAgentRequest,
-} from "@/lib/agent/api-auth";
+  authorizeSnapshotRequest,
+  snapshotAuthConfigured,
+  snapshotAuthDisabledResponse,
+} from "@/lib/snapshot/api-auth";
 import { withActiveVaultAuthorization } from "@/lib/vault/access";
 import { VaultLockedError } from "@/lib/vault/errors";
 
@@ -16,7 +16,7 @@ export const runtime = "nodejs";
 const NO_STORE = { "cache-control": "no-store" } as const;
 
 export async function GET(): Promise<Response> {
-  if (!agentAuthConfigured()) return agentAuthDisabledResponse();
+  if (!snapshotAuthConfigured()) return snapshotAuthDisabledResponse();
   try {
     return await withActiveVaultAuthorization(
       async () => Response.json({ ok: true, today: todayKey() }, { headers: NO_STORE }),
@@ -31,7 +31,7 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const auth = authorizeAgentRequest(request);
+  const auth = authorizeSnapshotRequest(request);
   if (!auth.ok) return auth.response;
 
   try {

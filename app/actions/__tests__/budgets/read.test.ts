@@ -218,7 +218,7 @@ describe("getSpendVsBudget", () => {
 
     const rows = await getSpendVsBudget({ dateKey: "2026-07-28" });
     // Not measured at all: a paycheque compared against a "limit" would show up
-    // in the page's over/near totals and in the agent's budget_status answer.
+    // in the page's over/near totals and in every other budget projection.
     expect(rows.find((r) => r.categoryId === SALARY)).toBeUndefined();
     // The other budgets are unaffected.
     expect(rows.map((r) => r.categoryId)).toEqual([FOOD]);

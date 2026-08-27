@@ -20,6 +20,10 @@ client does not auto-load Claude rules.
   encrypted but sensitive.
 - Treat `data/`, database files, exports, backups, credentials, and real ledger
   values as private. Never inspect, copy, log, seed from, or commit them.
+- Run coding tools only through `bun run sandbox:source -- <template>`. The
+  launcher exposes committed source through a disposable Docker Sandbox; never
+  mount the owner checkout, a database, export, backup, environment file, shared
+  skill store, or host Docker socket into that environment.
 - Preserve pre-existing work. Check `git status` before editing and do not rewrite
   unrelated changes in a dirty worktree.
 
@@ -27,15 +31,11 @@ client does not auto-load Claude rules.
 
 - Start with `README.md` for the runtime and `docs/REFERENCE.md` for code ownership.
 - Read `docs/DECISIONS.md` before changing an architectural boundary.
-- `docs/AGENT.md` describes the optional chat-capture runtime; it is not repository
-  guidance.
 - Read every matching canonical rule before editing:
   - `.claude/rules/persistence.md` for `lib/db/`, migrations, and DB/ledger scripts.
   - `.claude/rules/financial-domain.md` for actions, money, dates, ledger, reports,
     recurrence, prices, and investments.
   - `.claude/rules/frontend.md` for dashboard routes, components, and global UI.
-  - `.claude/rules/agent-runtime.md` for `lib/agent/`, `app/api/agent/`, `agent/`,
-    the agent CLI, and evals.
   - `.claude/rules/testing.md` when adding or changing tests.
 
 ## Non-negotiable invariants

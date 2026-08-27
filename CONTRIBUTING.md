@@ -1,12 +1,12 @@
 # Contributing to LocalFi
 
-Preserve LocalFi's single-owner, loopback-only model. Never include real
-financial data, vault files, credentials, or model checkpoints.
+Preserve LocalFi's single-owner, loopback-only model. Never include financial
+data, database files, vault files, exports, backups, or credentials.
 
 ## Customizing your own LocalFi
 
-Start with [Customize your LocalFi](README.md#customize-your-localfi). Return
-here only when proposing the result upstream.
+Start with [Customize your LocalFi](README.md#customize-your-localfi). Use the
+source-only Docker Sandbox launcher; never mount the owner checkout or data.
 
 ## Before opening a pull request
 
@@ -21,7 +21,7 @@ upgrade path, and temporary-database tests.
 ## Pull requests
 
 Describe the change, validation, migration impact, and security implications.
-Use fictional data in issues, commits, logs, and tests.
+Use minimal synthetic values in tests and never attach a database artifact.
 
 ## Handling Dependabot pull requests
 
