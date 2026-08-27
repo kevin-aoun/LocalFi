@@ -26,27 +26,41 @@ hash-linked ledger that drives balances, budgets, reports, and positions.
 > **Local-only by design.** The default Docker setup binds to `127.0.0.1`.
 > LocalFi is not a hardened multi-user or internet-facing service.
 
+## Run LocalFi
+
+Install [Git](https://git-scm.com/downloads) and [Docker Desktop](https://www.docker.com/products/docker-desktop/), then run:
+
+```bash
+git clone https://github.com/kevin-aoun/LocalFi.git
+cd LocalFi
+docker compose up --build
+```
+
+On first start, the terminal prints a **LocalFi first-run setup** link. Open it,
+choose a passphrase, and save the recovery secret somewhere off this computer.
+Later starts use the same Compose command and only ask for your passphrase.
+
+Open <http://localhost:1313>. Keep the terminal open while LocalFi is running;
+press `Ctrl+C` there to stop it.
+
 ## Customize your LocalFi
 
 **Every component is customizable:** layout, colors, categories, reports,
 workflows, data model, ledger projections, and local integrations.
 
-For automated coding, use a source-only [Docker Sandbox](https://docs.docker.com/ai/sandboxes/):
+Start a new coding-agent chat with:
 
-```bash
-bun run sandbox:source -- codex
+```text
+Understand this LocalFi repository, then help me customize it by [describe the outcome you want]. Before editing, read AGENTS.md, every scoped rule it identifies for the files you expect to touch, and the relevant parts of README.md, docs/REFERENCE.md, and docs/DECISIONS.md. Trace the existing implementation, its callers, data flow, and nearby tests. Summarize the constraints you found and propose the smallest coherent plan; ask only about choices that would materially change the result. Preserve the local-only privacy model, integer-cents money, local calendar dates, and append-only ledger. Never inspect data/, my real database, backups, or exports. Never give an agent a real or fictional database file; tests must create explicit temporary databases from minimal synthetic values. Add or update regression tests, then validate every changed path with bun run validate:agent -- <changed paths> and run the full validator when the rules require it. Finish by reporting what changed, what was validated, and any remaining risks. Do not commit or push unless I explicitly ask.
 ```
 
-The launcher requires a clean commit, copies only tracked source to a separate
-directory, then enables clone isolation and disables shared skills. It never
-mounts the owner checkout, databases, exports, backups, environment files, or
-the host Docker socket. Do not run `sbx` directly from this checkout: even its
-clone mode exposes ignored files in the source directory read-only.
-
-Install `sbx` from Docker's [installation guide](https://docs.docker.com/ai/sandboxes/install/).
-Replace `codex` with another supported template when needed. Commit work inside
-the sandbox before removing it. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
-project invariants and validation commands.
+LocalFi ships project hooks and permissions for Cursor, Claude Code, Codex,
+Gemini CLI, OpenCode, Windsurf, Cline, and Pi. Trust/enable the project controls
+when your tool asks. They reject direct reads and writes to owner databases,
+backups, exports, credentials, and the policy files themselves. Do not give an
+agent your passphrase, recovery secret, Docker access, or an external tool that
+can retrieve private files. See [Agent access](docs/SECURITY.md#agent-access).
+After `bun install --frozen-lockfile`, run `bun run agent:privacy-check` to verify them.
 
 ## What it does
 
@@ -119,14 +133,14 @@ Map a chronological itinerary with connected stops and country flags.
 
 | Tool | Version | Check |
 | --- | --- | --- |
-| Node.js | 20+ | `node --version` |
-| Bun | 1.3.14 | `bun --version` |
+| Git | Current | `git --version` |
 | Docker Compose | Current | `docker compose version` |
-| Docker Sandboxes | Optional | `sbx version` |
+| Node.js | 20+ (development only) | `node --version` |
+| Bun | 1.3.14 (development only) | `bun --version` |
 
 LocalFi serves the UI and Server Actions at `127.0.0.1:1313`.
 
-## Getting started
+## Development
 
 ### Local development
 
@@ -148,26 +162,10 @@ Setup is browser-only so LocalFi can show the recovery secret exactly once. It
 also converts valid same-owner legacy databases and tightens permissions to
 `0700` directories and `0600` files. Unsafe paths fail closed.
 
-### Docker
-
-```bash
-export LOCALFI_VAULT_BOOTSTRAP_TOKEN="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')"
-printf 'One-time setup credential: %s\n' "$LOCALFI_VAULT_BOOTSTRAP_TOKEN"
-docker compose up -d --build
-```
-
-Open <http://localhost:1313>, complete setup, save the recovery secret, then
-remove the shell copy of the token without restarting:
-
-```bash
-unset LOCALFI_VAULT_BOOTSTRAP_TOKEN
-```
-
-Verify with `docker compose ps -a`: `app` should be healthy and
-`data-permissions` should exit successfully. That one-shot service assigns
-`data/` to `${DOCKER_UID:-1000}:${DOCKER_GID:-1000}` and enforces private modes;
-the app runs as that non-root owner. The next ordinary Compose start drops the
-unset token from container configuration.
+For Docker diagnostics, `docker compose ps -a` should show `app` healthy and
+`data-permissions` exited successfully. That one-shot service prepares private
+file permissions and creates the one-use setup link only when no encrypted
+vault exists. If you missed the link, run `docker compose logs data-permissions`.
 
 ## Verification
 
@@ -233,7 +231,8 @@ flowchart LR
 | --- | --- | --- |
 | `DATABASE_URL` | No | SQLite URL; defaults to `file:./data/budget.db` |
 | `BUDGET_DB_PATH` | No | Direct database-file override for scripts and tests |
-| `LOCALFI_VAULT_BOOTSTRAP_TOKEN` | First setup or conversion | One-use, random 24–512 character browser setup credential |
+| `LOCALFI_VAULT_BOOTSTRAP_TOKEN` | Local development setup | Optional explicit one-use browser setup credential |
+| `LOCALFI_VAULT_BOOTSTRAP_TOKEN_FILE` | Docker setup | Owner-only credential file generated and consumed by Compose |
 | `LOCALFI_VAULT_PASSPHRASE` | Headless database commands | One-process vault authorization |
 | `NEXT_PUBLIC_APP_URL` | No | LocalFi URL; defaults to `http://localhost:1313` |
 | `DOCKER_UID` / `DOCKER_GID` | No | Host user IDs for the Docker bind mount |

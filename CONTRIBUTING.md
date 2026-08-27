@@ -6,7 +6,9 @@ data, database files, vault files, exports, backups, or credentials.
 ## Customizing your own LocalFi
 
 Start with [Customize your LocalFi](README.md#customize-your-localfi). Use the
-source-only Docker Sandbox launcher; never mount the owner checkout or data.
+repository's harness hooks and permissions, and accept them when your coding
+tool asks whether to trust the project. Never disable those controls or give an
+agent a database, export, backup, passphrase, recovery secret, or Docker access.
 
 ## Before opening a pull request
 

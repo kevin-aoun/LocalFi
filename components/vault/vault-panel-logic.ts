@@ -9,3 +9,8 @@ export function initialVaultPanelMode(status: VaultStatus): VaultPanelMode {
 export function canContinueAfterRecovery(savedConfirmation: boolean): boolean {
   return savedConfirmation;
 }
+
+export function setupCredentialFromFragment(fragment: string): string {
+  const value = new URLSearchParams(fragment.replace(/^#/, "")).get("setup") ?? "";
+  return value.length >= 24 && value.length <= 512 ? value : "";
+}
