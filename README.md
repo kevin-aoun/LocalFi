@@ -71,7 +71,7 @@ workflows, data model, ledger projections, and local integrations.
 Start a new coding-agent chat with:
 
 ```text
-Understand this LocalFi repository, then help me customize it by [describe the outcome you want]. Before editing, read AGENTS.md, every scoped rule it identifies for the files you expect to touch, and the relevant parts of README.md, docs/REFERENCE.md, and docs/DECISIONS.md. Trace the existing implementation, its callers, data flow, and nearby tests. Summarize the constraints you found and propose the smallest coherent plan; ask only about choices that would materially change the result. Preserve the local-only privacy model, integer-cents money, local calendar dates, and append-only ledger. Never inspect data/, my real database, backups, or exports. Never give an agent a real or fictional database file; tests must create explicit temporary databases from minimal synthetic values. Add or update regression tests, then validate every changed path with bun run validate:agent -- <changed paths> and run the full validator when the rules require it. Finish by reporting what changed, what was validated, and any remaining risks. Do not commit or push unless I explicitly ask.
+Understand this LocalFi repository, then help me customize it by [describe the outcome you want]. Before editing, read AGENTS.md, every scoped rule it identifies for the files you expect to touch, and the relevant parts of README.md, docs/SPECS.md, and docs/DECISIONS.md. Trace the existing implementation, its callers, data flow, and nearby tests. Summarize the constraints you found and propose the smallest coherent plan; ask only about choices that would materially change the result. Preserve the local-only privacy model, integer-cents money, local calendar dates, and append-only ledger. Never inspect data/, my real database, backups, or exports. Never give an agent a real or fictional database file; tests must create explicit temporary databases from minimal synthetic values. Add or update regression tests, then validate every changed path with bun run validate:agent -- <changed paths> and run the full validator when the rules require it. Finish by reporting what changed, what was validated, and any remaining risks. Do not commit or push unless I explicitly ask.
 ```
 
 LocalFi ships project hooks and permissions for Cursor, Claude Code, Codex,
@@ -246,7 +246,7 @@ LocalFi beyond its loopback-only default or running database maintenance tools.
 
 ## Docs
 
-- [docs/REFERENCE.md](docs/REFERENCE.md) — code map and extension points.
+- [docs/SPECS.md](docs/SPECS.md) — code map and extension points.
 - [docs/DECISIONS.md](docs/DECISIONS.md) — architectural decisions.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — contribution workflow.
 - [SECURITY.md](SECURITY.md) — vulnerability-reporting policy.
