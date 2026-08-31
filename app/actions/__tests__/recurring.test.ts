@@ -67,7 +67,7 @@ describe("createRecurringTransaction", () => {
           startDate: "2026-01-31",
           accountId: 1,
           categoryId: 1,
-          comment: "flat",
+          comment: "ignored legacy description",
         }),
       ),
     );
@@ -75,6 +75,7 @@ describe("createRecurringTransaction", () => {
     expect(created.startDate).toBe("2026-01-31");
     expect(created.nextDue).toBe("2026-01-31");
     expect(created.lastGenerated).toBeNull();
+    expect(created.comment).toBeNull();
     expect(Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"))).toBe(0);
   });
 
@@ -295,7 +296,7 @@ describe("generateDueTransactions — idempotency", () => {
     expect(dates).toEqual(["2026-01-01", "2026-02-01", "2026-03-01"]);
   });
 
-  it("copies the whole template onto every row", async () => {
+  it("copies the financial template fields and uses its name for every transaction", async () => {
     await generateDueTransactions({ throughKey: "2026-02-15" });
     for (const row of generated(1)) {
       expect(row.amount_cents).toBe(120_000);
@@ -305,7 +306,7 @@ describe("generateDueTransactions — idempotency", () => {
       expect(row.direction).toBe("outflow");
       expect(row.currency).toBe("USD");
     }
-    expect(temp.scalar("SELECT comment FROM transactions LIMIT 1")).toBe("flat");
+    expect(temp.scalar("SELECT comment FROM transactions LIMIT 1")).toBe("Rent");
   });
 
   it("keeps the derived Cash asset in step with what it posted", async () => {
@@ -314,6 +315,33 @@ describe("generateDueTransactions — idempotency", () => {
     expect(Number(temp.scalar("SELECT current_value_cents FROM assets WHERE category = 'Cash'"))).toBe(
       -360_000,
     );
+  });
+});
+
+describe("generateDueTransactions — occurrence descriptions", () => {
+  it("uses the template name even when an old template has a legacy description", async () => {
+    seedRecurring(temp, {
+      id: 1,
+      name: "Gym membership",
+      accountId: 1,
+      categoryId: 1,
+      amountCents: 4_000,
+      comment: "Legacy description",
+      frequency: "monthly",
+      startDate: "2026-01-15",
+    });
+
+    unwrap(await generateDueTransactions({ throughKey: "2026-01-15" }));
+
+    const [row] = temp.query(
+      `SELECT t.comment, e.description, e.metadata_json
+       FROM transactions t
+       JOIN ledger_events e ON e.event_id = t.current_event_id
+       WHERE t.recurring_id = 1`,
+    );
+    expect(row.comment).toBe("Gym membership");
+    expect(row.description).toBe("Gym membership");
+    expect(JSON.parse(String(row.metadata_json)).transaction.comment).toBe("Gym membership");
   });
 });
 
@@ -725,11 +753,17 @@ describe("updateRecurringTransaction", () => {
     expect(templateRow(1).next_due).toBe("2026-02-05");
   });
 
-  it("does not re-post an occurrence that was already materialised after an edit", async () => {
+  it("uses an edited name for future transactions without re-posting earlier occurrences", async () => {
     await generateDueTransactions({ throughKey: "2026-02-15" });
-    unwrap(await updateRecurringTransaction(1, form({ comment: "new landlord" })));
+    unwrap(await updateRecurringTransaction(1, form({ name: "Home rent" })));
     expect(unwrap(await generateDueTransactions({ throughKey: "2026-02-15" })).posted).toBe(0);
     expect(Number(temp.scalar("SELECT COUNT(*) FROM transactions"))).toBe(2);
+
+    expect(unwrap(await generateDueTransactions({ throughKey: "2026-03-15" })).posted).toBe(1);
+    expect(
+      temp.query("SELECT comment FROM transactions ORDER BY recurring_occurrence").map((row) => row.comment),
+    ).toEqual(["Rent", "Rent", "Home rent"]);
+    expect(templateRow(1).comment).toBeNull();
   });
 
   it("refuses an unknown id", async () => {
