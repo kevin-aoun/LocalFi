@@ -21,10 +21,12 @@ import {
   ArrowUp,
   ArrowDown,
   Clock,
+  Coins,
   Search,
   X,
 } from "lucide-react";
 import { TransactionDialog } from "@/components/transactions/transaction-dialog";
+import { AssetDialog } from "@/components/assets/asset-dialog";
 import { TransferDialog } from "@/components/transactions/transfer-dialog";
 import { ImportDialog } from "@/components/transactions/import-dialog";
 import { getTransactions, deleteTransaction } from "@/app/actions/transactions";
@@ -139,6 +141,11 @@ export default function TransactionsPage() {
 
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<LedgerTransaction | null>(null);
+  const [cryptoPurchaseOpen, setCryptoPurchaseOpen] = useState(false);
+  const [cryptoPurchaseDefaults, setCryptoPurchaseDefaults] = useState<{
+    accountId: number | null;
+    categoryId: number | null;
+  }>({ accountId: null, categoryId: null });
 
   const loadData = useCallback(async () => {
     const [txData, catData, settings, accountData, defaultId] = await Promise.all([
@@ -250,6 +257,7 @@ export default function TransactionsPage() {
 
     setActionError(null);
     await loadData();
+    window.dispatchEvent(new Event("localfi:financial-updated"));
     setDeleteDialogOpen(false);
   };
 
@@ -265,6 +273,11 @@ export default function TransactionsPage() {
   const openAddTransfer = () => {
     setSelectedTransfer(null);
     setTransferDialogOpen(true);
+  };
+
+  const openCryptoPurchase = (defaults: { accountId: number | null; categoryId: number | null }) => {
+    setCryptoPurchaseDefaults(defaults);
+    setCryptoPurchaseOpen(true);
   };
 
   const handleSort = (column: LedgerSortColumn) => {
@@ -415,6 +428,13 @@ export default function TransactionsPage() {
           <Button variant="outline" onClick={openAddTransfer}>
             <ArrowLeftRight className="mr-2 h-4 w-4" />
             Transfer
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => openCryptoPurchase({ accountId: defaultAccountId, categoryId: null })}
+          >
+            <Coins className="mr-2 h-4 w-4" />
+            Crypto
           </Button>
           <Button onClick={openAddDialog}>
             <Plus className="mr-2 h-4 w-4" />
@@ -939,6 +959,24 @@ export default function TransactionsPage() {
         accounts={pickerAccounts}
         defaultAccountId={defaultAccountId}
         quickCommands={quickCommands}
+        onCreateCryptoPurchase={openCryptoPurchase}
+        onSuccess={loadData}
+      />
+
+      <AssetDialog
+        open={cryptoPurchaseOpen}
+        onOpenChange={setCryptoPurchaseOpen}
+        cryptoPurchase
+        initialPurchaseAccountId={cryptoPurchaseDefaults.accountId}
+        initialPurchaseCategoryId={cryptoPurchaseDefaults.categoryId}
+        accounts={accounts.map((account) => ({
+          id: account.id,
+          name: account.name,
+          currency: account.currency,
+          kind: account.kind,
+          archived: account.archived,
+        }))}
+        categories={categories}
         onSuccess={loadData}
       />
 

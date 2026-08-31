@@ -67,6 +67,15 @@ export function emptyAssetForm(): AssetFormData {
     useLivePrice: false,
   };
 }
+
+export function cryptoPurchaseForm(): AssetFormData {
+  return {
+    ...emptyAssetForm(),
+    category: "Crypto",
+    currency: "USD",
+    useLivePrice: true,
+  };
+}
 export function gramsToOz(grams: number): number {
   return grams / GRAMS_PER_TROY_OUNCE;
 }
