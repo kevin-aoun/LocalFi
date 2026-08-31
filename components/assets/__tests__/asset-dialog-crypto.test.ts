@@ -75,6 +75,12 @@ describe("Bitcoin and Ethereum are pickable live-priced holdings", () => {
     expect(source).toMatch(/instrumentSymbol/);
     expect(source).toMatch(/This creates one confirmed transaction and decreases the selected account/);
   });
+
+  it("can open the same purchase form from a transaction entry point", () => {
+    expect(source).toMatch(/cryptoPurchase/);
+    expect(source).toMatch(/initialPurchaseAccountId/);
+    expect(source).toMatch(/initialPurchaseCategoryId/);
+  });
 });
 
 describe("confirmed purchases no longer depend on manual asset linking", () => {

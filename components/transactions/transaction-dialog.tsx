@@ -78,6 +78,7 @@ type TransactionDialogProps = {
 
   defaultAccountId?: number | null;
   quickCommands: QuickCommand[];
+  onCreateCryptoPurchase?: (defaults: { accountId: number | null; categoryId: number | null }) => void;
   onSuccess: () => void;
 };
 
@@ -89,6 +90,7 @@ export function TransactionDialog({
   accounts = [],
   defaultAccountId = null,
   quickCommands,
+  onCreateCryptoPurchase,
   onSuccess,
 }: TransactionDialogProps) {
   const [loading, setLoading] = useState(false);
@@ -214,6 +216,7 @@ export function TransactionDialog({
       }
 
       onSuccess();
+      window.dispatchEvent(new Event("localfi:financial-updated"));
       onOpenChange(false);
     } catch (err) {
       console.error("Failed to save transaction:", err);
@@ -229,10 +232,16 @@ export function TransactionDialog({
       )
     : [];
   const selectedCategory = categories.find((category) => String(category.id) === formData.categoryId);
-  const showsInvestment = selectedCategory?.type.toLowerCase() === "investment" || Boolean(
-    transaction?.instrumentId,
-  );
+  const showsInvestment = Boolean(transaction?.instrumentId);
   const quantityPreview = previewInvestmentQuantity(formData.amount, investment.unitPrice);
+
+  const openCryptoPurchase = () => {
+    onOpenChange(false);
+    onCreateCryptoPurchase?.({
+      accountId: accountId === "" ? defaultAccountId : Number(accountId),
+      categoryId: selectedCategory?.type === "Investment" ? selectedCategory.id : null,
+    });
+  };
 
   const loadProviderPreview = async () => {
     setError(null);
@@ -320,6 +329,18 @@ export function TransactionDialog({
               )}
             </div>
           </div>
+
+          {!transaction && onCreateCryptoPurchase && (
+            <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+              <p className="text-sm font-medium">Buying crypto?</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Use the shared crypto purchase form so the holding and its ledger transaction stay together.
+              </p>
+              <Button type="button" variant="outline" size="sm" className="mt-3" onClick={openCryptoPurchase}>
+                Add crypto purchase
+              </Button>
+            </div>
+          )}
 
           {showsInvestment && (
             <div className="space-y-3 rounded-md border p-3">

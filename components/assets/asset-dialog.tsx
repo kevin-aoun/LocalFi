@@ -22,6 +22,7 @@ import {
   type PriceQuote,
 } from "@/lib/prices";
 import {
+  cryptoPurchaseForm,
   emptyAssetForm,
   formFromAsset,
   gramsToOz,
@@ -60,6 +61,9 @@ type AssetDialogProps = {
   asset?: Asset | null;
   accounts?: Array<{ id: number; name: string; currency: string; kind?: string; archived?: boolean }>;
   categories?: Array<{ id: number; name: string; type: string }>;
+  cryptoPurchase?: boolean;
+  initialPurchaseAccountId?: number | null;
+  initialPurchaseCategoryId?: number | null;
   onSuccess: () => void;
 };
 
@@ -76,6 +80,9 @@ export function AssetDialog({
   asset,
   accounts = [],
   categories = [],
+  cryptoPurchase = false,
+  initialPurchaseAccountId = null,
+  initialPurchaseCategoryId = null,
   onSuccess,
 }: AssetDialogProps) {
   const [loading, setLoading] = useState(false);
@@ -151,11 +158,19 @@ export function AssetDialog({
 
       setFormData(formFromAsset(asset, centsToDecimal));
     } else {
-      setFormData(emptyAssetForm());
-      setPurchaseAccountId(defaultPurchaseAccountId);
-      setPurchaseCategoryId(defaultPurchaseCategoryId);
+      setFormData(cryptoPurchase ? cryptoPurchaseForm() : emptyAssetForm());
+      setPurchaseAccountId(initialPurchaseAccountId == null ? defaultPurchaseAccountId : String(initialPurchaseAccountId));
+      setPurchaseCategoryId(initialPurchaseCategoryId == null ? defaultPurchaseCategoryId : String(initialPurchaseCategoryId));
     }
-  }, [asset, defaultPurchaseAccountId, defaultPurchaseCategoryId, open]);
+  }, [
+    asset,
+    cryptoPurchase,
+    defaultPurchaseAccountId,
+    defaultPurchaseCategoryId,
+    initialPurchaseAccountId,
+    initialPurchaseCategoryId,
+    open,
+  ]);
 
 
 
@@ -270,6 +285,7 @@ export function AssetDialog({
       }
 
       onSuccess();
+      window.dispatchEvent(new Event("localfi:financial-updated"));
       onOpenChange(false);
     } catch (err) {
       console.error("Failed to save asset:", err);
