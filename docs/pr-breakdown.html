@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LocalFi — Merged PRs by branch type</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-0:      #f6f5f2;
+    --surface-1:      #fcfcfb;
+    --border:         #e2e1dc;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #83817b;
+    --series-1:       #2a78d6;
+    --series-2:       #eb6834;
+    --series-3:       #1baf7a;
+    --series-4:       #eda100;
+    --series-5:       #e87ba4;
+    --series-6:       #008300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-0:      #111110;
+      --surface-1:      #1a1a19;
+      --border:         #35342f;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #96958c;
+      --series-1:       #3987e5;
+      --series-2:       #d95926;
+      --series-3:       #199e70;
+      --series-4:       #c98500;
+      --series-5:       #d55181;
+      --series-6:       #008300;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-0:      #111110;
+    --surface-1:      #1a1a19;
+    --border:         #35342f;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #96958c;
+    --series-1:       #3987e5;
+    --series-2:       #d95926;
+    --series-3:       #199e70;
+    --series-4:       #c98500;
+    --series-5:       #d55181;
+    --series-6:       #008300;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--surface-0, #f6f5f2);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .viz-root {
+    background: var(--surface-0);
+    color: var(--text-primary);
+    min-height: 100vh;
+    padding: 40px 24px 56px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+
+  header h1 {
+    font-size: 21px; font-weight: 600; letter-spacing: -0.01em;
+    margin: 0 0 6px; color: var(--text-primary);
+  }
+  header p {
+    margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--text-secondary);
+    max-width: 60ch;
+  }
+
+  .toolbar {
+    display: flex; align-items: center; gap: 8px;
+    margin: 22px 0 14px;
+  }
+  .seg {
+    display: inline-flex; background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 8px; padding: 2px;
+  }
+  .seg button {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    font: inherit; font-size: 12.5px; color: var(--text-secondary);
+    padding: 5px 12px; border-radius: 6px; transition: background .12s, color .12s;
+  }
+  .seg button[aria-pressed="true"] {
+    background: var(--surface-0); color: var(--text-primary); font-weight: 550;
+    box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+  }
+  .figure {
+    display: grid;
+    grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
+    gap: 32px; align-items: center;
+  }
+  @media (max-width: 700px) {
+    .figure { grid-template-columns: 1fr; gap: 24px; }
+    .viz-root { padding: 28px 16px 44px; }
+    .card { padding: 20px; }
+  }
+
+  .chart { position: relative; width: 100%; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .slice { cursor: default; transition: opacity .12s; }
+  .slice:focus { outline: none; }
+  .dimmed { opacity: .32; }
+  .center-num { font-size: 40px; font-weight: 600; fill: var(--text-primary); letter-spacing: -0.02em; }
+  .center-cap { font-size: 10.5px; fill: var(--text-muted); letter-spacing: .06em; text-transform: uppercase; }
+
+  .legend { display: flex; flex-direction: column; gap: 2px; }
+  .legend-row {
+    display: grid; grid-template-columns: 12px minmax(0,1fr) auto auto;
+    align-items: center; gap: 10px;
+    padding: 7px 8px; border-radius: 7px;
+    font-size: 13px; cursor: default;
+    transition: background .12s;
+  }
+  .legend-row:hover { background: var(--surface-0); }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; }
+  .legend-name { color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .legend-count { color: var(--text-primary); font-variant-numeric: tabular-nums; font-weight: 550; }
+  .legend-pct { color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 12px; min-width: 42px; text-align: right; }
+  .legend-note { font-size: 11.5px; color: var(--text-muted); margin-top: 10px; padding-left: 8px; line-height: 1.5; }
+
+  .tooltip {
+    position: absolute; pointer-events: none; opacity: 0;
+    transform: translate(-50%, -120%);
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.13);
+    font-size: 12.5px; color: var(--text-primary); white-space: nowrap;
+    transition: opacity .1s;
+  }
+  .tooltip .tt-sub { color: var(--text-muted); font-size: 11.5px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  caption { text-align: left; font-size: 12.5px; color: var(--text-secondary); padding-bottom: 12px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); }
+  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); font-weight: 550; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tfoot td { font-weight: 600; border-bottom: 0; }
+  .cell-name { display: flex; align-items: center; gap: 9px; }
+  .branches { font-size: 12px; color: var(--text-secondary); }
+
+  footer { margin-top: 16px; font-size: 11.5px; color: var(--text-muted); line-height: 1.6; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <div class="wrap">
+    <header>
+      <h1>LocalFi — 31 merged pull requests by branch type</h1>
+      <p>Every <code>Merge pull request #N</code> commit reachable from <code>develop</code>, bucketed by the prefix of its source branch. Nearly half are release promotions moving code between <code>develop</code> and <code>main</code> rather than new work.</p>
+    </header>
+
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="View">
+        <button id="btn-chart" aria-pressed="true">Chart</button>
+        <button id="btn-table" aria-pressed="false">Table</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="figure" id="view-chart">
+        <div class="chart" id="chart">
+          <svg id="pie" viewBox="0 0 340 340" role="img" aria-labelledby="pie-title">
+            <title id="pie-title">Donut chart of 31 merged pull requests split across six branch types</title>
+          </svg>
+          <div class="tooltip" id="tip"></div>
+        </div>
+        <div>
+          <div class="legend" id="legend"></div>
+          <p class="legend-note">Promotion PRs carry no new commits of their own — they merge <code>develop</code> into <code>main</code> for a release, then <code>main</code> back into <code>develop</code>.</p>
+        </div>
+      </div>
+
+      <div id="view-table" hidden>
+        <table>
+          <caption>Merged pull requests by branch type — LocalFi, PRs #1–#37 (numbers 5 and 24–28 were never merged into this history).</caption>
+          <thead>
+            <tr><th>Branch type</th><th>Example branches</th><th class="num">PRs</th><th class="num">Share</th></tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+          <tfoot><tr><td>Total</td><td></td><td class="num">31</td><td class="num">100%</td></tr></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <footer>
+      Source: <code>git log --merges</code> on <code>kevin-aoun/LocalFi</code>, branch <code>develop</code> · 31 merged PRs across 94 commits · generated 2026-08-28.<br>
+      Counts cover merges present in local history only; PRs closed without merging, or merged into branches not reachable from <code>develop</code>, are not represented.
+    </footer>
+  </div>
+</div>
+
+<script>
+(function () {
+  const DATA = [
+    { name: "Promotion (develop ↔ main)", short: "Promotion", n: 15, slot: 1, branches: "develop, main" },
+    { name: "Dependabot",                 short: "Dependabot", n: 7,  slot: 2, branches: "dependabot/bun/*, dependabot/github_actions/*" },
+    { name: "Docs",                       short: "Docs",       n: 4,  slot: 3, branches: "docs/use-agent-logos, docs/curate-readme-showcase" },
+    { name: "Feature",                    short: "Feature",    n: 3,  slot: 4, branches: "feat/encrypted-vault, feat/private-agent-guards" },
+    { name: "Fix",                        short: "Fix",        n: 1,  slot: 5, branches: "fix/docker-bootstrap-setup" },
+    { name: "Other",                      short: "Other",      n: 1,  slot: 6, branches: "remove-embedded-agents" }
+  ];
+  const TOTAL = DATA.reduce((s, d) => s + d.n, 0);
+
+  const CX = 170, CY = 170, R_OUT = 152, R_IN = 92, GAP_DEG = 1.6;
+  const svg = document.getElementById("pie");
+  const NS = "http://www.w3.org/2000/svg";
+  const tip = document.getElementById("tip");
+  const chartBox = document.getElementById("chart");
+
+  const pol = (r, deg) => {
+    const a = (deg - 90) * Math.PI / 180;
+    return [CX + r * Math.cos(a), CY + r * Math.sin(a)];
+  };
+  const arcPath = (a0, a1) => {
+    const large = (a1 - a0) > 180 ? 1 : 0;
+    const [x0, y0] = pol(R_OUT, a0), [x1, y1] = pol(R_OUT, a1);
+    const [x2, y2] = pol(R_IN, a1),  [x3, y3] = pol(R_IN, a0);
+    return `M${x0} ${y0}A${R_OUT} ${R_OUT} 0 ${large} 1 ${x1} ${y1}L${x2} ${y2}A${R_IN} ${R_IN} 0 ${large} 0 ${x3} ${y3}Z`;
+  };
+  const el = (tag, attrs) => {
+    const n = document.createElementNS(NS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  };
+
+  // ---- slices -------------------------------------------------------------
+  let cursor = 0;
+  const slices = [];
+  DATA.forEach((d, i) => {
+    const span = d.n / TOTAL * 360;
+    const a0 = cursor + GAP_DEG / 2;
+    const a1 = cursor + span - GAP_DEG / 2;
+    cursor += span;
+    d.a0 = a0; d.a1 = a1; d.mid = (a0 + a1) / 2;
+
+    const p = el("path", {
+      d: arcPath(a0, a1),
+      fill: `var(--series-${d.slot})`,
+      class: "slice",
+      tabindex: "0",
+      role: "img",
+      "aria-label": `${d.name}: ${d.n} of ${TOTAL} pull requests`
+    });
+    svg.appendChild(p);
+    slices.push(p);
+
+    p.addEventListener("pointerenter", () => focus(i));
+    p.addEventListener("pointermove", (e) => {
+      const r = chartBox.getBoundingClientRect();
+      tip.style.left = (e.clientX - r.left) + "px";
+      tip.style.top  = (e.clientY - r.top) + "px";
+    });
+    p.addEventListener("pointerleave", blur);
+    p.addEventListener("focus", () => focus(i, true));
+    p.addEventListener("blur", blur);
+  });
+
+  // ---- center hero --------------------------------------------------------
+  const cNum = el("text", { x: CX, y: CY + 6, "text-anchor": "middle", class: "center-num" });
+  cNum.textContent = TOTAL;
+  const cCap = el("text", { x: CX, y: CY + 28, "text-anchor": "middle", class: "center-cap" });
+  cCap.textContent = "merged PRs";
+  svg.appendChild(cNum); svg.appendChild(cCap);
+
+  // ---- legend -------------------------------------------------------------
+  const legend = document.getElementById("legend");
+  DATA.forEach((d, i) => {
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    row.innerHTML =
+      `<span class="swatch" style="background:var(--series-${d.slot})"></span>` +
+      `<span class="legend-name">${d.name}</span>` +
+      `<span class="legend-count">${d.n}</span>` +
+      `<span class="legend-pct">${(d.n / TOTAL * 100).toFixed(0)}%</span>`;
+    row.addEventListener("pointerenter", () => focus(i));
+    row.addEventListener("pointerleave", blur);
+    legend.appendChild(row);
+  });
+
+  // ---- table --------------------------------------------------------------
+  const tbody = document.getElementById("tbody");
+  DATA.forEach((d) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td><span class="cell-name"><span class="swatch" style="background:var(--series-${d.slot})"></span>${d.name}</span></td>` +
+      `<td class="branches">${d.branches}</td>` +
+      `<td class="num">${d.n}</td>` +
+      `<td class="num">${(d.n / TOTAL * 100).toFixed(1)}%</td>`;
+    tbody.appendChild(tr);
+  });
+
+  // ---- hover / focus ------------------------------------------------------
+  function focus(i, keyboard) {
+    slices.forEach((p, j) => p.classList.toggle("dimmed", j !== i));
+    const d = DATA[i];
+    tip.innerHTML = `<strong>${d.name}</strong> — ${d.n} PR${d.n === 1 ? "" : "s"}` +
+                    `<br><span class="tt-sub">${(d.n / TOTAL * 100).toFixed(1)}% of ${TOTAL}</span>`;
+    if (keyboard) {
+      const [x, y] = pol((R_OUT + R_IN) / 2, d.mid);
+      const r = svg.getBoundingClientRect();
+      tip.style.left = (x / 340 * r.width) + "px";
+      tip.style.top  = (y / 340 * r.height) + "px";
+    }
+    tip.style.opacity = 1;
+  }
+  function blur() {
+    slices.forEach((p) => p.classList.remove("dimmed"));
+    tip.style.opacity = 0;
+  }
+
+  // ---- view toggle --------------------------------------------------------
+  const bC = document.getElementById("btn-chart"), bT = document.getElementById("btn-table");
+  const vC = document.getElementById("view-chart"), vT = document.getElementById("view-table");
+  function show(chart) {
+    bC.setAttribute("aria-pressed", String(chart));
+    bT.setAttribute("aria-pressed", String(!chart));
+    vC.hidden = !chart; vT.hidden = chart;
+  }
+  bC.addEventListener("click", () => show(true));
+  bT.addEventListener("click", () => show(false));
+})();
+</script>
+</body>
+</html>
