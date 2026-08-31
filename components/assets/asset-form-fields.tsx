@@ -5,7 +5,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { PRICED_HOLDINGS } from "@/lib/prices";
 import {
   ASSET_TYPES,
   COMMODITY_CHOICES,
@@ -22,7 +21,12 @@ export function AssetCategoryField({ formData, setFormData }: FormProps) {
   return (
     <div className="space-y-2">
       <Label htmlFor="category">Category</Label>
-      <Select value={formData.category} onValueChange={(category) => setFormData((prev) => ({ ...prev, category }))} required>
+      <Select value={formData.category} onValueChange={(category) => setFormData((prev) => ({
+        ...prev,
+        category,
+        useLivePrice: category === "Crypto" ? true : prev.useLivePrice,
+        currency: category === "Crypto" ? "USD" : prev.currency,
+      }))} required>
         <SelectTrigger id="category"><SelectValue /></SelectTrigger>
         <SelectContent>{ASSET_TYPES.map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent>
       </Select>
@@ -63,7 +67,7 @@ export function CryptoFields({ formData, setFormData }: FormProps) {
         <div className="space-y-2"><Label htmlFor="cryptoSymbol">Coin</Label><Select value={formData.cryptoSymbol} onValueChange={(value) => setFormData((prev) => ({ ...prev, cryptoSymbol: value as AssetFormData["cryptoSymbol"] }))}><SelectTrigger id="cryptoSymbol"><SelectValue /></SelectTrigger><SelectContent>{CRYPTO_CHOICES.map((choice) => <SelectItem key={choice.symbol} value={choice.symbol}>{choice.label} ({choice.symbol})</SelectItem>)}</SelectContent></Select></div>
         <div className="space-y-2"><Label>Pricing</Label><LivePriceCheckbox formData={formData} setFormData={setFormData} /></div>
       </div>
-      {formData.useLivePrice && <div className="space-y-2"><Label htmlFor="quantityCoins">Quantity (coins)</Label><Input id="quantityCoins" type="number" step="0.00000001" min="0" value={formData.quantityCoins} onChange={(e) => setFormData((prev) => ({ ...prev, quantityCoins: e.target.value }))} placeholder="0.00000000" required /><p className="text-xs text-muted-foreground">How many {PRICED_HOLDINGS[formData.cryptoSymbol].label} you hold: fractions are exact, so 0.0345 means 0.0345 {formData.cryptoSymbol}.</p></div>}
+      {formData.useLivePrice && <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="quantityCoins">Quantity (coins)</Label><Input id="quantityCoins" type="number" step="0.00000001" min="0" value={formData.quantityCoins} onChange={(e) => setFormData((prev) => ({ ...prev, quantityCoins: e.target.value }))} placeholder="0.00000000" required /><p className="text-xs text-muted-foreground">Fractions are exact: 0.0345 means 0.0345 {formData.cryptoSymbol}.</p></div><div className="space-y-2"><Label htmlFor="paidAmount">Paid (USD)</Label><Input id="paidAmount" type="number" step="0.01" min="0" value={formData.paidAmount} onChange={(e) => setFormData((prev) => ({ ...prev, paidAmount: e.target.value }))} placeholder="0.00" required /><p className="text-xs text-muted-foreground">Your cost basis. It is used for live profit or loss.</p></div></div>}
     </>
   );
 }

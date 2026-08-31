@@ -617,6 +617,14 @@ export default function DashboardPage() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         asset={selectedAsset}
+        accounts={accountRows.map((account) => ({
+          id: account.id,
+          name: account.name,
+          currency: account.currency,
+          kind: account.kind,
+          archived: account.archived,
+        }))}
+        categories={categories}
         onSuccess={loadAssets}
       />
 
