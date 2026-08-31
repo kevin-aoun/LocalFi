@@ -49,6 +49,7 @@ type HoldingFields = {
   unit: string;
   currency: string;
   notes: string | null;
+  paidAmountCents: Cents | null;
 };
 
 type ActionResult<T> = { success: true; data: T } | { error: string };
@@ -101,6 +102,16 @@ function readHoldingFields(formData: FormData): HoldingFields | { error: string 
 
   const currency = "USD";
   const notes = fieldText(formData, "notes");
+  const rawPaidAmount = fieldText(formData, "paidAmount");
+  const paidAmountCents = rawPaidAmount === null || rawPaidAmount.trim() === ""
+    ? null
+    : tryParseAmount(rawPaidAmount);
+  if (rawPaidAmount !== null && rawPaidAmount.trim() !== "" && paidAmountCents === null) {
+    return { error: `"${rawPaidAmount.trim()}" is not a valid paid amount.` };
+  }
+  if (paidAmountCents !== null && paidAmountCents < 0) {
+    return { error: "The paid amount cannot be negative." };
+  }
 
   return {
     spec,
@@ -108,6 +119,7 @@ function readHoldingFields(formData: FormData): HoldingFields | { error: string 
     unit,
     currency,
     notes: notes && notes.trim() !== "" ? notes : null,
+    paidAmountCents,
   };
 }
 
@@ -158,6 +170,9 @@ export async function createLivePricedAsset(
   try {
     const fields = readHoldingFields(formData);
     if ("error" in fields) return fields;
+    if (fields.spec.assetCategory === "Crypto" && fields.paidAmountCents === null) {
+      return { error: "Enter what you paid for this coin." };
+    }
 
     const priced = await priceHolding(fields);
     if ("error" in priced) return priced;
@@ -201,7 +216,7 @@ export async function createLivePricedAsset(
         instrumentId: instrument.id,
         currency: fields.currency,
         quantity: String(quantity.quantity),
-        bookAmountMinor: priced.valueCents,
+        bookAmountMinor: fields.paidAmountCents ?? priced.valueCents,
         effectiveDate: observationDay(Math.floor(priced.quote.fetchedAt / 1000)),
         description: `Opening position for ${fields.spec.label}`,
         recordedAt: Math.floor(priced.quote.fetchedAt / 1000),
@@ -305,7 +320,7 @@ async function updateLivePricedAssetWith(
         instrumentId: instrument.id,
         currency: fields.currency,
         quantity: String(quantity.quantity),
-        bookAmountMinor: priced.valueCents,
+        bookAmountMinor: fields.paidAmountCents ?? exactPosition?.bookAmountMinor ?? priced.valueCents,
         effectiveDate: observationDay(Math.floor(priced.quote.fetchedAt / 1000)),
         description: `Opening position for ${fields.spec.label}`,
         recordedAt: Math.floor(priced.quote.fetchedAt / 1000),

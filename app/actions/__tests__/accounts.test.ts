@@ -100,11 +100,49 @@ describe("createAccount", () => {
     expect(account.currency).toBe("USD");
   });
 
-  it("infers 'liability' for a credit card, a loan and a mortgage", async () => {
+  it("infers 'liability' by default for a credit card, a loan and a mortgage", async () => {
     for (const [name, type] of [["Amex", "CreditCard"], ["Car", "Loan"], ["House", "Mortgage"]]) {
       const account = unwrap(await createAccount(form({ name, type })));
       expect(account.kind, `${type} should be a liability`).toBe("liability");
     }
+  });
+
+  it("lets a loan represent either money owed to the owner or money the owner owes", async () => {
+    const receivable = unwrap(
+      await createAccount(
+        form({
+          name: "Loan to a friend",
+          type: "Loan",
+          kind: "asset",
+          openingBalance: "250.00",
+          openingBalanceDate: "2026-07-01",
+        }),
+      ),
+    );
+    const payable = unwrap(
+      await createAccount(
+        form({
+          name: "Personal loan",
+          type: "Loan",
+          kind: "liability",
+          openingBalance: "100.00",
+          openingBalanceDate: "2026-07-01",
+        }),
+      ),
+    );
+
+    expect(receivable.kind).toBe("asset");
+    expect(payable.kind).toBe("liability");
+    expect(balanceOf(await getAccountBalances(), receivable.name)).toMatchObject({
+      balanceCents: 25_000,
+      balanceKind: "asset",
+    });
+    expect(balanceOf(await getAccountBalances(), payable.name)).toMatchObject({
+      balanceCents: -10_000,
+      owedCents: 10_000,
+      balanceKind: "liability",
+    });
+    expect(await verifyLedger()).toMatchObject({ ok: true });
   });
 
   it("parses the opening balance into exact cents", async () => {

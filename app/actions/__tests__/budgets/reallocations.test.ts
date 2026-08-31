@@ -7,12 +7,14 @@ import {
   seedAccount,
   seedBudget,
   seedCategory,
+  seedTransaction,
   type DomainDb,
 } from "../support/domain-fixture";
 import {
   createBudgetReallocation,
   deleteBudgetReallocation,
   getBudgetReallocations,
+  getBudgetReallocationAvailability,
   getBudgets,
   getSpendVsBudget,
   updateBudget,
@@ -101,7 +103,7 @@ describe("monthly budget reallocations", () => {
     expect(food.limitCents).toBe(75_000);
   });
 
-  it("applies percentages to the remaining reallocatable budget so Max always works", async () => {
+  it("applies percentages to the current allocation when nothing has been spent", async () => {
     unwrap(
       await createBudgetReallocation(
         form({
@@ -160,6 +162,31 @@ describe("monthly budget reallocations", () => {
         form({ month: "2026-99", fromCategoryId: FOOD, toCategoryId: TRANSPORT, inputMode: "amount", value: "1" }),
       ),
     ).toMatchObject({ error: expect.stringMatching(/invalid month/i) });
+  });
+
+  it("allows only the source category's unspent budget and exposes that maximum to the UI", async () => {
+    seedTransaction(temp, {
+      categoryId: FOOD,
+      accountId: 2,
+      amountCents: 12_500,
+      dateKey: "2026-07-10",
+    });
+    expect(await getBudgetReallocationAvailability({ month: "2026-07", categoryId: FOOD })).toMatchObject({
+      categoryName: "Food",
+      budgetedCents: 50_000,
+      spentCents: 12_500,
+      maximumCents: 37_500,
+    });
+    expect(
+      await createBudgetReallocation(form({
+        month: "2026-07", fromCategoryId: FOOD, toCategoryId: TRANSPORT, inputMode: "percentage", value: "100",
+      })),
+    ).toMatchObject({ error: expect.stringMatching(/375\.00|unspent/i) });
+    expect(
+      await createBudgetReallocation(form({
+        month: "2026-07", fromCategoryId: FOOD, toCategoryId: TRANSPORT, inputMode: "amount", value: "375",
+      })),
+    ).toMatchObject({ success: true, data: { amountCents: 37_500 } });
   });
 
   it("deletes the reallocation directly and restores the original limits", async () => {

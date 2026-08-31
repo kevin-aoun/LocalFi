@@ -44,6 +44,7 @@ function asset(values: Partial<SidebarAssetRow> & { category: string }): Sidebar
     commodityType: values.commodityType ?? null,
     priceSymbol: values.priceSymbol ?? null,
     quantity: values.quantity ?? null,
+    quantityExact: values.quantityExact ?? null,
     unit: values.unit ?? null,
   };
 }
@@ -156,6 +157,23 @@ describe("cash is a row in the table, not a footnote", () => {
     expect(
       crypto.holdings.map((holding) => (holding.source === "asset" ? holding.asset.id : null)),
     ).toEqual([2, 3]);
+  });
+
+  it("shows one exact-quantity row per coin instead of splitting the same symbol into purchases", () => {
+    const view = buildAssetTable({
+      accounts: [],
+      assets: [
+        asset({ category: "Crypto", priceSymbol: "ETH", quantityExact: "0.156777", currentValueCents: 38_178 }),
+        asset({ category: "Crypto", priceSymbol: "ETH", quantityExact: "0.039664", currentValueCents: 9_693 }),
+        asset({ category: "Crypto", priceSymbol: "BTC", quantityExact: "0.001537", currentValueCents: 11_993 }),
+      ],
+    });
+    const crypto = view.categories.find((category) => category.name === "Crypto")!;
+    expect(crypto.count).toBe(2);
+    expect(crypto.holdings).toMatchObject([
+      { source: "crypto-summary", name: "ETH", detail: "0.196441 coins", amountLabel: "$478.71" },
+      { source: "crypto-summary", name: "BTC", detail: "0.001537 coins", amountLabel: "$119.93" },
+    ]);
   });
 
   it("lists each account separately when there is more than one", () => {

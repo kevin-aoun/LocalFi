@@ -47,6 +47,7 @@ describe("Bitcoin and Ethereum are pickable live-priced holdings", () => {
     expect(source).toMatch(/const ASSET_TYPES = \[[^\]]*"Crypto"/);
     // The live-price controls are no longer gated on Commodities alone.
     expect(source).toMatch(/liveSymbol/);
+    expect(source).toMatch(/category === "Crypto" \? true : prev\.useLivePrice/);
   });
 
   it("labels the crypto quantity as a coin count, not a weight", () => {
@@ -54,10 +55,25 @@ describe("Bitcoin and Ethereum are pickable live-priced holdings", () => {
     expect(source).toMatch(/"coins"/);
   });
 
+  it("collects the paid amount and shows live profit or loss beside the value", () => {
+    expect(source).toMatch(/Paid \(USD\)/);
+    expect(source).toMatch(/cost basis/i);
+    expect(source).toMatch(/Live profit \/ loss/);
+    expect(source).toMatch(/profitLossCents/);
+  });
+
   it("routes a live-priced save through the priced-holding action", () => {
     expect(source).toMatch(/createLivePricedAsset/);
     expect(source).toMatch(/updateLivePricedAsset/);
     expect(source).toMatch(/getLivePriceQuote/);
+  });
+
+  it("records a new coin as one account-backed investment transaction", () => {
+    expect(source).toMatch(/createTransaction/);
+    expect(source).toMatch(/Paid from/);
+    expect(source).toMatch(/Tag \/ category/);
+    expect(source).toMatch(/instrumentSymbol/);
+    expect(source).toMatch(/This creates one confirmed transaction and decreases the selected account/);
   });
 });
 
@@ -132,6 +148,6 @@ describe("the dialog stays inside the viewport", () => {
   });
 
   it("stacks paired asset fields on narrow screens", () => {
-    expect(source.match(/grid-cols-1 gap-4 sm:grid-cols-2/g)).toHaveLength(3);
+    expect(source.match(/grid-cols-1 gap-4 sm:grid-cols-2/g)).toHaveLength(4);
   });
 });

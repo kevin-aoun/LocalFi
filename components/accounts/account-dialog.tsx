@@ -22,9 +22,9 @@ import {
   ACCOUNT_TYPE_LABELS,
   accountFormStateFromAccount,
   emptyAccountFormState,
+  kindAfterTypeChange,
   kindIsEditable,
   openingBalanceHelp,
-  resolveFormKind,
   toAccountFormData,
   validateAccountForm,
   type AccountFormState,
@@ -66,7 +66,7 @@ export function AccountDialog({ open, onOpenChange, account, onSuccess }: Accoun
     setFormState((prev) => ({
       ...prev,
       type: value,
-      kind: resolveFormKind(value, prev.kind),
+      kind: kindAfterTypeChange(value, prev.kind),
     }));
   };
 
@@ -168,12 +168,14 @@ export function AccountDialog({ open, onOpenChange, account, onSuccess }: Accoun
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="asset">Asset: money you hold</SelectItem>
+                  <SelectItem value="asset">Asset: money held or owed to you</SelectItem>
                   <SelectItem value="liability">Liability: money you owe</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                {kindEditable
+                {formState.type === "Loan"
+                  ? "Choose asset when someone owes you; choose liability when you owe money."
+                  : kindEditable
                   ? "“Other” can sit on either side, so choose one."
                   : `A ${ACCOUNT_TYPE_LABELS[formState.type as AccountTypeName] ?? formState.type} is always ${
                       formState.kind === "liability" ? "a liability" : "an asset"
@@ -184,7 +186,14 @@ export function AccountDialog({ open, onOpenChange, account, onSuccess }: Accoun
 
           <div className="space-y-2 rounded-md border border-primary/30 bg-primary/5 p-3">
             <Label htmlFor="account-opening-balance">
-              Opening balance{formState.kind === "liability" ? " (amount owed)" : ""}
+              Opening balance
+              {formState.type === "Loan"
+                ? formState.kind === "liability"
+                  ? " (you owe)"
+                  : " (owed to you)"
+                : formState.kind === "liability"
+                  ? " (amount owed)"
+                  : ""}
             </Label>
             <Input
               id="account-opening-balance"
@@ -199,7 +208,9 @@ export function AccountDialog({ open, onOpenChange, account, onSuccess }: Accoun
               }
               placeholder="0.00"
             />
-            <p className="text-xs text-muted-foreground">{openingBalanceHelp(formState.kind)}</p>
+            <p className="text-xs text-muted-foreground">
+              {openingBalanceHelp(formState.kind, formState.type)}
+            </p>
             {}
             {openingPreviewCents !== null && (
               <p className="text-xs font-medium" data-private-value>

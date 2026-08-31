@@ -29,8 +29,11 @@ export type SidebarAssetRow = {
   notes?: string | null;
   commodityType?: string | null;
   priceSymbol?: string | null;
+  costBasisCents?: Cents | null;
+  profitLossCents?: Cents | null;
 
   quantity?: number | null;
+  quantityExact?: string | null;
   unit?: string | null;
   archived?: boolean | null;
 };

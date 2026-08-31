@@ -1,7 +1,7 @@
 # Architecture decisions
 
 This file records durable choices and rejected alternatives. See the
-[README](../README.md) for setup and [REFERENCE.md](REFERENCE.md) for locations.
+[README](../README.md) for setup and [SPECS.md](SPECS.md) for locations.
 
 ## Product boundary
 

@@ -62,12 +62,16 @@ export function impliedKind(type: string): AccountKind {
 }
 
 export function kindIsEditable(type: string): boolean {
-  return type === "Other";
+  return type === "Loan" || type === "Other";
 }
 
 export function resolveFormKind(type: string, requested: string): AccountKind {
   if (!kindIsEditable(type)) return impliedKind(type);
   return isAccountKind(requested) ? requested : impliedKind(type);
+}
+
+export function kindAfterTypeChange(type: string, current: AccountKind): AccountKind {
+  return type === "Loan" ? impliedKind(type) : resolveFormKind(type, current);
 }
 
 export type AccountFormState = {
@@ -335,7 +339,12 @@ export function currencyOf(rows: readonly Pick<AccountRow, "currency">[]): {
   return { currency: codes.length === 1 ? codes[0] : "USD", mixed: codes.length > 1, currencies: codes };
 }
 
-export function openingBalanceHelp(kind: AccountKind): string {
+export function openingBalanceHelp(kind: AccountKind, type?: string): string {
+  if (type === "Loan") {
+    return kind === "liability"
+      ? "What you already owed before your logged history begins. Enter it as a positive number."
+      : "What someone already owed you before your logged history begins. Leave blank if you are recording the loan from the beginning.";
+  }
   return kind === "liability"
     ? "What you still owed on this account before your logged history begins. Enter it as a positive number: $600 of card debt is 600."
     : "What was in this account before your logged history begins. Leave blank if your ledger covers everything.";

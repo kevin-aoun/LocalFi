@@ -28,6 +28,10 @@ export async function getBudgetReallocations(...args: Parameters<typeof realloca
   return reallocations.getBudgetReallocations(...args);
 }
 
+export async function getBudgetReallocationAvailability(...args: Parameters<typeof reallocations.getBudgetReallocationAvailability>) {
+  return reallocations.getBudgetReallocationAvailability(...args);
+}
+
 export async function createBudgetReallocation(...args: Parameters<typeof reallocations.createBudgetReallocation>) {
   return reallocations.createBudgetReallocation(...args);
 }
@@ -56,5 +60,5 @@ export async function importLegacyBudgets(...args: Parameters<typeof mutations.i
   return mutations.importLegacyBudgets(...args);
 }
 
-export type { BudgetReallocationView } from "./budgets/reallocations";
+export type { BudgetReallocationAvailability, BudgetReallocationView } from "./budgets/reallocations";
 export type { ActionResult, BudgetPerformanceRow } from "./budgets/shared";

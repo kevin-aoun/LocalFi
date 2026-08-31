@@ -20,6 +20,7 @@ const {
 } = await import("../crypto");
 const { recordNetWorthToday } = await import("../accounts");
 const { calculateCommodityValue } = await import("../commodities");
+const { getAssets } = await import("../assets");
 
 let temp: TempDb;
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -56,10 +57,14 @@ const storedAssets = () =>
 
 function holdingForm(over: Record<string, string> = {}) {
   const fd = new FormData();
-  fd.append("priceSymbol", over.priceSymbol ?? "BTC");
+  const symbol = over.priceSymbol ?? "BTC";
+  fd.append("priceSymbol", symbol);
   if (over.quantity !== undefined) fd.append("quantity", over.quantity);
   if (over.unit !== undefined) fd.append("unit", over.unit);
   fd.append("currency", over.currency ?? "USD");
+  if ((symbol === "BTC" || symbol === "ETH") && over.paidAmount !== "") {
+    fd.append("paidAmount", over.paidAmount ?? "100.00");
+  }
   if (over.notes !== undefined) fd.append("notes", over.notes);
   return fd;
 }
@@ -117,6 +122,25 @@ describe("createLivePricedAsset", () => {
         use_live_price: 1,
         priced_at: expect.any(Number),
       },
+    ]);
+    expect(temp.query("SELECT book_amount_minor FROM instrument_positions")).toEqual([
+      { book_amount_minor: 10_000 },
+    ]);
+  });
+
+  it("requires a crypto cost basis and preserves it while the live value changes", async () => {
+    expect(await createLivePricedAsset(holdingForm({ quantity: "1", paidAmount: "" }))).toEqual({
+      error: "Enter what you paid for this coin.",
+    });
+    await createLivePricedAsset(holdingForm({ quantity: "1", paidAmount: "90000" }));
+    serve({ coingecko: { bitcoin: { usd: 100_000 } } });
+    await updateLivePricedAsset(1, holdingForm({ quantity: "1", paidAmount: "90000" }));
+    expect(temp.query("SELECT book_amount_minor FROM instrument_positions")).toEqual([
+      { book_amount_minor: 9_000_000 },
+    ]);
+    expect(storedAssets()[0]).toMatchObject({ current_value_cents: 10_000_000 });
+    expect(await getAssets()).toMatchObject([
+      { category: "Crypto", costBasisCents: 9_000_000, profitLossCents: 1_000_000 },
     ]);
   });
 

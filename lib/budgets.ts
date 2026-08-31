@@ -299,6 +299,37 @@ export function monthlyReallocationAdjustment(
   return monthlyReallocationFlow(reallocations, categoryId, month).netCents;
 }
 
+/**
+ * The portion of a monthly allocation that can leave a category without making
+ * its confirmed spending exceed that allocation. Keep this separate from
+ * rollover: a reallocation is about this month's allocation only.
+ */
+export function reallocationMaximumCents(
+  budgetedCents: Cents,
+  spentCents: Cents,
+): Cents {
+  assertCents(budgetedCents, "budgeted amount");
+  assertCents(spentCents, "spent amount");
+  const unspent = sumCents([budgetedCents, negateCents(spentCents)]);
+  // Refunds must not let a category give away more than is allocated, and an
+  // overspent category has no amount left to move.
+  return Math.max(0, Math.min(budgetedCents, unspent)) as Cents;
+}
+
+export function percentageOfBudgetCents(
+  budgetedCents: Cents,
+  basisPoints: number,
+): Cents {
+  assertCents(budgetedCents, "budgeted amount");
+  if (!Number.isInteger(basisPoints) || basisPoints < 1 || basisPoints > 10_000) {
+    throw new Error("Percentage must be between 0.01 and 100.");
+  }
+  const rounded = (BigInt(budgetedCents) * BigInt(basisPoints) + BigInt(5_000)) / BigInt(10_000);
+  const cents = Number(rounded);
+  assertCents(cents, "percentage amount");
+  return cents;
+}
+
 
 export function budgetPerformance(input: BudgetPerformanceInput): BudgetPeriodResult[] {
   const { budgets, transactions, reallocations = [], categoryId, period } = input;

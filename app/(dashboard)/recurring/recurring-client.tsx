@@ -551,9 +551,6 @@ export default function RecurringClient({
                       {status.detail && (
                         <p className="text-xs text-muted-foreground">{status.detail}</p>
                       )}
-                      {template.comment && (
-                        <p className="text-xs text-muted-foreground">{template.comment}</p>
-                      )}
                       {clamp && <p className="text-xs text-muted-foreground">{clamp}</p>}
                     </div>
 

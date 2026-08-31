@@ -30,7 +30,6 @@ function state(overrides: Partial<RecurringFormState> = {}): RecurringFormState 
     transferAccountId: "",
     categoryId: "2",
     amount: "1200",
-    comment: "Monthly rent",
     frequency: "monthly",
     interval: "1",
     startDate: fromDateKey("2026-01-31"),
@@ -236,13 +235,13 @@ describe("buildRecurringFormValues", () => {
       transferAccountId: "",
       categoryId: "2",
       amount: "1200",
-      comment: "Monthly rent",
       frequency: "monthly",
       interval: "1",
       startDate: "2026-01-31",
       endDate: "",
       archived: "false",
     });
+    expect(buildRecurringFormValues(state())).not.toHaveProperty("comment");
   });
 
   it("clears the category when the template is a transfer", () => {
