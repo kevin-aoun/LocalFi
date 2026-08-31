@@ -96,6 +96,14 @@ export function Sidebar() {
   }, [load]);
 
   useEffect(() => {
+    const refreshFinancialData = () => {
+      void load();
+    };
+    window.addEventListener("localfi:financial-updated", refreshFinancialData);
+    return () => window.removeEventListener("localfi:financial-updated", refreshFinancialData);
+  }, [load]);
+
+  useEffect(() => {
     const refreshSettings = async () => {
       try {
         const settingsData = await getSettings();

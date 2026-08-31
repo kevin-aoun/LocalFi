@@ -486,6 +486,48 @@ describe("immutable interactive transaction flows", () => {
     expect((await verifyLedger()).ok).toBe(true);
   });
 
+  it("reprojects a shared crypto holding when one purchase is deleted", async () => {
+    const first = await createTransaction(form({
+      accountId: 1,
+      categoryId: 12,
+      amount: "1000.00",
+      comment: "First BTC purchase",
+      date: "2026-08-01T00:00:00",
+      instrumentSymbol: "BTC",
+      instrumentUnit: "coins",
+      quantity: "0.02",
+      unitPrice: "50000.00",
+    }));
+    const second = await createTransaction(form({
+      accountId: 1,
+      categoryId: 12,
+      amount: "600.00",
+      comment: "Second BTC purchase",
+      date: "2026-08-02T00:00:00",
+      instrumentSymbol: "BTC",
+      instrumentUnit: "coins",
+      quantity: "0.01",
+      unitPrice: "60000.00",
+    }));
+    const firstId = (first as { data: { id: number } }).data.id;
+    expect(second).toMatchObject({ success: true });
+    expect(temp.query("SELECT quantity, book_amount_minor FROM instrument_positions")).toEqual([
+      { quantity: "0.03", book_amount_minor: 160_000 },
+    ]);
+
+    expect(await deleteTransaction(firstId)).toEqual({ success: true });
+
+    expect(temp.query("SELECT quantity, book_amount_minor FROM instrument_positions")).toEqual([
+      { quantity: "0.01", book_amount_minor: 60_000 },
+    ]);
+    expect(temp.query(
+      "SELECT category, quantity, current_value_cents FROM assets WHERE category <> 'Cash'",
+    )).toEqual([
+      { category: "Crypto", quantity: 0.01, current_value_cents: 60_000 },
+    ]);
+    expect(await verifyLedger()).toMatchObject({ ok: true });
+  });
+
   it("appends a balanced same-dollar purchase correction when only quantity changes", async () => {
     const created = await createTransaction(form({
       accountId: 1,
