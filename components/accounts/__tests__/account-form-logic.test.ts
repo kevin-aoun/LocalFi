@@ -16,6 +16,7 @@ import {
   emptyAccountFormState,
   groupAccountsByKind,
   impliedKind,
+  kindAfterTypeChange,
   kindIsEditable,
   openingBalanceHelp,
   orphanSummary,
@@ -67,10 +68,15 @@ describe("impliedKind", () => {
     expect(impliedKind("Nonsense")).toBe("asset");
   });
 
-  it("only lets the user choose the kind for the one ambiguous type", () => {
+  it("lets the user choose the kind for loans and other accounts", () => {
+    expect(kindIsEditable("Loan")).toBe(true);
     expect(kindIsEditable("Other")).toBe(true);
     expect(kindIsEditable("Mortgage")).toBe(false);
     expect(kindIsEditable("Checking")).toBe(false);
+  });
+
+  it("keeps liability as the initial loan default before the user chooses a side", () => {
+    expect(kindAfterTypeChange("Loan", "asset")).toBe("liability");
   });
 });
 
@@ -132,6 +138,11 @@ describe("validateAccountForm — type and kind", () => {
   it("honours an explicit kind for the ambiguous 'Other' type", () => {
     expect(ok({ ...base, type: "Other", kind: "liability" }).kind).toBe("liability");
     expect(ok({ ...base, type: "Other", kind: "asset" }).kind).toBe("asset");
+  });
+
+  it("honours either side for a loan", () => {
+    expect(ok({ ...base, type: "Loan", kind: "liability" }).kind).toBe("liability");
+    expect(ok({ ...base, type: "Loan", kind: "asset" }).kind).toBe("asset");
   });
 
   it("rejects a kind that is neither asset nor liability", () => {
@@ -532,6 +543,11 @@ describe("openingBalanceHelp", () => {
     const help = openingBalanceHelp("liability");
     expect(help).toMatch(/owe/i);
     expect(help).toMatch(/positive/i);
+  });
+
+  it("explains which direction a loan balance is owed", () => {
+    expect(openingBalanceHelp("asset", "Loan")).toMatch(/owed you/i);
+    expect(openingBalanceHelp("liability", "Loan")).toMatch(/you already owed/i);
   });
 });
 

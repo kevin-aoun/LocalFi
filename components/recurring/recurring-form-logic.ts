@@ -116,7 +116,6 @@ export type RecurringFormState = {
   categoryId: string;
 
   amount: string;
-  comment: string;
   frequency: Frequency;
 
   interval: string;
@@ -181,7 +180,6 @@ export function buildRecurringFormValues(state: RecurringFormState): Record<stri
 
     categoryId: isTransfer ? "" : state.categoryId,
     amount: state.amount.trim(),
-    comment: state.comment.trim(),
     frequency: state.frequency,
     interval: state.interval.trim(),
 

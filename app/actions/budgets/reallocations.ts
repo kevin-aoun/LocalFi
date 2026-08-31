@@ -1,15 +1,35 @@
 import { asc, eq } from "drizzle-orm";
 import { revalidate } from "@/lib/revalidate";
-import { readDb, withDb } from "@/lib/db/client";
+import { readDb, withDb, type BudgetDb } from "@/lib/db/client";
 import { budgetReallocations, budgets, categories, type BudgetReallocation, type BudgetReallocationInputMode } from "@/lib/db/schema";
-import { budgetInForce, monthlyReallocationAdjustment, type BudgetReallocationRow, type BudgetRow } from "@/lib/budgets";
+import {
+  budgetInForce,
+  monthlyReallocationAdjustment,
+  percentageOfBudgetCents,
+  periodContaining,
+  reallocationMaximumCents,
+  spendInRange,
+  type BudgetLedgerTransaction,
+  type BudgetReallocationRow,
+  type BudgetRow,
+} from "@/lib/budgets";
 import { isDateKey, type DateKey } from "@/lib/dates";
 import { formatMoney, parseAmount, type Cents } from "@/lib/money";
+import { readCategoryMovements } from "@/lib/ledger";
 import { str, toBudgetRow, type ActionResult } from "./shared";
 
 export type BudgetReallocationView = BudgetReallocation & {
   fromCategoryName: string;
   toCategoryName: string;
+};
+
+export type BudgetReallocationAvailability = {
+  month: string;
+  categoryId: number;
+  categoryName: string;
+  budgetedCents: Cents;
+  spentCents: Cents;
+  maximumCents: Cents;
 };
 
 function requireMonth(value: string | null): string {
@@ -48,6 +68,81 @@ function monthlyBudgetFor(
     effectiveTo: null,
     rollover: false,
   };
+}
+
+function toExistingRows(rows: readonly BudgetReallocation[]): BudgetReallocationRow[] {
+  return rows.map((allocation) => ({
+    id: allocation.id,
+    month: allocation.month,
+    fromCategoryId: allocation.fromCategoryId,
+    toCategoryId: allocation.toCategoryId,
+    amountCents: allocation.amountCents,
+  }));
+}
+
+function sourceSpending(
+  raw: Parameters<typeof readCategoryMovements>[0],
+  categoryId: number,
+  month: string,
+): Cents {
+  const startKey = `${month}-01` as DateKey;
+  const monthEnd = periodContaining("monthly", startKey).endKey;
+  const movements = readCategoryMovements(raw, { fromKey: startKey, toKey: monthEnd });
+  const currencies = new Set(movements.filter((movement) => movement.categoryId === categoryId).map((movement) => movement.currency));
+  if (currencies.size > 1) {
+    throw new Error("This category has spending in multiple currencies, so it cannot be reallocated.");
+  }
+  const transactions: BudgetLedgerTransaction[] = movements.map((movement) => ({
+    categoryId: movement.categoryId,
+    amountCents: Math.abs(movement.movementCents) as Cents,
+    categoryMovementCents: movement.movementCents as Cents,
+    dateKey: movement.dateKey,
+    direction: "outflow",
+    currency: movement.currency,
+    pending: false,
+    accountId: null,
+    transferAccountId: null,
+  }));
+  return spendInRange(transactions, categoryId, startKey, monthEnd);
+}
+
+async function sourceAvailability(
+  db: BudgetDb,
+  raw: Parameters<typeof readCategoryMovements>[0],
+  month: string,
+  categoryId: number,
+): Promise<BudgetReallocationAvailability> {
+  const categoryRows = await db.select().from(categories);
+  const category = categoryRows.find((row) => row.id === categoryId);
+  if (!category) throw new Error(`No category with id ${categoryId}`);
+  if (category.type === "Income") throw new Error("Budget can only be reallocated between spending categories.");
+  const storedBudgets = (await db.select().from(budgets)).map(toBudgetRow);
+  const sourceBudget = monthlyBudgetFor(storedBudgets, category, `${month}-01` as DateKey);
+  if (!sourceBudget) throw new Error(`${category.name} has no monthly budget in ${month}.`);
+  const existing = await db.select().from(budgetReallocations).where(eq(budgetReallocations.month, month));
+  const budgetedCents = (
+    sourceBudget.limitCents + monthlyReallocationAdjustment(toExistingRows(existing), categoryId, month)
+  ) as Cents;
+  const spentCents = sourceSpending(raw, categoryId, month);
+  return {
+    month,
+    categoryId,
+    categoryName: category.name,
+    budgetedCents,
+    spentCents,
+    maximumCents: reallocationMaximumCents(budgetedCents, spentCents),
+  };
+}
+
+export async function getBudgetReallocationAvailability(options: {
+  month: string;
+  categoryId: number;
+}): Promise<BudgetReallocationAvailability> {
+  const month = requireMonth(options.month);
+  if (!Number.isInteger(options.categoryId) || options.categoryId <= 0) {
+    throw new Error("Choose the category to take budget from.");
+  }
+  return readDb((db, raw) => sourceAvailability(db, raw, month, options.categoryId));
 }
 
 
@@ -97,7 +192,7 @@ export async function createBudgetReallocation(
     const inputValue = str(formData, "value");
     if (inputValue === null) return { error: "Enter how much budget to move." };
 
-    const row = await withDb(async (db) => {
+    const row = await withDb(async (db, raw) => {
       const categoryRows = await db.select().from(categories);
       const fromCategory = categoryRows.find((category) => category.id === fromCategoryId);
       const toCategory = categoryRows.find((category) => category.id === toCategoryId);
@@ -107,40 +202,22 @@ export async function createBudgetReallocation(
         throw new Error("Budget can only be reallocated between spending categories.");
       }
 
-      const storedBudgets = (await db.select().from(budgets)).map(toBudgetRow);
       const monthStart = `${month}-01` as DateKey;
-      const sourceBudget = monthlyBudgetFor(storedBudgets, fromCategory, monthStart);
+      const availability = await sourceAvailability(db, raw, month, fromCategoryId);
+      const storedBudgets = (await db.select().from(budgets)).map(toBudgetRow);
       const targetBudget = monthlyBudgetFor(storedBudgets, toCategory, monthStart);
-      if (!sourceBudget) {
-        throw new Error(`${fromCategory.name} has no monthly budget in ${month}.`);
-      }
       if (!targetBudget) {
         throw new Error(`${toCategory.name} has no monthly budget in ${month}.`);
       }
 
-      const existing = await db
-        .select()
-        .from(budgetReallocations)
-        .where(eq(budgetReallocations.month, month));
-      const existingRows: BudgetReallocationRow[] = existing.map((allocation) => ({
-        id: allocation.id,
-        month: allocation.month,
-        fromCategoryId: allocation.fromCategoryId,
-        toCategoryId: allocation.toCategoryId,
-        amountCents: allocation.amountCents,
-      }));
-      const adjustedSourceCents =
-        sourceBudget.limitCents +
-        monthlyReallocationAdjustment(existingRows, fromCategoryId, month);
-
       const amountCents =
         inputMode === "amount"
           ? parseAmount(inputValue)
-          : Math.round((adjustedSourceCents * parsePercentageBasisPoints(inputValue)) / 10_000);
+          : percentageOfBudgetCents(availability.budgetedCents, parsePercentageBasisPoints(inputValue));
       if (amountCents <= 0) throw new Error("The reallocated amount must be greater than zero.");
-      if (amountCents > adjustedSourceCents) {
+      if (amountCents > availability.maximumCents) {
         throw new Error(
-          `${fromCategory.name} only has ${formatMoney(adjustedSourceCents)} left to reallocate in ${month}.`,
+          `${fromCategory.name} only has ${formatMoney(availability.maximumCents)} unspent to reallocate in ${month}.`,
         );
       }
 

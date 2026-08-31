@@ -16,7 +16,8 @@ import {
   type SidebarAssetRow,
   type SidebarHolding,
 } from "@/components/shared/sidebar-assets";
-import { negateCents, sumCents, type Cents } from "@/lib/money";
+import { formatMoney, negateCents, sumCents, type Cents } from "@/lib/money";
+import { addCanonicalDecimals } from "@/lib/ledger/decimal";
 
 export const CASH_CATEGORY = DERIVED_CASH_CATEGORY;
 
@@ -35,6 +36,11 @@ export type AssetTableHolding<T extends SidebarAssetRow> = SidebarHolding &
         asset: null;
 
         account: AccountRow;
+      }
+    | {
+        source: "crypto-summary";
+        asset: null;
+        account: null;
       }
   );
 
@@ -189,7 +195,15 @@ function listedRows<T extends SidebarAssetRow>(input: AssetTableInput<T>): Liste
     });
   }
 
+  const cryptoGroups = new Map<string, T[]>();
   for (const asset of countedAssets(input.assets)) {
+    if (asset.category === "Crypto" && asset.priceSymbol && asset.quantityExact) {
+      const key = `${asset.priceSymbol}\u0000${asset.currency}`;
+      const group = cryptoGroups.get(key);
+      if (group) group.push(asset);
+      else cryptoGroups.set(key, [asset]);
+      continue;
+    }
     const holding: AssetTableHolding<T> = {
       ...assetHolding(asset),
       source: "asset",
@@ -201,6 +215,34 @@ function listedRows<T extends SidebarAssetRow>(input: AssetTableInput<T>): Liste
       category: asset.category,
       currency: asset.currency,
       currentValueCents: asset.currentValueCents,
+      holding,
+    });
+  }
+
+  for (const [key, assets] of cryptoGroups) {
+    const [first] = assets;
+    const valueCents = sumCents(assets.map((asset) => asset.currentValueCents));
+    const quantity = assets.reduce(
+      (total, asset) => addCanonicalDecimals(total, asset.quantityExact!),
+      "0",
+    );
+    const symbol = first.priceSymbol!;
+    const holding: AssetTableHolding<T> = {
+      key: `crypto:${key}`,
+      name: symbol,
+      detail: `${quantity} coins`,
+      amountLabel: formatMoney(valueCents, first.currency),
+      note: null,
+      tone: valueCents > 0 ? "positive" : valueCents < 0 ? "negative" : "neutral",
+      source: "crypto-summary",
+      asset: null,
+      account: null,
+    };
+    rows.push({
+      key: holding.key,
+      category: "Crypto",
+      currency: first.currency,
+      currentValueCents: valueCents,
       holding,
     });
   }
@@ -365,7 +407,8 @@ export function auditNetWorthFromTable<T extends SidebarAssetRow>(
     rows.filter((row) => row.holding.source === "account").map((row) => row.currentValueCents),
   );
   const standaloneAssetsCents = sumCents(
-    rows.filter((row) => row.holding.source === "asset").map((row) => row.currentValueCents),
+    rows.filter((row) => row.holding.source === "asset" || row.holding.source === "crypto-summary")
+      .map((row) => row.currentValueCents),
   );
   const listedCents = sumCents([cashCents, standaloneAssetsCents]);
 

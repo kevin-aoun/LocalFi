@@ -5,7 +5,7 @@ import { assets } from "@/lib/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { revalidate } from "@/lib/revalidate";
 import { calculateCommodityValue } from "./commodities";
-import { tryParseAmount, type Cents } from "@/lib/money";
+import { negateCents, sumCents, tryParseAmount, type Cents } from "@/lib/money";
 import { normalizeLedgerCurrency } from "@/lib/cash-balance";
 import {
   createManualInstrument,
@@ -29,11 +29,25 @@ import { readPositionHistory } from "@/lib/ledger";
 
 export async function getAssets(options?: { includeArchived?: boolean }) {
   const includeArchived = options?.includeArchived === true;
-  return readDb((db) => {
+  return readDb(async (db, raw) => {
     const query = db.select().from(assets);
-    return includeArchived
+    const rows = await (includeArchived
       ? query.orderBy(asc(assets.id))
-      : query.where(eq(assets.archived, false)).orderBy(asc(assets.id));
+      : query.where(eq(assets.archived, false)).orderBy(asc(assets.id)));
+    return rows.map((asset) => {
+      const position = asset.category === "Crypto" && asset.instrumentId
+        ? getExactPosition(raw, asset.instrumentId, asset.currency)
+        : null;
+      const costBasisCents = position?.bookAmountMinor as Cents | undefined;
+      return {
+        ...asset,
+        quantityExact: position?.quantity ?? null,
+        costBasisCents: costBasisCents ?? null,
+        profitLossCents: costBasisCents === undefined
+          ? null
+          : sumCents([asset.currentValueCents, negateCents(costBasisCents)]),
+      };
+    });
   });
 }
 

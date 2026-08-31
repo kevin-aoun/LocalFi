@@ -66,7 +66,6 @@ function emptyState(): RecurringFormState {
     transferAccountId: "",
     categoryId: "",
     amount: "",
-    comment: "",
     frequency: "monthly",
     interval: "1",
     startDate: fromDateKey(todayKey()),
@@ -84,7 +83,6 @@ function stateFromTemplate(template: RecurringTransaction): RecurringFormState {
     categoryId: template.categoryId === null ? "" : template.categoryId.toString(),
 
     amount: centsToInputValue(template.amountCents),
-    comment: template.comment ?? "",
     frequency: template.frequency,
     interval: template.interval.toString(),
     startDate: fromDateKey(template.startDate),
@@ -285,16 +283,6 @@ export function RecurringDialog({
                 </p>
               )}
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="recurring-comment">Description</Label>
-            <Input
-              id="recurring-comment"
-              value={state.comment}
-              onChange={(e) => set("comment", e.target.value)}
-              placeholder="Copied onto every occurrence"
-            />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">

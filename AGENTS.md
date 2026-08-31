@@ -31,7 +31,7 @@ client does not auto-load Claude rules.
 
 ## Read before changing code
 
-- Start with `README.md` for the runtime and `docs/REFERENCE.md` for code ownership.
+- Start with `README.md` for the runtime and `docs/SPECS.md` for code ownership.
 - Read `docs/DECISIONS.md` before changing an architectural boundary.
 - Read every matching canonical rule before editing:
   - `.claude/rules/persistence.md` for `lib/db/`, migrations, and DB/ledger scripts.
@@ -65,7 +65,7 @@ client does not auto-load Claude rules.
    Node, not jsdom; extract render-independent component logic into `*-logic.ts`.
 5. Generate migrations with `bun run db:generate`; do not hand-author generated SQL
    or snapshots. Add upgrade verification and temporary-database migration tests.
-6. Update `docs/REFERENCE.md` when code ownership moves and `docs/DECISIONS.md` when
+6. Update `docs/SPECS.md` when code ownership moves and `docs/DECISIONS.md` when
    an architectural decision changes.
 
 ## Validation

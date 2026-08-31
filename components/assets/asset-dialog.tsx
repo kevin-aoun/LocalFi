@@ -1,18 +1,21 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createAsset, updateAsset } from "@/app/actions/assets";
+import { createTransaction } from "@/app/actions/transactions";
 import {
   createLivePricedAsset,
   getLivePriceQuote,
   updateLivePricedAsset,
 } from "@/app/actions/crypto";
 import { AlertCircle, Loader2, TrendingUp } from "lucide-react";
-import { centsToDecimal, formatMoney, tryParseAmount, type Cents } from "@/lib/money";
+import { todayKey } from "@/lib/dates";
+import { centsToDecimal, formatMoney, negateCents, sumCents, tryParseAmount, type Cents } from "@/lib/money";
 import {
   describePriceError,
   holdingValueCents,
@@ -48,12 +51,15 @@ type Asset = {
 
   pricedAt?: Date | number | string | null;
   useLivePrice?: boolean;
+  costBasisCents?: Cents | null;
 };
 
 type AssetDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   asset?: Asset | null;
+  accounts?: Array<{ id: number; name: string; currency: string; kind?: string; archived?: boolean }>;
+  categories?: Array<{ id: number; name: string; type: string }>;
   onSuccess: () => void;
 };
 
@@ -68,6 +74,8 @@ export function AssetDialog({
   open,
   onOpenChange,
   asset,
+  accounts = [],
+  categories = [],
   onSuccess,
 }: AssetDialogProps) {
   const [loading, setLoading] = useState(false);
@@ -78,6 +86,8 @@ export function AssetDialog({
 
   const [priceError, setPriceError] = useState<string | null>(null);
   const [formData, setFormData] = useState<AssetFormData>(emptyAssetForm);
+  const [purchaseAccountId, setPurchaseAccountId] = useState("");
+  const [purchaseCategoryId, setPurchaseCategoryId] = useState("");
 
   const { isCommodity, isCrypto, liveSymbol, usesLivePricing, liveUnit, liveQuantityText } = livePricingFor(formData);
   const liveQuantityGiven = liveQuantityText.trim() !== "";
@@ -89,6 +99,22 @@ export function AssetDialog({
       : null;
 
   const storedPricedAt = pricedAtLabel(asset?.pricedAt);
+  const purchaseAccounts = useMemo(
+    () => accounts.filter((account) => account.archived !== true && account.kind !== "liability"),
+    [accounts],
+  );
+  const purchaseCategories = useMemo(
+    () => categories.filter((category) => category.type === "Investment"),
+    [categories],
+  );
+  const defaultPurchaseAccountId = purchaseAccounts[0] ? String(purchaseAccounts[0].id) : "";
+  const defaultPurchaseCategoryId = purchaseCategories[0] ? String(purchaseCategories[0].id) : "";
+  const paidAmountCents = isCrypto ? tryParseAmount(formData.paidAmount) : null;
+  const quoteUnitPriceCents = quote === null ? null : tryParseAmount(String(quote.pricePerUnitUsd));
+  const profitLossCents =
+    computedValue?.ok && paidAmountCents !== null
+      ? sumCents([computedValue.valueCents, negateCents(paidAmountCents)])
+      : null;
 
 
 
@@ -126,8 +152,10 @@ export function AssetDialog({
       setFormData(formFromAsset(asset, centsToDecimal));
     } else {
       setFormData(emptyAssetForm());
+      setPurchaseAccountId(defaultPurchaseAccountId);
+      setPurchaseCategoryId(defaultPurchaseCategoryId);
     }
-  }, [asset, open]);
+  }, [asset, defaultPurchaseAccountId, defaultPurchaseCategoryId, open]);
 
 
 
@@ -159,9 +187,32 @@ export function AssetDialog({
     try {
       let result:
         | Awaited<ReturnType<typeof createAsset>>
-        | Awaited<ReturnType<typeof createLivePricedAsset>>;
+        | Awaited<ReturnType<typeof createLivePricedAsset>>
+        | Awaited<ReturnType<typeof createTransaction>>;
 
       if (usesLivePricing && liveSymbol !== null) {
+        if (isCrypto && !asset) {
+          if (quote === null || quoteUnitPriceCents === null) {
+            setError("Wait for the live price before recording this purchase.");
+            return;
+          }
+          if (purchaseAccountId === "" || purchaseCategoryId === "") {
+            setError("Choose the account and investment category for this purchase.");
+            return;
+          }
+          const purchase = new FormData();
+          purchase.set("accountId", purchaseAccountId);
+          purchase.set("categoryId", purchaseCategoryId);
+          purchase.set("amount", formData.paidAmount);
+          purchase.set("date", todayKey());
+          purchase.set("comment", formData.notes.trim() || `Buy ${liveSymbol}`);
+          purchase.set("pending", "false");
+          purchase.set("instrumentSymbol", liveSymbol);
+          purchase.set("quantity", liveQuantityText.trim());
+          purchase.set("instrumentUnit", liveUnit);
+          purchase.set("unitPrice", String(centsToDecimal(quoteUnitPriceCents)));
+          result = await createTransaction(purchase);
+        } else {
 
 
 
@@ -172,6 +223,9 @@ export function AssetDialog({
         if (liveQuantityGiven) {
           livePriceForm.append("quantity", liveQuantityText.trim());
         }
+        if (isCrypto && formData.paidAmount.trim() !== "") {
+          livePriceForm.append("paidAmount", formData.paidAmount.trim());
+        }
         livePriceForm.append("unit", liveUnit);
 
         livePriceForm.append("currency", "USD");
@@ -181,6 +235,7 @@ export function AssetDialog({
         result = asset
           ? await updateLivePricedAsset(asset.id, livePriceForm)
           : await createLivePricedAsset(livePriceForm);
+        }
       } else {
         const formDataObj = new FormData();
         formDataObj.append("category", formData.category);
@@ -276,6 +331,13 @@ export function AssetDialog({
         </div>
       )}
 
+      {isCrypto && usesLivePricing && computedValue?.ok && paidAmountCents !== null && profitLossCents !== null && (
+        <div className="grid grid-cols-2 gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm" data-private-value>
+          <div><div className="text-xs text-muted-foreground">Paid</div><div className="font-medium">{formatMoney(paidAmountCents, "USD")}</div></div>
+          <div><div className="text-xs text-muted-foreground">Live profit / loss</div><div className={profitLossCents >= 0 ? "font-medium text-emerald-600 dark:text-emerald-400" : "font-medium text-destructive"}>{formatMoney(profitLossCents, "USD")}</div></div>
+        </div>
+      )}
+
       {usesLivePricing && quote !== null && formData.currency !== "USD" && (
         <p className="text-xs text-muted-foreground">
           Both price feeds quote in USD; the value above is shown as{" "}
@@ -311,6 +373,46 @@ export function AssetDialog({
           {isCrypto && (
             <>
               <CryptoFields formData={formData} setFormData={setFormData} />
+
+              {!asset && usesLivePricing && (
+                <div className="space-y-3 rounded-md border p-3">
+                  <div>
+                    <p className="text-sm font-medium">Record purchase</p>
+                    <p className="text-xs text-muted-foreground">
+                      This creates one confirmed transaction and decreases the selected account.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="crypto-purchase-account">Paid from</Label>
+                      <Select value={purchaseAccountId} onValueChange={setPurchaseAccountId}>
+                        <SelectTrigger id="crypto-purchase-account"><SelectValue placeholder="Choose account" /></SelectTrigger>
+                        <SelectContent>
+                          {purchaseAccounts.map((account) => (
+                            <SelectItem key={account.id} value={String(account.id)}>{account.name} ({account.currency})</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="crypto-purchase-category">Tag / category</Label>
+                      <Select value={purchaseCategoryId} onValueChange={setPurchaseCategoryId}>
+                        <SelectTrigger id="crypto-purchase-category"><SelectValue placeholder="Choose investment category" /></SelectTrigger>
+                        <SelectContent>
+                          {purchaseCategories.map((category) => (
+                            <SelectItem key={category.id} value={String(category.id)}>{category.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {(purchaseAccounts.length === 0 || purchaseCategories.length === 0) && (
+                    <p role="alert" className="text-xs text-destructive">
+                      Add an asset account and an Investment category before recording a coin purchase.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {livePricePanel}
             </>

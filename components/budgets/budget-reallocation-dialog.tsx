@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { AlertCircle, ArrowRight, CalendarIcon, Loader2 } from "lucide-react";
 
-import { createBudgetReallocation } from "@/app/actions/budgets";
+import {
+  createBudgetReallocation,
+  getBudgetReallocationAvailability,
+  type BudgetReallocationAvailability,
+} from "@/app/actions/budgets";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -26,14 +30,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { fromMonthKey, monthKey } from "@/lib/dates";
+import { centsToDecimal, formatMoney } from "@/lib/money";
+import {
+  draftedReallocationCents,
+  reallocationOverflowCents,
+  type ReallocationInputMode,
+} from "./budget-reallocation-logic";
 
 type CategoryOption = { id: number; name: string; type: string };
-type InputMode = "amount" | "percentage";
-
 const QUICK_PERCENTAGES = [
   { label: "25%", value: "25" },
   { label: "50%", value: "50" },
-  { label: "Max", value: "100" },
 ] as const;
 
 type BudgetReallocationDialogProps = {
@@ -59,10 +66,13 @@ export function BudgetReallocationDialog({
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const [fromCategoryId, setFromCategoryId] = useState("");
   const [toCategoryId, setToCategoryId] = useState("");
-  const [inputMode, setInputMode] = useState<InputMode>("amount");
+  const [inputMode, setInputMode] = useState<ReallocationInputMode>("amount");
   const [value, setValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [availability, setAvailability] = useState<BudgetReallocationAvailability | null>(null);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const selectedSource = selectable.find(
     (category) => String(category.id) === fromCategoryId,
   );
@@ -76,7 +86,44 @@ export function BudgetReallocationDialog({
     setInputMode("amount");
     setValue("");
     setError(null);
+    setAvailability(null);
+    setAvailabilityError(null);
   }, [defaultMonth, open]);
+
+  useEffect(() => {
+    if (!open || fromCategoryId === "") {
+      setAvailability(null);
+      setAvailabilityError(null);
+      setAvailabilityLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setAvailability(null);
+    setAvailabilityError(null);
+    setAvailabilityLoading(true);
+    getBudgetReallocationAvailability({ month, categoryId: Number(fromCategoryId) })
+      .then((next) => {
+        if (!cancelled) setAvailability(next);
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setAvailabilityError(caught instanceof Error ? caught.message : "Could not load this category’s available budget.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAvailabilityLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fromCategoryId, month, open]);
+
+  const draftedCents = draftedReallocationCents(
+    inputMode,
+    value,
+    availability?.budgetedCents ?? null,
+  );
+  const overflowCents = reallocationOverflowCents(draftedCents, availability?.maximumCents ?? null);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -203,7 +250,7 @@ export function BudgetReallocationDialog({
                 value={inputMode}
                 disabled={!fromCategoryId}
                 onValueChange={(next) => {
-                  setInputMode(next as InputMode);
+                  setInputMode(next as ReallocationInputMode);
                   setValue("");
                 }}
               >
@@ -216,7 +263,7 @@ export function BudgetReallocationDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="reallocation-value">
-                {inputMode === "amount" ? "Amount" : "Percent of available budget"}
+                {inputMode === "amount" ? "Amount" : "Percent of current allocation"}
               </Label>
               <div className="relative">
                 {inputMode === "amount" && (
@@ -226,7 +273,7 @@ export function BudgetReallocationDialog({
                   id="reallocation-value"
                   type="number"
                   min={inputMode === "amount" ? "0.01" : "0.01"}
-                  max={inputMode === "percentage" ? "100" : undefined}
+                  max={inputMode === "percentage" ? "100" : availability ? centsToDecimal(availability.maximumCents) : undefined}
                   step="0.01"
                   value={value}
                   disabled={!fromCategoryId}
@@ -242,10 +289,27 @@ export function BudgetReallocationDialog({
             </div>
           </div>
 
+          {availabilityLoading && (
+            <p className="text-xs text-muted-foreground">Loading available budget…</p>
+          )}
+          {availabilityError && (
+            <p role="alert" className="text-xs text-destructive">{availabilityError}</p>
+          )}
+          {availability && (
+            <p className="text-xs text-muted-foreground" data-private-value>
+              {formatMoney(availability.maximumCents)} unspent of {formatMoney(availability.budgetedCents)} is available to move.
+            </p>
+          )}
+          {overflowCents !== null && availability && draftedCents !== null && (
+            <p role="alert" className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200" data-private-value>
+              This moves {formatMoney(draftedCents)}, but only {formatMoney(availability.maximumCents)} is unspent. Choose a smaller amount or Max.
+            </p>
+          )}
+
           <div className="space-y-2">
             <Label>
               {selectedSource
-                ? `Quick percentage of ${selectedSource.name}`
+                ? `Quick move from ${selectedSource.name}`
                 : "Quick percentage of source"}
             </Label>
             <div className="grid grid-cols-3 gap-2" role="group" aria-label="Quick reallocation amount">
@@ -268,6 +332,20 @@ export function BudgetReallocationDialog({
                   </Button>
                 );
               })}
+              <Button
+                type="button"
+                size="sm"
+                variant={inputMode === "amount" && availability !== null && draftedCents === availability.maximumCents ? "default" : "outline"}
+                aria-pressed={inputMode === "amount" && availability !== null && draftedCents === availability.maximumCents}
+                disabled={!fromCategoryId || loading || availabilityLoading || availability === null || availability.maximumCents <= 0}
+                onClick={() => {
+                  if (!availability) return;
+                  setInputMode("amount");
+                  setValue(String(centsToDecimal(availability.maximumCents)));
+                }}
+              >
+                Max
+              </Button>
             </div>
             {!selectedSource && (
               <p className="text-xs text-muted-foreground">
@@ -277,9 +355,9 @@ export function BudgetReallocationDialog({
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Both categories must have a monthly budget in the selected month. Percentages use
-            the source category’s budget currently allocated for that month, then save as a fixed
-            amount so later budget edits cannot rewrite history.
+            Both categories must have a monthly budget in the selected month. Percentages use the
+            current source allocation; Max uses only its unspent amount. Every choice saves as a
+            fixed amount so later budget edits cannot rewrite history.
           </p>
 
           <DialogFooter>
@@ -293,7 +371,10 @@ export function BudgetReallocationDialog({
                 selectable.length < 2 ||
                 !fromCategoryId ||
                 !toCategoryId ||
-                value === ""
+                value === "" ||
+                availabilityLoading ||
+                availabilityError !== null ||
+                overflowCents !== null
               }
             >
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

@@ -119,6 +119,12 @@ function HoldingActions<T extends SidebarAssetRow>({
             <Trash2 className="h-4 w-4 text-destructive" />
           </Button>
         </>
+      ) : holding.source === "crypto-summary" ? (
+        <Button variant="ghost" size="sm" asChild>
+          <Link href="/transactions" aria-label={`Manage ${holding.name} purchases in Transactions`}>
+            <Pencil className="h-4 w-4" />
+          </Link>
+        </Button>
       ) : (
         <Button variant="ghost" size="sm" asChild>
           <Link href={ACCOUNT_MANAGE_HREF} aria-label={`Manage ${holding.name} in Accounts`}>

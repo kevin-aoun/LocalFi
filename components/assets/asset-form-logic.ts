@@ -17,6 +17,7 @@ export type AssetFormData = {
   quantityOz: string;
   quantityGrams: string;
   quantityCoins: string;
+  paidAmount: string;
   useLivePrice: boolean;
 };
 
@@ -29,6 +30,7 @@ export type AssetFormAsset = {
   quantity?: number | null;
   unit?: string | null;
   priceSymbol?: string | null;
+  costBasisCents?: number | null;
   useLivePrice?: boolean;
 };
 
@@ -61,6 +63,7 @@ export function emptyAssetForm(): AssetFormData {
     quantityOz: "",
     quantityGrams: "",
     quantityCoins: "",
+    paidAmount: "",
     useLivePrice: false,
   };
 }
@@ -91,6 +94,7 @@ export function formFromAsset(asset: AssetFormAsset, centsToDecimal: (cents: num
     quantityOz: hasQuantity ? quantityOz : "",
     quantityGrams: hasQuantity ? quantityGrams : "",
     quantityCoins: hasQuantity ? String(quantity) : "",
+    paidAmount: asset.costBasisCents == null ? "" : centsToDecimal(asset.costBasisCents).toString(),
     useLivePrice,
   };
 }

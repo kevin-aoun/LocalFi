@@ -51,6 +51,19 @@ import {
   type BudgetRuleFormState,
 } from "../budget-view-logic";
 
+describe("reallocation dialog safety wiring", () => {
+  it("uses the unspent maximum for Max and keeps overflow feedback inside the form", () => {
+    const source = readFileSync(
+      path.join(process.cwd(), "components/budgets/budget-reallocation-dialog.tsx"),
+      "utf8",
+    );
+    expect(source).toContain("getBudgetReallocationAvailability");
+    expect(source).toContain("availability.maximumCents");
+    expect(source).toContain("Choose a smaller amount or Max.");
+    expect(source).toContain("overflowCents !== null");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -882,15 +895,15 @@ describe("the Budgets UI keeps the house conventions", () => {
     expect(source).toMatch(/getBudgetHistory/);
   });
 
-  it("the reallocation dialog offers 25%, 50%, and Max shortcuts", () => {
+  it("the reallocation dialog offers 25%, 50%, and a ledger-safe Max shortcut", () => {
     const source = stripComments(read("components/budgets/budget-reallocation-dialog.tsx"));
     expect(source).toMatch(/label:\s*"25%",\s*value:\s*"25"/);
     expect(source).toMatch(/label:\s*"50%",\s*value:\s*"50"/);
-    expect(source).toMatch(/label:\s*"Max",\s*value:\s*"100"/);
+    expect(source).toMatch(/availability\.maximumCents/);
     expect(source).toMatch(/setInputMode\("percentage"\)/);
     expect(source).toMatch(/aria-pressed=\{selected\}/);
-    expect(source).toMatch(/disabled=\{!fromCategoryId \|\| loading\}/);
-    expect(source).toMatch(/Quick percentage of \$\{selectedSource\.name\}/);
+    expect(source).toMatch(/disabled=\{!fromCategoryId \|\| loading \|\| availabilityLoading/);
+    expect(source).toMatch(/Quick move from \$\{selectedSource\.name\}/);
     expect(source).toMatch(/Choose the source category before selecting a percentage/);
   });
 
