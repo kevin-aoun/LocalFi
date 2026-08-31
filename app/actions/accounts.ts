@@ -88,7 +88,7 @@ function resolveKind(type: AccountType, requested: string | null): AccountKind {
     throw new Error(`Invalid account kind: ${requested}. Expected 'asset' or 'liability'`);
   }
   const kind = requested as AccountKind;
-  if (type !== "Other" && kind !== implied) {
+  if (type !== "Other" && type !== "Loan" && kind !== implied) {
     throw new Error(`An account of type ${type} must have kind '${implied}', not '${kind}'`);
   }
   return kind;
