@@ -10,9 +10,9 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "node node_modules/next/dist/bin/next dev --turbopack -p 1313",
+    "dev": "node node_modules/next/dist/bin/next dev --turbopack -p 1313 --hostname 127.0.0.1",
     "build": "node node_modules/next/dist/bin/next build --webpack",
-    "start": "node node_modules/next/dist/bin/next start",
+    "start": "node node_modules/next/dist/bin/next start --hostname 127.0.0.1",
     "lint": "node node_modules/eslint/bin/eslint.js .",
     "db:generate": "drizzle-kit generate",
     "db:setup": "node --import tsx scripts/refuse-headless-vault-setup.ts",
