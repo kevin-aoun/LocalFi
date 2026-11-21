@@ -13,6 +13,7 @@ import { AlertTriangle, ChartNoAxesCombined } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
+import { usePrivacyMode } from "@/components/shared/privacy-provider";
 import { formatMoney, tryParseAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import type { DateKey } from "@/lib/dates";
@@ -28,9 +29,10 @@ type Props = {
 };
 
 export function InvestmentPerformance({ rows, range }: Props) {
+  const { enabled: privacyEnabled } = usePrivacyMode();
   const model = useMemo(() => buildInvestmentHistory(rows, range), [rows, range]);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
-  const byKey = useMemo(() => new Map(model.series.map((item) => [item.key, item])), [model.series]);
+  const byKey = useMemo(() => new Map(model.series.flatMap((item) => [[item.key, item], [item.costKey, item]] as const)), [model.series]);
   const chartConfig = useMemo(
     () =>
       Object.fromEntries(
@@ -60,10 +62,10 @@ export function InvestmentPerformance({ rows, range }: Props) {
             const cents = tryParseAmount(entry.value);
             if (!item || cents === null) return null;
             return (
-              <div key={item.key} className="flex items-center justify-between gap-5">
+              <div key={String(entry.dataKey)} className="flex items-center justify-between gap-5">
                 <span className="flex items-center gap-2 text-muted-foreground">
                   <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
-                  {item.label}
+                  {item.label}{entry.dataKey === item.costKey ? " · net cash invested" : " · value"}
                 </span>
                 <span className="font-mono font-medium">
                   {formatMoney(cents, item.currency)}
@@ -76,16 +78,33 @@ export function InvestmentPerformance({ rows, range }: Props) {
     );
   };
 
+  if (privacyEnabled) return <Card><CardHeader><CardTitle>Investment performance</CardTitle><CardDescription>Investment values and returns are hidden in privacy mode.</CardDescription></CardHeader></Card>;
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Investment performance</CardTitle>
         <CardDescription>
-          Daily holding values from the same ledger that produces net worth. Click a holding to
-          show or hide its line.
+          Solid lines show holding value; matching dashed lines show cash paid, including fees, minus net sale proceeds.
+          Above the dashed line means net positive. Click a holding to show or hide both lines.
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {model.summaries.length > 0 && (
+          <div className="mb-6 divide-y rounded-md border px-4" data-private-value>
+            {model.summaries.map((item) => (
+              <div key={item.key} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 py-3 text-sm">
+                <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} /><span className="font-medium">{item.label}</span></div>
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-1 tabular-nums">
+                  <span>{formatMoney(item.valueCents, item.currency)} <span className="text-muted-foreground">value</span></span>
+                  <span className="text-muted-foreground">{item.costBasisCents === null ? "Purchase cost unavailable" : `${formatMoney(item.costBasisCents, item.currency)} net cash invested`}</span>
+                  {item.realizedGainCents !== null && <span className="text-muted-foreground">{formatMoney(item.realizedGainCents, item.currency)} realized</span>}
+                  {item.profitLossCents !== null && <span className={item.profitLossCents > 0 ? "font-medium text-emerald-700 dark:text-emerald-400" : item.profitLossCents < 0 ? "font-medium text-destructive" : "font-medium"}>{item.profitLossCents > 0 ? "+" : ""}{formatMoney(item.profitLossCents, item.currency)} · {item.profitLossCents > 0 ? "Net positive" : item.profitLossCents < 0 ? "Net negative" : "Break-even"}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         {model.mixedCurrency && (
           <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -96,13 +115,13 @@ export function InvestmentPerformance({ rows, range }: Props) {
           </div>
         )}
 
-        {model.series.length === 0 || model.points.length < 2 ? (
+        {model.series.length === 0 || model.points.length === 0 ? (
           <div className="flex h-72 flex-col items-center justify-center gap-3 text-center">
             <ChartNoAxesCombined className="h-10 w-10 text-muted-foreground" />
             <p className="max-w-lg text-sm text-muted-foreground">
               {rows.length === 0
-                ? "No daily investment history has been recorded yet. Run the history backfill, or record net worth on two different days, to start this chart."
-                : "This range has fewer than two days of investment history. Choose a wider range."}
+                ? "Record a purchase in Transactions to compare its value with what you paid."
+                : "No investment history is available in this range. Choose a wider range."}
             </p>
           </div>
         ) : (
@@ -149,20 +168,21 @@ export function InvestmentPerformance({ rows, range }: Props) {
                     }}
                   />
                   <RechartsTooltip content={<InvestmentTooltip />} cursor={false} />
-                  {model.series.map((item: InvestmentSeries) => (
+                  {model.series.flatMap((item: InvestmentSeries) => [
                     <Line
                       key={item.key}
-                      type="monotone"
+                      type="linear"
                       dataKey={item.key}
                       name={item.label}
                       stroke={item.color}
                       strokeWidth={2}
-                      dot={false}
+                      dot={model.points.length === 1}
                       connectNulls={false}
                       hide={hidden.has(item.key)}
                       isAnimationActive={false}
-                    />
-                  ))}
+                    />,
+                    <Line key={item.costKey} type="stepAfter" dataKey={item.costKey} name={`${item.label} · cash invested`} stroke={item.color} strokeWidth={2} strokeDasharray="6 4" dot={false} connectNulls={false} hide={hidden.has(item.key)} isAnimationActive={false} />,
+                  ])}
                 </LineChart>
               </ChartContainer>
             </div>

@@ -22,22 +22,15 @@ import {
   fetchHoldingValueCents,
   fetchPriceQuote,
   fetchPriceQuotes,
-  holdingValueFromQuotes,
   priceableSymbols,
   pricedHolding,
   quantityInPriceUnits,
   readQuantityField,
-  type PriceError,
   type PriceQuote,
   type PriceResult,
   type PriceSymbol,
   type PricedHoldingSpec,
 } from "@/lib/prices";
-
-type PriceBatch = {
-  quotes: ReadonlyMap<PriceSymbol, PriceQuote>;
-  errors: ReadonlyMap<string, PriceError>;
-};
 
 export async function getLivePriceQuote(symbol: string): Promise<PriceResult> {
   return fetchPriceQuote(symbol);
@@ -71,7 +64,7 @@ function readHoldingFields(formData: FormData): HoldingFields | { error: string 
   }
 
 
-  if (spec.coinGeckoId === null) {
+  if (spec.provider === null) {
     return {
       error: describePriceError({
         code: "no_price_source",
@@ -124,16 +117,8 @@ function readHoldingFields(formData: FormData): HoldingFields | { error: string 
 }
 
 
-async function priceHolding(fields: HoldingFields, batch?: PriceBatch) {
-  const valued = batch
-    ? holdingValueFromQuotes(
-        fields.spec.symbol,
-        fields.quantity,
-        fields.unit,
-        batch.quotes,
-        batch.errors,
-      )
-    : await fetchHoldingValueCents(fields.spec.symbol, fields.quantity, fields.unit);
+async function priceHolding(fields: HoldingFields) {
+  const valued = await fetchHoldingValueCents(fields.spec.symbol, fields.quantity, fields.unit);
 
   if (!valued.ok) {
     return { error: describePriceError(valued.error) };
@@ -147,7 +132,7 @@ function recordQuoteObservation(
   quote: PriceQuote,
 ): { amountMinor: Cents; observedAt: number } {
   const amountMinor = tryParseAmount(String(quote.pricePerUnitUsd));
-  if (amountMinor === null || amountMinor <= 0) {
+  if (amountMinor === null || quote.pricePerUnitUsd <= 0) {
     throw new Error("Provider quote could not be stored as integer minor units");
   }
   const observedAt = Math.floor(quote.fetchedAt / 1000);
@@ -157,6 +142,7 @@ function recordQuoteObservation(
     observedDay: observationDay(observedAt),
     observedAt,
     amountMinor,
+    unitPrice: String(quote.pricePerUnitUsd),
     currency: "USD",
     source: quote.provider,
   });
@@ -228,7 +214,7 @@ export async function createLivePricedAsset(
       return projected;
     });
 
-    revalidate("/");
+    revalidate("/", "/accounts", "/reports");
     return { success: true, data: asset };
   } catch (error) {
     console.error("Failed to create live-priced asset:", error);
@@ -248,7 +234,6 @@ export async function updateLivePricedAsset(
 async function updateLivePricedAssetWith(
   id: number,
   formData: FormData,
-  batch?: PriceBatch,
 ): Promise<ActionResult<typeof assets.$inferSelect>> {
   try {
     const existing = await readDb(async (db) => {
@@ -264,7 +249,7 @@ async function updateLivePricedAssetWith(
     const fields = readHoldingFields(formData);
     if ("error" in fields) return fields;
 
-    const priced = await priceHolding(fields, batch);
+    const priced = await priceHolding(fields);
     if ("error" in priced) return priced;
 
     const asset = await withDb(async (db, raw) => {
@@ -283,12 +268,6 @@ async function updateLivePricedAssetWith(
 
 
 
-      if (batch && exactPosition) {
-        const projection = projectPositionHolding(raw, instrument.id, fields.currency);
-        const [projected] = await db.select().from(assets).where(eq(assets.id, projection.assetId));
-        if (!projected) throw new Error("Projected holding could not be read back");
-        return projected;
-      }
       if (exactPosition && !opening) {
         const projection = projectPositionHolding(raw, instrument.id, fields.currency);
         const [projected] = await db.select().from(assets).where(eq(assets.id, projection.assetId));
@@ -332,7 +311,7 @@ async function updateLivePricedAssetWith(
       return projected;
     });
 
-    revalidate("/");
+    revalidate("/", "/accounts", "/reports");
     return { success: true, data: asset };
   } catch (error) {
     console.error("Failed to update live-priced asset:", error);
@@ -383,7 +362,7 @@ export async function refreshLivePricedAssets(): Promise<{
 
 
     const spec = pricedHolding(symbol);
-    if (spec !== null && spec.coinGeckoId === null) {
+    if (spec !== null && spec.provider === null) {
       unpriceable.push({
         id: asset.id,
         label: labelOf(asset),
@@ -402,22 +381,47 @@ export async function refreshLivePricedAssets(): Promise<{
     ...new Set(candidates.map((asset) => (asset.priceSymbol ?? "").trim())),
   ]);
 
+  const quotes: Array<{ asset: (typeof candidates)[number]; quote: PriceQuote }> = [];
   for (const asset of candidates) {
-    const label = labelOf(asset);
     const symbol = (asset.priceSymbol ?? "").trim();
-
-    const formData = new FormData();
-    formData.set("priceSymbol", symbol);
-    formData.set("quantity", String(asset.quantity));
-    if (asset.unit) formData.set("unit", asset.unit);
-    formData.set("currency", "USD");
-    if (asset.notes !== null && asset.notes !== undefined) formData.set("notes", asset.notes);
-    const result = await updateLivePricedAssetWith(asset.id, formData, batch);
-    if ("error" in result) {
-      failed.push({ id: asset.id, label, error: result.error });
-      continue;
+    const quote = batch.quotes.get(symbol as PriceSymbol);
+    if (!quote) {
+      const error = batch.errors.get(symbol);
+      failed.push({ id: asset.id, label: labelOf(asset), error: error ? describePriceError(error) : "No quote returned for this holding." });
+    } else {
+      quotes.push({ asset, quote });
     }
-    refreshed += 1;
+  }
+
+  if (quotes.length > 0) {
+    try {
+      await withDb(async (db, raw) => {
+        for (const { asset, quote } of quotes) {
+          const [current] = await db.select().from(assets).where(eq(assets.id, asset.id));
+          if (!current || current.archived || current.priceSymbol !== asset.priceSymbol) {
+            skipped += 1;
+            continue;
+          }
+          const instrument = current.instrumentId ? findInstrument(raw, current.instrumentId) : null;
+          if (!instrument || instrument.symbol !== quote.symbol || current.currency !== "USD" ||
+              !getExactPosition(raw, instrument.id, current.currency)) {
+            failed.push({ id: asset.id, label: labelOf(asset), error: "This holding needs a ledger position before its price can refresh." });
+            continue;
+          }
+          recordQuoteObservation(raw, instrument.id, quote);
+          projectPositionHolding(raw, instrument.id, current.currency);
+          refreshed += 1;
+        }
+      });
+    } catch (error) {
+      refreshed = 0;
+      for (const { asset } of quotes) {
+        if (!failed.some((row) => row.id === asset.id)) {
+          failed.push({ id: asset.id, label: labelOf(asset), error: error instanceof Error ? error.message : "Could not save refreshed prices." });
+        }
+      }
+    }
+    revalidate("/", "/accounts", "/reports");
   }
 
   return { refreshed, skipped, unpriceable, failed };

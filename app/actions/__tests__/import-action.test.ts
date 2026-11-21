@@ -1,5 +1,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildTransactionsCsv } from "@/lib/reports";
+import { parseImportRows, readCsvRows } from "@/components/transactions/import-logic";
 import { MAX_IMPORT_ROWS } from "@/components/transactions/import-logic";
 import { verifyLedger } from "@/lib/ledger";
 import { createTempDb, execOn, seedCategory, seedTransaction, type TempDb } from "./support/temp-db";
@@ -51,6 +53,29 @@ function transactionRows() {
 }
 
 describe("importTransactions inserts the whole batch in one database write", () => {
+  it("preserves pending status from CSV without posting a confirmed event", async () => {
+    const text = buildTransactionsCsv([{
+      dateKey: "2026-06-01", categoryName: "Groceries", categoryType: "Expense",
+      amountCents: 5000, description: "Pending fixture", accountName: null, pending: true,
+      transferAccountName: null, currency: "USD",
+    }]);
+    const [parsed] = parseImportRows(readCsvRows(text), [{ id: 1, name: "Groceries", type: "Expense" }], { dayFirst: false });
+    expect(parsed.problems).toEqual([]);
+    expect(await importTransactions([{ ...row(), date: parsed.date!, amount: "50", currency: parsed.currency, pending: parsed.pending }])).toMatchObject({ success: true, inserted: 1 });
+    expect(transactionRows()).toMatchObject([{ pending: 1, currency: "USD", current_event_id: null }]);
+    expect(temp.query("SELECT event_id FROM ledger_events")).toEqual([]);
+  });
+
+  it("rejects an exported foreign currency without changing any rows", async () => {
+    expect(await importTransactions([{ ...row(), currency: "EUR", pending: true }])).toMatchObject({ error: expect.stringContaining("Cannot import EUR into a USD account") });
+    expect(transactionRows()).toEqual([]);
+  });
+
+  it("does not deduplicate a pending draft against a confirmed transaction", async () => {
+    expect(await importTransactions([{ ...row(), pending: true }, { ...row(), pending: false }])).toMatchObject({ inserted: 2 });
+    expect(transactionRows().map((item) => item.pending)).toEqual([1, 0]);
+  });
+
   it("takes the lock exactly once for a 250-row import", async () => {
     const rows = Array.from({ length: 250 }, (_, i) =>
       row({ amount: `${i + 1}.00`, comment: `row ${i}` }),

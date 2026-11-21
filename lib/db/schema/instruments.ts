@@ -48,6 +48,7 @@ export const instrumentObservations = sqliteTable(
     observedDay: text("observed_day").notNull(),
     observedAt: integer("observed_at").notNull(),
     amountMinor: integer("amount_minor").notNull(),
+    unitPrice: text("unit_price"),
     currency: text("currency").notNull(),
     source: text("source"),
   },

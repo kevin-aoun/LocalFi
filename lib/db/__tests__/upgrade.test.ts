@@ -139,6 +139,26 @@ async function runUpgrade(dbPath: string, dryRun = false, passphrase?: string) {
 }
 
 describe("journaled pre-open upgrade", () => {
+  it("preserves legacy cent observations, adds exact unit prices, and upgrades idempotently", async () => {
+    const dbPath = tempDbPath();
+    const db = new SQL.Database();
+    replayThrough(db, 16);
+    createJournalThrough(db, 16);
+    db.run("INSERT INTO instruments (id, kind, label, symbol, unit) VALUES ('test:stock', 'security', 'Synthetic stock', 'STOCK:AAPL', 'shares')");
+    db.run("INSERT INTO instrument_observations (instrument_id, observation_kind, observed_day, observed_at, amount_minor, currency) VALUES ('test:stock', 'price', '2026-06-01', 1780272000, 1235, 'USD')");
+    writeFileSync(dbPath, Buffer.from(db.export()));
+    db.close();
+
+    await expect(runUpgrade(dbPath)).resolves.toMatchObject({ applied: ["0017_sour_squadron_sinister", "0018_sparkling_monster_badoon", "0019_groovy_amphibian"] });
+    const upgraded = open(dbPath);
+    try {
+      expect(upgraded.exec("SELECT amount_minor, unit_price FROM instrument_observations")[0].values).toEqual([[1235, null]]);
+      upgraded.run("UPDATE instrument_observations SET unit_price = '12.3456'");
+      expect(upgraded.exec("SELECT amount_minor, unit_price FROM instrument_observations")[0].values).toEqual([[1235, "12.3456"]]);
+    } finally { upgraded.close(); }
+    await expect(runUpgrade(dbPath)).resolves.toMatchObject({ changed: false, applied: [] });
+  });
+
   it("adds the bounded inactivity-timeout setting with its 15-minute default", async () => {
     const dbPath = tempDbPath();
     const db = new SQL.Database();
@@ -152,7 +172,7 @@ describe("journaled pre-open upgrade", () => {
     db.close();
 
     await expect(runUpgrade(dbPath)).resolves.toMatchObject({
-      applied: ["0016_vault-settings"],
+      applied: ["0016_vault-settings", "0017_sour_squadron_sinister", "0018_sparkling_monster_badoon", "0019_groovy_amphibian"],
     });
 
     const upgraded = open(dbPath);
@@ -227,6 +247,9 @@ describe("journaled pre-open upgrade", () => {
           "0014_category-order",
           "0015_budget-order",
           "0016_vault-settings",
+          "0017_sour_squadron_sinister",
+          "0018_sparkling_monster_badoon",
+          "0019_groovy_amphibian",
         ],
       });
       const upgraded = open(dbPath);

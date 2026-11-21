@@ -2,6 +2,9 @@ import type { Database } from "sql.js";
 
 import { isDateKey, type DateKey } from "@/lib/dates";
 import { quantityValueMinor } from "@/lib/investments/positions";
+import { sumCents, type Cents } from "@/lib/money";
+import { pricedHolding } from "@/lib/prices";
+import { readInvestmentReturns } from "@/lib/investments/returns";
 import { addCanonicalDecimals, canonicalDecimal } from "./decimal";
 
 type SqlValue = string | number | Uint8Array | null;
@@ -372,6 +375,8 @@ export function readPositionStates(
 }
 
 export type PositionValuation = ExactPositionState & {
+  realizedGainCents: Cents | null;
+  cashInvestedMinor: number | null;
   assetId: number | null;
   archived: boolean;
   label: string;
@@ -381,6 +386,31 @@ export type PositionValuation = ExactPositionState & {
   valueMinor: number;
 };
 
+export function readPortfolioMovements(
+  raw: Database,
+  current: readonly CurrentLedgerMovement[] = readCurrentMovements(raw),
+): CurrentLedgerMovement[] {
+  const openings = rows(raw, `
+    SELECT DISTINCT e.event_id, a.instrument_id, i.category, i.symbol, m.currency
+      FROM ledger_events e
+      JOIN ledger_movements m ON m.event_id = e.event_id
+      JOIN ledger_accounts a ON a.id = m.ledger_account_id
+      JOIN instruments i ON i.id = a.instrument_id
+     WHERE e.amends_event_id IS NULL
+       AND a.target_type = 'instrument'
+       AND EXISTS (
+         SELECT 1 FROM ledger_movements opening
+         JOIN ledger_accounts counter ON counter.id = opening.ledger_account_id
+         WHERE opening.event_id = e.event_id
+           AND counter.target_type = 'system' AND counter.target_ref = 'opening-position'
+       )
+  `);
+  // Crypto inventory comes only from transactions; other openings remain additive.
+  const excludedRoots = new Set(openings.filter((row) => row.category === "Crypto")
+    .map((row) => String(row.event_id)));
+  return current.filter((movement) => !excludedRoots.has(movement.chainRootEventId));
+}
+
 
 export function readPositionValuations(
   raw: Database,
@@ -388,17 +418,20 @@ export function readPositionValuations(
   currentMovements?: readonly CurrentLedgerMovement[],
 ): PositionValuation[] {
   if (!isDateKey(asOfKey)) throw new Error(`Invalid asOfKey: ${asOfKey}`);
+  const current = movementsInRange(readPortfolioMovements(raw, currentMovements), undefined, asOfKey);
+  const cashBasis = readPositionCashBasis(current);
+  const returns = readInvestmentReturns(current);
   const out: PositionValuation[] = [];
-  for (const state of readPositionStates(raw, asOfKey, currentMovements)) {
+  for (const state of readPositionStates(raw, asOfKey, current)) {
     const instrument = rows(
       raw,
-      "SELECT kind, label, category FROM instruments WHERE id = ? LIMIT 1",
+      "SELECT kind, label, category, symbol FROM instruments WHERE id = ? LIMIT 1",
       [state.instrumentId],
     )[0];
     if (!instrument) throw new Error(`Missing instrument ${state.instrumentId}`);
     const observation = rows(
       raw,
-      `SELECT observation_kind, observed_day, amount_minor
+      `SELECT *
          FROM instrument_observations
         WHERE instrument_id = ? AND currency = ?
           AND observed_day <= ?
@@ -419,9 +452,13 @@ export function readPositionValuations(
     const observationKind = observation?.observation_kind === "valuation" ? "valuation" : "price";
     out.push({
       ...state,
+      cashInvestedMinor: cashBasis.get(`${state.instrumentId}\u0000${state.currency}`) ?? null,
+      realizedGainCents: returns.get(`${state.instrumentId}\u0000${state.currency}`)?.realizedGainCents ?? null,
       assetId: projection ? targetId(projection.id, "asset projection") : null,
       archived: projection ? Number(projection.archived) === 1 : false,
-      label: String(instrument.label),
+      label: instrument.category === "Crypto"
+        ? pricedHolding(instrument.symbol)?.symbol ?? String(instrument.label)
+        : String(instrument.label),
       category: instrument.category == null ? "Other" : String(instrument.category),
       observationKind,
       observedDay: observation ? String(observation.observed_day) as DateKey : null,
@@ -429,24 +466,42 @@ export function readPositionValuations(
         ? 0
         : observationKind === "valuation"
         ? observedAmount
-        : quantityValueMinor(state.quantity, observedAmount),
+        : quantityValueMinor(state.quantity, observedAmount, observation.unit_price == null ? null : String(observation.unit_price)),
     });
   }
   return out;
+}
+
+// Opening valuations have no cash purchase to establish a break-even baseline.
+export function readPositionCashBasis(current: readonly CurrentLedgerMovement[]): Map<string, Cents | null> {
+  const cashChains = new Set(current.filter((row) => row.targetType === "real_account")
+    .map((row) => row.chainRootEventId));
+  const basis = new Map<string, Cents | null>();
+  for (const row of current) {
+    if (row.targetType !== "instrument") continue;
+    const key = `${row.instrumentId}\u0000${row.currency}`;
+    if (!cashChains.has(row.chainRootEventId) && !(row.amountMinor === 0 && row.quantityDelta?.startsWith("-"))) {
+      basis.set(key, null);
+    } else if (basis.get(key) !== null) {
+      basis.set(key, sumCents([basis.get(key) ?? 0, row.amountMinor]));
+    }
+  }
+  return basis;
 }
 
 export type PositionHistoryPoint = PositionValuation & { dateKey: DateKey };
 
 
 export function readPositionHistory(raw: Database): PositionHistoryPoint[] {
+  const current = readCurrentMovements(raw);
   const days = [...new Set([
-    ...readCurrentMovements(raw)
+    ...current
       .filter((movement) => movement.targetType === "instrument")
       .map((movement) => movement.dateKey),
     ...rows(raw, "SELECT observed_day FROM instrument_observations")
       .map((row) => String(row.observed_day) as DateKey),
   ])].sort();
   return days.flatMap((dateKey) =>
-    readPositionValuations(raw, dateKey).map((valuation) => ({ ...valuation, dateKey })),
+    readPositionValuations(raw, dateKey, current).map((valuation) => ({ ...valuation, dateKey })),
   );
 }

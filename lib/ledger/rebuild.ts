@@ -25,8 +25,8 @@ function insertTransaction(raw: Database, eventId: string, transaction: Record<s
     `INSERT INTO transactions
       (id, date, category_id, account_id, transfer_account_id, amount_cents, direction, currency,
        current_event_id, instrument_id, quantity_delta, transfer_principal_amount_cents, comment,
-       pending, recurring_id, recurring_occurrence, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+       pending, recurring_id, recurring_occurrence, created_at, updated_at${transaction.feeForTransferId == null ? "" : ", fee_for_transfer_id"})
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?${transaction.feeForTransferId == null ? "" : ", ?"})`,
     [
       Number(transaction.id), Number(transaction.date), nullableNumber(transaction.categoryId),
       nullableNumber(transaction.accountId), nullableNumber(transaction.transferAccountId),
@@ -35,6 +35,7 @@ function insertTransaction(raw: Database, eventId: string, transaction: Record<s
       nullableNumber(transaction.transferPrincipalAmountCents), nullableString(transaction.comment),
       nullableNumber(transaction.recurringId), nullableString(transaction.recurringOccurrence),
       Number(transaction.createdAt), Number(transaction.updatedAt),
+      ...(transaction.feeForTransferId == null ? [] : [Number(transaction.feeForTransferId)]),
     ],
   );
   const allocations = Array.isArray(transaction.allocations) ? transaction.allocations : [];
@@ -102,7 +103,9 @@ export function rebuildLedgerProjectionsRaw(raw: Database): LedgerRebuildResult 
        WHERE transaction_id IN (SELECT id FROM transactions WHERE pending = 0)`,
     );
     raw.run("DELETE FROM transactions WHERE pending = 0");
-    for (const projected of transactions) {
+    // Restore transfers before their linked fee expenses, regardless of correction order.
+    for (const projected of [...transactions].sort((a, b) =>
+      Number(a.transaction?.feeForTransferId != null) - Number(b.transaction?.feeForTransferId != null))) {
       if (projected.transaction !== null) {
         insertTransaction(raw, projected.eventId, projected.transaction);
       }

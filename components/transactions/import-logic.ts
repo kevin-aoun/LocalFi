@@ -391,6 +391,8 @@ export type ParsedImportRow = {
   sign: -1 | 0 | 1;
   comment: string;
 
+  currency?: string | null;
+  pending?: boolean;
   suggestedType: CategoryType;
 
   problems: string[];
@@ -415,6 +417,13 @@ export function parseImportRows(
     const rawComment = pickColumn(row, COMMENT_COLUMNS);
 
     const problems: string[] = [];
+    const rawCurrency = pickColumn(row, ["currency"]);
+    const currency = rawCurrency == null || rawCurrency === "" ? null : String(rawCurrency).trim().toUpperCase();
+    if (currency !== null && !/^[A-Z]{3}$/.test(currency)) problems.push("invalid currency");
+    const rawPending = pickColumn(row, ["pending"]);
+    const pendingText = rawPending == null ? "" : String(rawPending).trim().toLowerCase();
+    if (!["", "yes", "no", "true", "false", "1", "0"].includes(pendingText)) problems.push("invalid pending status");
+    const pending = ["yes", "true", "1"].includes(pendingText);
 
     let date: DateKey | null = null;
     if (rawDate === undefined || rawDate === null || rawDate === "") {
@@ -462,6 +471,8 @@ export function parseImportRows(
       sign: amount.sign,
       comment: typeof rawComment === "string" ? rawComment.trim() : rawComment == null ? "" : String(rawComment),
       suggestedType,
+      currency,
+      pending,
       problems,
     };
   });
@@ -493,6 +504,7 @@ export type DedupeKeyInput = {
   accountId?: number | null;
   currency?: string | null;
   direction?: "inflow" | "outflow" | "transfer";
+  pending?: boolean;
   comment: string | null | undefined;
 };
 
@@ -502,7 +514,7 @@ export function dedupeKey(tx: DedupeKeyInput): string {
   const account = tx.accountId ?? "unassigned";
   const currency = (tx.currency ?? "USD").trim().toUpperCase();
   const direction = tx.direction ?? "legacy";
-  return `${tx.date}|${tx.amountCents}|${tx.categoryId ?? "none"}|${account}|${currency}|${direction}|${comment}`;
+  return `${tx.date}|${tx.amountCents}|${tx.categoryId ?? "none"}|${account}|${currency}|${direction}|${tx.pending ? "pending" : "confirmed"}|${comment}`;
 }
 
 export type ImportPlan = {
@@ -532,6 +544,8 @@ export function planImport(
       amountCents: row.amountCents,
       categoryId: row.categoryId,
       comment: row.comment,
+      currency: row.currency,
+      pending: row.pending,
     });
     if (seen.has(key)) {
       plan.duplicates.push(row);

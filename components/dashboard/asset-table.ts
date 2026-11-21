@@ -109,6 +109,7 @@ export type AssetTableView<T extends SidebarAssetRow> = {
   derivedCashLabel: string | null;
 
   cashAccountCount: number;
+  zeroBalanceAccountCount: number;
 };
 
 export const ASSET_TABLE_AUTO_EXPAND_LIMIT = 8;
@@ -163,6 +164,7 @@ export type AssetTableInput<T extends SidebarAssetRow> = {
   accounts: readonly AccountRow[];
 
   hidden?: HiddenKeys;
+  showZeroCashBalances?: boolean;
 };
 
 type ListedRow<T extends SidebarAssetRow> = {
@@ -290,7 +292,9 @@ function buildFilter<T extends SidebarAssetRow>(
 export function buildAssetTable<T extends SidebarAssetRow>(
   input: AssetTableInput<T>,
 ): AssetTableView<T> {
-  const all = listedRows(input);
+  const listed = listedRows(input);
+  const zeroBalanceAccountCount = listed.filter((row) => row.holding.source === "account" && row.currentValueCents === 0).length;
+  const all = input.showZeroCashBalances ? listed : listed.filter((row) => row.holding.source !== "account" || row.currentValueCents !== 0);
   const hiddenKeys = asKeySet(input.hidden);
 
   const visible: ListedRow<T>[] = [];
@@ -365,12 +369,13 @@ export function buildAssetTable<T extends SidebarAssetRow>(
 
     visibleTotalsLabel: formatCurrencyTotals(currencyTotals),
     mixed: currencyTotals.length > 1,
-    isEmpty: all.length === 0,
+    isEmpty: listed.length === 0,
     filter: buildFilter(all, hiddenRows),
     derivedCashCount: cashRows.length,
     derivedCashLabel:
       cashRows.length === 0 ? null : formatCurrencyTotals(totalsByCurrency(cashRows)),
-    cashAccountCount: all.filter((row) => row.holding.source === "account").length,
+    cashAccountCount: listed.filter((row) => row.holding.source === "account").length,
+    zeroBalanceAccountCount,
   };
 }
 

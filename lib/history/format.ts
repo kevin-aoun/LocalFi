@@ -72,18 +72,7 @@ export function renderPlan(plan: ReconstructionPlan, options: RenderOptions = {}
   lines.push(`  ledger from  ${plan.ledgerFirstKey ?? "(no transactions)"}`);
   lines.push("");
 
-  lines.push("PRICE SERIES (one request per symbol, for the whole window):");
-  if (plan.series.length === 0) {
-    lines.push("  none needed: no live-priced holding with a quantity");
-  } else {
-    for (const series of plan.series) {
-      lines.push(
-        `  ${padRight(series.symbol, 5)} ${padRight(series.coinGeckoId, 10)} ` +
-          `${series.points} point(s)  ${series.firstKey} .. ${series.lastKey}` +
-          (series.proxy ? "   [PROXY]" : ""),
-      );
-    }
-  }
+  lines.push("VALUATIONS: recorded ledger observations only; no external price requests.");
   lines.push("");
 
   lines.push("HOLDINGS (a day before the acquisition day contributes 0, not today's value):");

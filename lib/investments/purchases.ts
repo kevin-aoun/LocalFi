@@ -27,6 +27,7 @@ export type PrepareInvestmentPurchaseInput = {
   quantity: string;
   unit?: string;
   unitPriceMinor: number;
+  unitPrice?: string;
   observedAt?: number;
   observedDay?: string;
   source?: string | null;
@@ -65,7 +66,7 @@ export function prepareInvestmentPurchase(
 ): PreparedInvestmentPurchase {
   const currency = input.currency.trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Purchase currency must be an ISO code");
-  if (!Number.isSafeInteger(input.unitPriceMinor) || input.unitPriceMinor <= 0) {
+  if (!Number.isSafeInteger(input.unitPriceMinor) || (input.unitPrice ? input.unitPriceMinor < 0 : input.unitPriceMinor <= 0)) {
     throw new Error("A confirmed investment purchase requires a positive frozen unit price");
   }
   const quantityDelta = canonicalDecimal(input.quantity);
@@ -89,6 +90,7 @@ export function prepareInvestmentPurchase(
     observedDay: input.observedDay ?? observationDay(observedAt),
     observedAt,
     amountMinor: input.unitPriceMinor,
+    unitPrice: input.unitPrice,
     currency,
     source: input.source ?? instrument.priceSource,
   });

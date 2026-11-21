@@ -418,6 +418,8 @@ export function AssetTable<T extends SidebarAssetRow>({
                   </Button>
                 </td>
               </tr>
+            ) : view.categories.length === 0 ? (
+              <tr><td colSpan={4} className="px-6 py-10 text-center text-sm text-muted-foreground">All cash accounts have a zero balance. Select “Show zero cash balances” to display them.</td></tr>
             ) : (
               view.categories.map((category) => {
                 const expanded = overrides.get(category.key) ?? seed.has(category.key);

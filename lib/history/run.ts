@@ -8,7 +8,6 @@ import {
 } from "@/lib/db/schema";
 import { fromDateKey, isDateKey, todayKey, type DateKey } from "@/lib/dates";
 import { sumCents, type Cents } from "@/lib/money";
-import { isPriceSymbol, type PriceFetchLike, type PriceSymbol } from "@/lib/prices";
 import {
   readAccountBalances,
   readCurrentMovements,
@@ -18,11 +17,7 @@ import {
 import type { Database } from "sql.js";
 
 import {
-  type HistoryError,
-} from "./prices";
-import {
   eachDay,
-  type HistoryAsset,
   type HoldingPlan,
   type PurchaseContinuity,
   type ReconstructedDay,
@@ -117,15 +112,6 @@ export type ExistingSnapshot = {
   netWorthCents: Cents;
 };
 
-export type SeriesInfo = {
-  symbol: PriceSymbol;
-  coinGeckoId: string;
-  proxy: boolean;
-  firstKey: DateKey;
-  lastKey: DateKey;
-  points: number;
-};
-
 export type ReconstructionPlan = {
   fromKey: DateKey;
   toKey: DateKey;
@@ -136,22 +122,14 @@ export type ReconstructionPlan = {
   holdings: HoldingPlan[];
   continuity: PurchaseContinuity[];
   warnings: ReconstructionWarning[];
-  series: SeriesInfo[];
 
   existing: ExistingSnapshot[];
 };
 
-export type PlanError =
-  | { code: "price_fetch_failed"; message: string; errors: HistoryError[] }
-  | {
-      code:
-        | "bad_range"
-        | "no_price_for_day"
-        | "no_history_source"
-        | "mixed_currencies"
-        | "empty";
-      message: string;
-    };
+export type PlanError = {
+  code: "bad_range" | "no_price_for_day" | "no_history_source" | "mixed_currencies" | "empty";
+  message: string;
+};
 
 export type PlanResult = { ok: true; plan: ReconstructionPlan } | { ok: false; error: PlanError };
 
@@ -169,30 +147,7 @@ export type PlanOptions = {
   toKey?: DateKey;
 
   today?: DateKey;
-
-  days?: number;
-
-  fetchImpl?: PriceFetchLike;
-
-  carryUnpriced?: boolean;
-
-  onPriceRateLimitRetry?: (symbol: PriceSymbol, delayMs: number) => void;
 };
-
-
-export function neededSymbols(assets: readonly HistoryAsset[]): PriceSymbol[] {
-  const wanted = new Set<PriceSymbol>();
-  for (const asset of assets) {
-    if (asset.category === "Cash") continue;
-    const symbol = asset.priceSymbol;
-    if (typeof symbol !== "string" || !isPriceSymbol(symbol)) continue;
-    const quantity = asset.quantity;
-    if (quantity === null || quantity === undefined || !Number.isFinite(quantity)) continue;
-    wanted.add(symbol);
-  }
-  return [...wanted];
-}
-
 
 export async function planNetWorthReconstruction(options: PlanOptions = {}): Promise<PlanResult> {
   const today = options.today ?? todayKey();
@@ -247,7 +202,6 @@ export async function planNetWorthReconstruction(options: PlanOptions = {}): Pro
       holdings: [],
       continuity: [],
       warnings: [],
-      series: [],
       existing,
     },
   };

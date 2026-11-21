@@ -20,6 +20,7 @@ type Category = {
   type: string;
   color: string;
   icon: string;
+  investmentKind?: string | null;
 };
 
 type BudgetDialogProps = {
@@ -49,6 +50,7 @@ export function BudgetDialog({
     type: "Expense",
     icon: "Wallet",
     color: "#10b981",
+    investmentKind: "",
   });
 
   useEffect(() => {
@@ -59,6 +61,7 @@ export function BudgetDialog({
         type: category.type,
         icon: category.icon,
         color: category.color,
+        investmentKind: category.investmentKind ?? "",
       });
     } else {
       setFormData({
@@ -66,6 +69,7 @@ export function BudgetDialog({
         type: "Expense",
         icon: "Wallet",
         color: "#10b981",
+        investmentKind: "",
       });
     }
   }, [category, open]);
@@ -149,6 +153,21 @@ export function BudgetDialog({
               </SelectContent>
             </Select>
           </div>
+
+          {formData.type === "Investment" && (
+            <div className="space-y-2">
+              <Label htmlFor="investment-kind">Transaction fields</Label>
+              <Select value={formData.investmentKind || "none"} onValueChange={(value) => setFormData((previous) => ({ ...previous, investmentKind: value === "none" ? "" : value }))}>
+                <SelectTrigger id="investment-kind"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Amount only</SelectItem>
+                  <SelectItem value="stock">Stock · buy / sell</SelectItem>
+                  <SelectItem value="crypto">Crypto · buy / sell</SelectItem>
+                  <SelectItem value="commodity">Commodity · buy / sell</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label id="icon-label">Icon</Label>

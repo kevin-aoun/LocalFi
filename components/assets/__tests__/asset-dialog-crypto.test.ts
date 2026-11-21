@@ -47,19 +47,22 @@ describe("Bitcoin and Ethereum are pickable live-priced holdings", () => {
     expect(source).toMatch(/const ASSET_TYPES = \[[^\]]*"Crypto"/);
     // The live-price controls are no longer gated on Commodities alone.
     expect(source).toMatch(/liveSymbol/);
-    expect(source).toMatch(/category === "Crypto" \? true : prev\.useLivePrice/);
+    expect(source).toMatch(/category === "Crypto" \|\| category === "Investments" \? true : prev\.useLivePrice/);
   });
 
-  it("labels the crypto quantity as a coin count, not a weight", () => {
-    expect(source).toMatch(/Quantity \(coins\)/);
+  it("labels the shared received units as Shares or Coins", () => {
+    expect(source).toMatch(/isStock \? "Shares" : "Coins"/);
     expect(source).toMatch(/"coins"/);
   });
 
-  it("collects the paid amount and shows live profit or loss beside the value", () => {
-    expect(source).toMatch(/Paid \(USD\)/);
-    expect(source).toMatch(/cost basis/i);
-    expect(source).toMatch(/Live profit \/ loss/);
-    expect(source).toMatch(/profitLossCents/);
+  it("always collects the fixed purchase price and keeps market previews out of the shared purchase fields", () => {
+    expect(source).toMatch(/Price \(USD\)/);
+    expect(source).toMatch(/Price per/);
+    expect(source).toMatch(/step="0\.0001"/);
+    expect(source).toMatch(/purchase.set\("unitPrice", formData.unitPrice\)/);
+    const fields = source.slice(source.indexOf("export function InvestmentFields"), source.indexOf("export function CommodityFields"));
+    expect(fields).not.toMatch(/LivePriceCheckbox|formData\.useLivePrice/);
+    expect(source).not.toMatch(/Live profit \/ loss|purchase.set\("refreshPrice"/);
   });
 
   it("routes a live-priced save through the priced-holding action", () => {
@@ -71,7 +74,8 @@ describe("Bitcoin and Ethereum are pickable live-priced holdings", () => {
   it("records a new coin as one account-backed investment transaction", () => {
     expect(source).toMatch(/createTransaction/);
     expect(source).toMatch(/Paid from/);
-    expect(source).toMatch(/Tag \/ category/);
+    expect(source).not.toMatch(/Tag \/ category|crypto-purchase-category/);
+    expect(source).toMatch(/purchaseCategoryIdFor\(categories, formData.category, initialPurchaseCategoryId\)/);
     expect(source).toMatch(/instrumentSymbol/);
     expect(source).toMatch(/This creates one confirmed transaction and decreases the selected account/);
   });
@@ -80,6 +84,14 @@ describe("Bitcoin and Ethereum are pickable live-priced holdings", () => {
     expect(source).toMatch(/cryptoPurchase/);
     expect(source).toMatch(/initialPurchaseAccountId/);
     expect(source).toMatch(/initialPurchaseCategoryId/);
+  });
+
+  it("puts Paid from and one Category selector at the top before investment details", () => {
+    const form = source.slice(source.indexOf("<form "));
+    expect(form.indexOf("Record purchase")).toBeLessThan(form.indexOf("Paid from"));
+    expect(form.indexOf("Paid from")).toBeLessThan(form.indexOf("<AssetCategoryField"));
+    expect(form.indexOf("<AssetCategoryField")).toBeLessThan(form.indexOf("<InvestmentFields"));
+    expect(form.match(/<AssetCategoryField\b/g)).toHaveLength(1);
   });
 });
 
@@ -99,12 +111,8 @@ describe("money is never hand-rolled", () => {
     expect(code).not.toMatch(/\$\$\{/);
     expect(code).not.toMatch(/\$\{[^}]*toFixed/);
     expect(code).not.toMatch(/"\$"/);
-    // The only rounding left is unit conversion for the WEIGHT fields, which is
-    // not money: grams <-> troy ounces.
-    for (const match of code.match(/\.toFixed\(\d\)/g) ?? []) {
-      expect(match).toMatch(/toFixed\(2\)|toFixed\(4\)/);
-    }
-    expect(code).toMatch(/ozToGrams\(oz\)\.toFixed\(2\)/);
+    expect(code).not.toMatch(/\.toFixed\(/);
+    expect(code).toContain("commodityQuantityFields");
   });
 
   it("rounds quantity x price to the cent exactly once, through lib/prices", () => {
@@ -154,6 +162,6 @@ describe("the dialog stays inside the viewport", () => {
   });
 
   it("stacks paired asset fields on narrow screens", () => {
-    expect(source.match(/grid-cols-1 gap-4 sm:grid-cols-2/g)).toHaveLength(4);
+    expect(source.match(/grid-cols-1 gap-4 sm:grid-cols-2/g)).toHaveLength(3);
   });
 });

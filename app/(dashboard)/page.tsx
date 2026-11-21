@@ -15,13 +15,16 @@ import {
 } from "@/app/actions/accounts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, ArchiveRestore, EyeOff, TrendingUp, TrendingDown, Plus, Wallet } from "lucide-react";
+import { AlertTriangle, ArchiveRestore, EyeOff, TrendingUp, TrendingDown, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip } from "recharts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
 import { AssetDialog } from "@/components/assets/asset-dialog";
+import { LivePriceRefresh } from "@/components/assets/live-price-refresh";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -64,7 +67,6 @@ export default function DashboardPage() {
     setDeleteDialogOpen,
     selectedAsset,
     assetToDelete,
-    openAddDialog,
     openEditDialog,
     openDeleteDialog,
   } = useDashboardStore();
@@ -86,6 +88,7 @@ export default function DashboardPage() {
   const [hiddenHoldings, setHiddenHoldings] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
+  const [showZeroCashBalances, setShowZeroCashBalances] = useState(false);
 
   const hideHoldings = (keys: string[]) =>
     setHiddenHoldings((current) => withHidden(current, keys, true));
@@ -125,11 +128,6 @@ export default function DashboardPage() {
     void loadData();
   }, [loadData]);
 
-  const loadAssets = async () => {
-    const data = await getAssets({ includeArchived: true });
-    setAssets(data);
-  };
-
   const handleDelete = async () => {
     if (!assetToDelete) return;
 
@@ -168,6 +166,7 @@ export default function DashboardPage() {
 
     accounts: accountRows,
     hidden: hiddenHoldings,
+    showZeroCashBalances,
   });
   const mixedCurrency = assetView.mixed;
 
@@ -312,17 +311,14 @@ export default function DashboardPage() {
           </h1>
           <p className="text-muted-foreground">Here&apos;s what&apos;s happening with your finances</p>
         </div>
-        <Button onClick={openAddDialog}>
-          <Plus className="mr-2 h-4 w-4" />
-          New
-        </Button>
+
       </div>
 
       {}
       {netWorth && (
         <NetWorthSection
           netWorth={netWorth}
-          accounts={accountRows}
+          accounts={accountRows.filter((account) => showZeroCashBalances || account.balanceCents !== 0)}
           history={history}
           onRecorded={loadData}
         />
@@ -446,6 +442,7 @@ export default function DashboardPage() {
       </div>
 
       <div>
+        <div className="mb-3"><LivePriceRefresh onRefresh={loadData} /></div>
         <div className="mb-4">
           <h2 className="flex flex-wrap items-center gap-2 text-lg font-semibold">
             <span>Assets{!assetView.isEmpty && ` · ${assetView.visibleTotalsLabel}`}</span>
@@ -475,6 +472,12 @@ export default function DashboardPage() {
               </Tooltip>
             )}
           </h2>
+          {assetView.zeroBalanceAccountCount > 0 && (
+            <div className="mt-2 flex items-center gap-2">
+              <Checkbox id="show-zero-cash-balances" checked={showZeroCashBalances} onCheckedChange={(checked) => setShowZeroCashBalances(checked === true)} />
+              <Label htmlFor="show-zero-cash-balances" className="text-sm font-normal text-muted-foreground">Show zero cash balances</Label>
+            </div>
+          )}
           {}
           {hasDerivedCashAsset && assetView.cashAccountCount > 0 && (
             <p className="mt-1 text-xs text-muted-foreground">
@@ -517,12 +520,9 @@ export default function DashboardPage() {
               <Wallet className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No assets yet</h3>
               <p className="text-sm text-muted-foreground mb-4 text-center max-w-sm">
-                Start by adding your first asset to track your net worth and financial progress
+                Record an asset purchase in Transactions to track your holdings and net worth.
               </p>
-              <Button onClick={() => setDialogOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Your First Asset
-              </Button>
+              <Button asChild><Link href="/transactions">Open Transactions</Link></Button>
             </CardContent>
           </Card>
         ) : (
@@ -614,7 +614,7 @@ export default function DashboardPage() {
       </div>
 
       <AssetDialog
-        open={dialogOpen}
+        open={dialogOpen && selectedAsset !== null}
         onOpenChange={setDialogOpen}
         asset={selectedAsset}
         accounts={accountRows.map((account) => ({
@@ -625,7 +625,7 @@ export default function DashboardPage() {
           archived: account.archived,
         }))}
         categories={categories}
-        onSuccess={loadAssets}
+        onSuccess={loadData}
       />
 
       <AlertDialog

@@ -128,7 +128,7 @@ describe("createLivePricedAsset", () => {
     ]);
   });
 
-  it("requires a crypto cost basis and preserves it while the live value changes", async () => {
+  it("preserves manual crypto openings for audit without treating them as transaction inventory", async () => {
     expect(await createLivePricedAsset(holdingForm({ quantity: "1", paidAmount: "" }))).toEqual({
       error: "Enter what you paid for this coin.",
     });
@@ -139,9 +139,7 @@ describe("createLivePricedAsset", () => {
       { book_amount_minor: 9_000_000 },
     ]);
     expect(storedAssets()[0]).toMatchObject({ current_value_cents: 10_000_000 });
-    expect(await getAssets()).toMatchObject([
-      { category: "Crypto", costBasisCents: 9_000_000, profitLossCents: 1_000_000 },
-    ]);
+    expect(await getAssets()).toEqual([]);
   });
 
   it("files a metal under Commodities and keeps commodity_type working", async () => {
@@ -163,7 +161,7 @@ describe("createLivePricedAsset", () => {
     const result = await createLivePricedAsset(holdingForm({ quantity: "0.0345" }));
 
     expect(result).toMatchObject({ error: expect.stringContaining("Bitcoin") });
-    expect(result).toMatchObject({ error: expect.stringContaining("nothing was saved") });
+    expect(result).toMatchObject({ error: expect.stringContaining("stored value is kept") });
     expect(storedAssets()).toEqual([]);
   });
 
@@ -227,7 +225,7 @@ describe("updateLivePricedAsset", () => {
     serve({ status: 503 });
     const result = await updateLivePricedAsset(Number(before.id), holdingForm({ quantity: "0.0345" }));
 
-    expect(result).toMatchObject({ error: expect.stringContaining("nothing was saved") });
+    expect(result).toMatchObject({ error: expect.stringContaining("stored value is kept") });
     expect(storedAssets()).toEqual([before]);
   });
 
@@ -345,7 +343,7 @@ describe("recordNetWorthToday", () => {
     expect(result).toMatchObject({
       success: true,
       data: {
-        netWorthCents: 5_820_000,
+        netWorthCents: 220_000,
         prices: { ok: true, refreshed: 4, skipped: 0, failed: [], unpriceable: [] },
       },
     });
@@ -361,14 +359,12 @@ describe("recordNetWorthToday", () => {
     ).toEqual([
       { asset_id: 1, value_cents: 200_000 },
       { asset_id: 2, value_cents: 20_000 },
-      { asset_id: 3, value_cents: 5_000_000 },
-      { asset_id: 4, value_cents: 600_000 },
     ]);
   });
 
   it("keeps only the sixth and latest recording when run six times in one day", async () => {
     await createLivePricedAsset(
-      holdingForm({ priceSymbol: "BTC", quantity: "1", notes: "Bitcoin" }),
+      holdingForm({ priceSymbol: "XAU", quantity: "1", notes: "Gold" }),
     );
     fetchMock.mockClear();
     const openingEvents = temp.query("SELECT COUNT(*) AS count FROM ledger_events");
@@ -381,7 +377,7 @@ describe("recordNetWorthToday", () => {
     );
 
     for (let run = 1; run <= 6; run += 1) {
-      serve({ coingecko: { bitcoin: { usd: 100_000 + run } } });
+      serve({ coingecko: { "pax-gold": { usd: 100_000 + run } } });
       expect(await recordNetWorthToday()).toMatchObject({ success: true });
     }
 
@@ -413,7 +409,7 @@ describe("recordNetWorthToday", () => {
 
   it("records the last stored value when the live quote is unavailable", async () => {
     await createLivePricedAsset(
-      holdingForm({ priceSymbol: "BTC", quantity: "1", notes: "Bitcoin" }),
+      holdingForm({ priceSymbol: "XAU", quantity: "1", notes: "Gold" }),
     );
     fetchMock.mockClear();
     serve({ status: 503 });
@@ -423,18 +419,18 @@ describe("recordNetWorthToday", () => {
     expect(result).toMatchObject({
       success: true,
       data: {
-        netWorthCents: 11_843_200,
+        netWorthCents: 331_558,
         prices: {
           ok: true,
           refreshed: 0,
-          failed: [{ id: 1, label: "Bitcoin", error: expect.any(String) }],
+          failed: [{ id: 1, label: "Gold", error: expect.any(String) }],
         },
       },
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(storedAssets()[0]).toMatchObject({ current_value_cents: 11_843_200 });
+    expect(storedAssets()[0]).toMatchObject({ current_value_cents: 331_558 });
     expect(temp.query("SELECT asset_id, value_cents FROM asset_history")).toEqual([
-      { asset_id: 1, value_cents: 11_843_200 },
+      { asset_id: 1, value_cents: 331_558 },
     ]);
   });
 });

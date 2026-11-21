@@ -89,7 +89,7 @@ describe.sequential("single-owner vault sessions", () => {
     const authorization = await manager.authorizationForToken(setup.token);
     expect(await withDatabaseVaultAuthorization(authorization, () =>
       readDb((_db, raw) => Number(raw.exec("SELECT COUNT(*) FROM categories")[0].values[0][0]))
-    )).toBe(15);
+    )).toBe(18);
 
     const restarted = new VaultSessionManager();
     expect(await restarted.authorizationForToken(setup.token)).toBeNull();

@@ -58,7 +58,7 @@ export function summarizeLedger(
         countedCount += 1;
         break;
       case "Investment":
-        buckets.investment.push(row.amountCents);
+        buckets.investment.push(row.direction === "inflow" ? negateCents(row.amountCents) : row.amountCents);
         countedCount += 1;
         break;
       default:
@@ -121,7 +121,7 @@ export function categoryBreakdown(
       count: 0,
     };
 
-    group.amounts.push(row.amountCents);
+    group.amounts.push(type === "Investment" && row.direction === "inflow" ? negateCents(row.amountCents) : row.amountCents);
     group.count += 1;
     groups.set(category.name, group);
   }

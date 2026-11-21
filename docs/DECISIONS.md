@@ -33,6 +33,12 @@ This file records durable choices and rejected alternatives. See the
 - **One accounts table.** Assets and liabilities share an inventory; net worth
   is assets minus liabilities.
 - **First-class transfers.** Transfers are neither income nor expense.
+- **Separate transfer fees.** The transfer amount is what arrives in the destination;
+  fees are paid on top from the source account as a separate Expense transaction.
+  A unique `fee_for_transfer_id` links the fee to its transfer in projections and
+  canonical event metadata. Create, edit, confirm, and delete keep both entries
+  atomic; zero fees create no expense. Legacy embedded principal/expense splits
+  remain readable and become separate entries when saved through the fee form.
 - **One append-only ledger.** Confirmed facts append global, UUID-identified
   `ledger_events` with sequence/`previous_hash` links and balanced ordered
   movements. Pending drafts stay mutable and eventless; corrections append.
@@ -70,6 +76,48 @@ This file records durable choices and rejected alternatives. See the
 - **Zustand for view state only.** Server Actions own server data.
 - **Keyless price providers.** Default pricing needs no account or repository
   secret and is keyed by instrument symbol.
+- **Shared priced investments.** Crypto and USD stock/ETF purchases share exact
+  ledger quantities, position projections, and price refreshes. Stocks use
+  `STOCK:<ticker>` symbols and Yahoo Finance's keyless chart endpoint; crypto
+  retains CoinGecko. Only symbols leave the machine. Yahoo's endpoint is
+  unofficial and quotes may be delayed; failures preserve stored values.
+  The shared stock/crypto form always collects received units and the USD price
+  per share or coin (up to four decimal places), without a pricing toggle or
+  market preview. Exact decimal unit prices are retained in price observations
+  alongside their legacy rounded cents; only the final units × price value is
+  rounded to cents. Original acquisition prices live in append-only event metadata.
+  Purchase writes never depend
+  on a quote request; Home and Reports refresh market values independently.
+  Provider aliases, such as CSPX to Yahoo's USD `CSPX.L` listing, affect quote
+  requests only and preserve existing ledger instrument identities.
+- **Transaction inventory supersedes opening snapshots.** Crypto quantities always
+  exclude manual and migrated openings. For other instruments, posting purchases
+  adds to opening positions; purchases never imply an opening is a duplicate.
+  Crypto opening snapshots stay excluded even after purchases are deleted.
+  Home, Reports, sidebar, and net worth value the same transaction quantities and
+  cash purchase costs. Opening events and full position projections remain intact
+  for audit and integrity verification. Crypto labels consistently use BTC/ETH.
+- **Cash break-even includes fees.** A purchase posts principal plus fees as one
+  cash outflow and instrument book amount. The original event records their
+  split in `investmentCost` metadata. Reports derive each baseline from current
+  ledger purchase movements, including corrections, before filtering the display
+  range. Manual opening valuations without a cash purchase have no cash baseline.
+- **One category-driven transaction form.** Categories configure optional stock,
+  crypto, or commodity fields through `investment_kind`; renaming a category
+  preserves that behavior. Stock, Crypto, and Commodities are supplied by default,
+  reusing recognized existing investment categories on upgrade. Home creates no
+  holdings; purchases and sales enter through Transactions with one category
+  selection. Ordinary investment categories can still use amount-only entries.
+- **Ledger sales.** A sale records a negative exact quantity and credits its
+  receiving account with units × frozen price minus fees. Instrument cash amounts
+  use the same sign as cash invested: buys add cost, sales subtract net proceeds.
+  Reports compare remaining value to that net cash baseline and show realized
+  gains using weighted average acquisition cost, including fees. Unknown opening
+  costs remain unknown. Trades on one calendar day use that day's pooled purchase
+  cost before sales. Create, correction, confirmation and deletion reject negative
+  holdings at any effective calendar day, including later sales. Eventless trade
+  drafts retain their price and fee split in `investment_draft` until confirmation
+  moves those facts into immutable event metadata.
 - **Read-only ledger explorer.** The optional explorer renders durable SQLite
   links with cursor pagination and integrity checks. Privacy mode hides values
   and purges loaded payloads.

@@ -4,8 +4,13 @@ import {
   commodityPriceSymbols,
   cryptoPriceSymbols,
   priceSymbolForCommodityType,
+  stockPriceSymbol,
+  pricedHolding,
   type PriceSymbol,
 } from "@/lib/prices";
+import { todayKey } from "@/lib/dates";
+import { purchaseAmountCents, unitPriceFromAmountCents } from "@/lib/investments/cost";
+import { parseAmount, sumCents } from "@/lib/money";
 
 export type AssetFormData = {
   category: string;
@@ -17,7 +22,10 @@ export type AssetFormData = {
   quantityOz: string;
   quantityGrams: string;
   quantityCoins: string;
-  paidAmount: string;
+  unitPrice: string;
+  ticker: string;
+  fees: string;
+  purchaseDate: string;
   useLivePrice: boolean;
 };
 
@@ -28,6 +36,7 @@ export type AssetFormAsset = {
   notes?: string | null;
   commodityType?: string | null;
   quantity?: number | null;
+  quantityExact?: string | null;
   unit?: string | null;
   priceSymbol?: string | null;
   costBasisCents?: number | null;
@@ -52,6 +61,18 @@ export const CRYPTO_CHOICES = cryptoPriceSymbols.map((symbol) => ({
   label: PRICED_HOLDINGS[symbol].label,
 }));
 
+export function purchaseCategoryIdFor(
+  categories: readonly { id: number; name: string; type: string }[],
+  assetCategory: string,
+  preferredId: number | null = null,
+): number | null {
+  const investments = categories.filter((category) => category.type === "Investment");
+  const preferred = investments.find((category) => category.id === preferredId);
+  const matching = investments.find((category) => category.name.trim().toLowerCase() === assetCategory.toLowerCase());
+  const general = investments.find((category) => ["investment", "investments"].includes(category.name.trim().toLowerCase()));
+  return (preferred ?? matching ?? general ?? investments[0])?.id ?? null;
+}
+
 export function emptyAssetForm(): AssetFormData {
   return {
     category: DEFAULT_ASSET_TYPE,
@@ -63,7 +84,10 @@ export function emptyAssetForm(): AssetFormData {
     quantityOz: "",
     quantityGrams: "",
     quantityCoins: "",
-    paidAmount: "",
+    unitPrice: "",
+    ticker: "",
+    fees: "0",
+    purchaseDate: todayKey(),
     useLivePrice: false,
   };
 }
@@ -84,11 +108,20 @@ export function ozToGrams(oz: number): number {
   return oz * GRAMS_PER_TROY_OUNCE;
 }
 
+export function commodityQuantityFields(value: string, unit: "oz" | "grams") {
+  const quantity = Number(value.trim());
+  const converted = value.trim() === "" || !Number.isFinite(quantity)
+    ? ""
+    : String(unit === "oz" ? ozToGrams(quantity) : gramsToOz(quantity));
+  return unit === "oz"
+    ? { quantityOz: value, quantityGrams: converted }
+    : { quantityOz: converted, quantityGrams: value };
+}
+
 export function formFromAsset(asset: AssetFormAsset, centsToDecimal: (cents: number) => number): AssetFormData {
   const hasQuantity = asset.quantity !== null && asset.quantity !== undefined;
   const quantity = hasQuantity ? asset.quantity! : 0;
-  const quantityOz = asset.unit === "grams" ? gramsToOz(quantity).toFixed(4) : String(quantity);
-  const quantityGrams = asset.unit === "grams" ? String(quantity) : ozToGrams(quantity).toFixed(2);
+  const weights = commodityQuantityFields(hasQuantity ? String(quantity) : "", asset.unit === "grams" ? "grams" : "oz");
   const storedCrypto = cryptoPriceSymbols.find((symbol) => symbol === asset.priceSymbol);
   const useLivePrice = asset.useLivePrice || false;
 
@@ -100,30 +133,50 @@ export function formFromAsset(asset: AssetFormAsset, centsToDecimal: (cents: num
     notes: asset.notes || "",
     commodityType: asset.commodityType || "Gold",
     cryptoSymbol: storedCrypto ?? "BTC",
-    quantityOz: hasQuantity ? quantityOz : "",
-    quantityGrams: hasQuantity ? quantityGrams : "",
-    quantityCoins: hasQuantity ? String(quantity) : "",
-    paidAmount: asset.costBasisCents == null ? "" : centsToDecimal(asset.costBasisCents).toString(),
+    ...weights,
+    quantityCoins: asset.quantityExact ?? (hasQuantity ? String(quantity) : ""),
+    unitPrice: hasQuantity && quantity > 0 && (asset.costBasisCents ?? asset.currentValueCents) > 0
+      ? unitPriceFromAmountCents(asset.costBasisCents ?? asset.currentValueCents, asset.quantityExact ?? String(quantity))
+      : "",
+    ticker: asset.priceSymbol?.startsWith("STOCK:") ? pricedHolding(asset.priceSymbol)?.label ?? "" : "",
+    fees: "0",
+    purchaseDate: todayKey(),
     useLivePrice,
   };
+}
+
+export function purchaseTotalFor(form: AssetFormData): number | null {
+  try {
+    const fees = parseAmount(form.fees.trim() || "0");
+    if (fees < 0) return null;
+    return sumCents([purchaseAmountCents(form.quantityCoins, form.unitPrice), fees]);
+  } catch {
+    return null;
+  }
 }
 
 export function livePricingFor(form: AssetFormData) {
   const isCommodity = form.category === "Commodities";
   const isCrypto = form.category === "Crypto";
-  const supportsLivePrice = isCommodity || isCrypto;
+  const isStock = form.category === "Investments";
+  const isInvestment = isCrypto || isStock;
+  const supportsLivePrice = isCommodity || isInvestment;
   const liveSymbol: PriceSymbol | null = !supportsLivePrice
     ? null
-    : isCrypto
+    : isStock
+      ? stockPriceSymbol(form.ticker)
+      : isCrypto
       ? form.cryptoSymbol
       : priceSymbolForCommodityType(form.commodityType);
-  const usesLivePricing = form.useLivePrice && liveSymbol !== null;
+  const usesLivePricing = isInvestment || (isCommodity && form.useLivePrice);
   return {
     isCommodity,
     isCrypto,
+    isStock,
+    isInvestment,
     liveSymbol,
     usesLivePricing,
-    liveUnit: isCrypto ? "coins" : "oz",
-    liveQuantityText: isCrypto ? form.quantityCoins : form.quantityOz,
+    liveUnit: isStock ? "shares" : isCrypto ? "coins" : "oz",
+    liveQuantityText: isInvestment ? form.quantityCoins : form.quantityOz,
   } as const;
 }

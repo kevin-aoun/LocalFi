@@ -1,0 +1,2 @@
+ALTER TABLE `transactions` ADD `fee_for_transfer_id` integer REFERENCES transactions(id);--> statement-breakpoint
+CREATE UNIQUE INDEX `transactions_transfer_fee_unique` ON `transactions` (`fee_for_transfer_id`);

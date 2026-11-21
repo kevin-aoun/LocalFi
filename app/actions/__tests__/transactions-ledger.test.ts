@@ -528,7 +528,7 @@ describe("immutable interactive transaction flows", () => {
     expect(await verifyLedger()).toMatchObject({ ok: true });
   });
 
-  it("appends a balanced same-dollar purchase correction when only quantity changes", async () => {
+  it("appends a balanced same-dollar purchase correction when quantity and price change together", async () => {
     const created = await createTransaction(form({
       accountId: 1,
       categoryId: 12,
@@ -548,9 +548,9 @@ describe("immutable interactive transaction flows", () => {
       date: "2026-08-01T00:00:00",
       instrumentSymbol: "BTC",
       instrumentUnit: "coins",
-      quantity: "0.021",
-      unitPrice: "50000.00",
-    }))).toMatchObject({ success: true, data: { quantityDelta: "0.021" } });
+      quantity: "0.025",
+      unitPrice: "40000.00",
+    }))).toMatchObject({ success: true, data: { quantityDelta: "0.025" } });
 
     const correction = movementRows(2);
     expect(correction).toHaveLength(2);
@@ -558,10 +558,10 @@ describe("immutable interactive transaction flows", () => {
     expect(correction).toContainEqual(expect.objectContaining({
       target_type: "instrument",
       amount_minor: 0,
-      quantity_delta: "0.001",
+      quantity_delta: "0.005",
     }));
     expect(temp.query("SELECT quantity, book_amount_minor FROM instrument_positions")).toEqual([
-      { quantity: "0.021", book_amount_minor: 100_000 },
+      { quantity: "0.025", book_amount_minor: 100_000 },
     ]);
     expect((await verifyLedger()).ok).toBe(true);
   });
