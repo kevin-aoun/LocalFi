@@ -31,8 +31,8 @@ describe("ledger asset sales", () => {
     expect(sale).toMatchObject({ direction: "inflow", quantityDelta: "-0.25", amountCents: 2978 });
     expect((await getAccountBalances()).find((row) => row.id === 9)?.balanceCents).toBe(100378);
     expect((await getTransactions()).find((row) => row.id === sale.id)).toMatchObject({ investmentUnitPrice: "120.1234", investmentFeeAmountCents: 25 });
-    expect((await getAssets()).find((row) => row.priceSymbol === symbol)).toMatchObject({ quantityExact: "0", currentValueCents: 0, costBasisCents: -378 });
-    expect((await getInvestmentHistory()).at(-1)).toMatchObject({ valueCents: 0, costBasisCents: -378, realizedGainCents: 378 });
+    expect((await getAssets()).find((row) => row.priceSymbol === symbol)).toBeUndefined();
+    expect((await getInvestmentHistory()).at(-1)).toMatchObject({ valueCents: 0, costBasisCents: 0, realizedGainCents: 378, closed: true });
     const totals = flowInRange(await getLedgerReportMovements(), [{ id: 12, type: "Investment" }], "2026-01-01", "2026-01-31");
     expect(totals).toMatchObject({ incomeCents: 0, investmentCents: -378, netCents: 378 });
     expect((await verifyLedger()).failures).toEqual([]);
@@ -44,7 +44,7 @@ describe("ledger asset sales", () => {
   it("records zero-net sales when fees equal proceeds", async () => {
     await save(trade());
     await save(trade("BTC", { investmentSide: "sell", unitPrice: "4", fees: "1", date: "2026-01-03" }));
-    expect((await getInvestmentHistory()).at(-1)).toMatchObject({ valueCents: 0, costBasisCents: 2600, realizedGainCents: -2600 });
+    expect((await getInvestmentHistory()).at(-1)).toMatchObject({ valueCents: 0, costBasisCents: 0, realizedGainCents: -2600 });
     expect((await verifyLedger()).failures).toEqual([]);
   });
 
@@ -52,7 +52,9 @@ describe("ledger asset sales", () => {
     await save(trade("BTC", { quantity: "1", unitPrice: "100", fees: "1" }));
     await save(trade("BTC", { quantity: "1", unitPrice: "200", fees: "1", date: "2026-01-03" }));
     await save(trade("BTC", { investmentSide: "sell", quantity: "0.5", unitPrice: "300", fees: "1", date: "2026-01-04" }));
-    expect((await getInvestmentHistory()).at(-1)).toMatchObject({ costBasisCents: 15300, realizedGainCents: 7350 });
+    // 2 units cost 302.00 with fees; selling 0.5 releases 75.50 of cost for 149.00 net.
+    expect((await getInvestmentHistory()).at(-1)).toMatchObject({ valueCents: 45000, costBasisCents: 22650, realizedGainCents: 7350, closed: false });
+    expect((await getAssets()).find((row) => row.priceSymbol === "BTC")).toMatchObject({ quantityExact: "1.5", costBasisCents: 22650, profitLossCents: 22350 });
     expect((await verifyLedger()).failures).toEqual([]);
   });
 

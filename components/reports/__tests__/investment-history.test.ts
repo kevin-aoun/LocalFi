@@ -58,8 +58,8 @@ describe("buildInvestmentHistory", () => {
     expect(model.points[0]).not.toHaveProperty("holding_1");
     expect(model.points.at(-1)).toMatchObject({ holding_2: 1300, cost_2: 1205, holding_1: 1000 });
     expect(model.points.at(-1)).not.toHaveProperty("cost_1");
-    expect(model.summaries.find((item) => item.assetId === 2)).toMatchObject({ costBasisCents: 120_500, profitLossCents: 9500 });
-    expect(model.summaries.find((item) => item.assetId === 1)).toMatchObject({ costBasisCents: null, profitLossCents: null });
+    expect(model.summaries.find((item) => item.assetId === 2)).toMatchObject({ costBasisCents: 120_500, unrealizedGainCents: 9500 });
+    expect(model.summaries.find((item) => item.assetId === 1)).toMatchObject({ costBasisCents: null, unrealizedGainCents: null, totalReturnCents: null });
   });
 
   it("keeps a zero cash baseline and excludes future purchases", () => {
@@ -69,6 +69,37 @@ describe("buildInvestmentHistory", () => {
     ], { startKey: "2026-01-01", endKey: "2026-02-01" });
     expect(model.series).toHaveLength(1);
     expect(model.points.at(-1)).toMatchObject({ cost_2: 0 });
-    expect(model.summaries[0].profitLossCents).toBe(210_000);
+    expect(model.summaries[0].unrealizedGainCents).toBe(210_000);
+  });
+
+  it("adds realized gains to unrealized gains for total return", () => {
+    const model = buildInvestmentHistory([
+      { ...rows[0], valueCents: 45_000, costBasisCents: 22_650, realizedGainCents: 7_350 },
+    ]);
+    expect(model.summaries[0]).toMatchObject({ unrealizedGainCents: 22_350, realizedGainCents: 7_350, totalReturnCents: 29_700, closed: false });
+  });
+
+  it("draws a sold-out holding's drop to zero once, then ends its lines until it is bought again", () => {
+    const btc = { ...rows[0], valueCents: 0, costBasisCents: 0, realizedGainCents: 500, closed: true };
+    const model = buildInvestmentHistory([
+      { ...rows[0], dateKey: "2026-01-01", valueCents: 1_000, costBasisCents: 900, realizedGainCents: 0 },
+      { ...btc, dateKey: "2026-01-02" },
+      { ...btc, dateKey: "2026-01-03" },
+      { ...rows[1], dateKey: "2026-01-03" },
+      { ...rows[0], dateKey: "2026-01-04", valueCents: 2_000, costBasisCents: 1_800, realizedGainCents: 500 },
+    ]);
+    expect(model.points.map((point) => point.holding_2 ?? null)).toEqual([10, 0, null, 20]);
+    expect(model.points.map((point) => point.cost_2 ?? null)).toEqual([9, 0, null, 18]);
+    expect(model.summaries.find((item) => item.assetId === 2)).toMatchObject({ closed: false, totalReturnCents: 700 });
+  });
+
+  it("summarizes a holding sold before the range by its realized gain", () => {
+    const model = buildInvestmentHistory([
+      { ...rows[0], dateKey: "2026-01-01", valueCents: 1_000, costBasisCents: 900, realizedGainCents: 0 },
+      { ...rows[0], dateKey: "2026-01-02", valueCents: 0, costBasisCents: 0, realizedGainCents: 300, closed: true },
+      { ...rows[1], dateKey: "2026-02-01" },
+    ], { startKey: "2026-02-01", endKey: "2026-02-28" });
+    expect(model.points.every((point) => !("holding_2" in point))).toBe(true);
+    expect(model.summaries.find((item) => item.assetId === 2)).toMatchObject({ closed: true, valueCents: 0, realizedGainCents: 300, totalReturnCents: 300 });
   });
 });

@@ -5,8 +5,11 @@ export type InvestmentHistoryInput = {
   assetId: number;
   dateKey: string;
   valueCents: Cents;
+  /** Average cost of the units still held; null when an opening has no cash cost. */
   costBasisCents?: Cents | null;
   realizedGainCents?: Cents | null;
+  /** Every unit has been sold. */
+  closed?: boolean;
   category: string;
   currency: string;
   label: string;
@@ -28,6 +31,18 @@ export type InvestmentPoint = {
   [seriesKey: string]: string | number;
 };
 
+export type InvestmentSummary = InvestmentSeries & {
+  valueCents: Cents;
+  costBasisCents: Cents | null;
+  /** Value minus the cost of the units still held. */
+  unrealizedGainCents: Cents | null;
+  realizedGainCents: Cents | null;
+  /** Unrealized plus realized gain. */
+  totalReturnCents: Cents | null;
+  closed: boolean;
+  asOfKey: string;
+};
+
 const COLORS = [
   "hsl(var(--chart-1))",
   "hsl(var(--chart-2))",
@@ -47,6 +62,32 @@ function dateLabel(key: DateKey, withYear: boolean) {
   });
 }
 
+function summarize(series: InvestmentSeries, row: InvestmentHistoryInput): InvestmentSummary {
+  const costBasisCents = row.costBasisCents ?? null;
+  const realizedGainCents = row.realizedGainCents ?? null;
+  const unrealizedGainCents = costBasisCents === null
+    ? null
+    : sumCents([row.valueCents, negateCents(costBasisCents)]);
+  return {
+    ...series,
+    valueCents: row.valueCents,
+    costBasisCents,
+    unrealizedGainCents,
+    realizedGainCents,
+    totalReturnCents: unrealizedGainCents === null || realizedGainCents === null
+      ? null
+      : sumCents([unrealizedGainCents, realizedGainCents]),
+    closed: row.closed === true,
+    asOfKey: row.dateKey,
+  };
+}
+
+/**
+ * Pivots per-holding daily rows into chart points. Each holding plots its
+ * market value against the average cost of the units it still holds, so the
+ * gap is the unrealized gain; realized gains are reported in the summaries.
+ * A sold-out holding draws its drop to zero once, then its lines end.
+ */
 export function buildInvestmentHistory(
   rows: readonly InvestmentHistoryInput[],
   range?: { startKey: DateKey; endKey: DateKey },
@@ -91,25 +132,24 @@ export function buildInvestmentHistory(
   const days = [...new Set([...byDate.keys(), ...(range ? [range.startKey, range.endKey] : [])])].sort();
   const years = new Set(days.map((day) => day.slice(0, 4)));
   const latest = new Map<number, InvestmentHistoryInput>();
+  const closedOn = new Map<number, string>();
   const points: InvestmentPoint[] = [];
   for (const day of days) {
-    for (const row of byDate.get(day) ?? []) latest.set(row.assetId, row);
+    for (const row of byDate.get(day) ?? []) {
+      if (!row.closed) closedOn.delete(row.assetId);
+      else if (!closedOn.has(row.assetId)) closedOn.set(row.assetId, day);
+      latest.set(row.assetId, row);
+    }
     if ((range && day < range.startKey) || latest.size === 0) continue;
     const point: InvestmentPoint = { dateKey: day as DateKey, label: dateLabel(day as DateKey, years.size > 1) };
     for (const row of latest.values()) {
+      if (row.closed && closedOn.get(row.assetId) !== day) continue;
       point[`holding_${row.assetId}`] = centsToDecimal(row.valueCents);
       if (row.costBasisCents != null) point[`cost_${row.assetId}`] = centsToDecimal(row.costBasisCents);
     }
     points.push(point);
   }
-  const summaries = series.map((item) => {
-    const row = latest.get(item.assetId)!;
-    const costBasisCents = row.costBasisCents ?? null;
-    return { ...item, valueCents: row.valueCents, costBasisCents, realizedGainCents: row.realizedGainCents ?? null,
-      profitLossCents: costBasisCents === null ? null : sumCents([row.valueCents, negateCents(costBasisCents)]),
-      asOfKey: row.dateKey,
-    };
-  });
+  const summaries = series.map((item) => summarize(item, latest.get(item.assetId)!));
   const currencies = [...new Set(series.map((item) => item.currency))].sort();
 
   return {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parsePurchaseQuantity, parsePurchaseUnitPrice, purchaseAmountCents, quantityValueMinor, unitPriceFromAmountCents } from "@/lib/investments/cost";
+import { observedHoldingValue } from "@/lib/investments/positions";
 
 describe("exact prices per share or coin", () => {
   it("multiplies exact units by a four-decimal price and rounds the cash total once", () => {
@@ -29,5 +30,17 @@ describe("exact prices per share or coin", () => {
     for (const quantity of ["0", "-1", "", "abc"]) expect(() => purchaseAmountCents(quantity, "12.3456")).toThrow();
     expect(() => purchaseAmountCents("0.1", "0.0001")).toThrow();
     expect(() => purchaseAmountCents("100000000000000", "10000.0001")).toThrow();
+  });
+});
+
+describe("observed holding value", () => {
+  it("values price observations by units and manual valuations as a whole", () => {
+    expect(observedHoldingValue("2.5", { observationKind: "price", amountMinor: 1235, unitPrice: "12.3456" })).toBe(3086);
+    expect(observedHoldingValue("1", { observationKind: "valuation", amountMinor: 25_000_000 })).toBe(25_000_000);
+    expect(observedHoldingValue("1", null)).toBe(0);
+  });
+  it("is zero once every unit is sold, whatever the last manual valuation", () => {
+    expect(observedHoldingValue("0", { observationKind: "valuation", amountMinor: 25_000_000 })).toBe(0);
+    expect(observedHoldingValue("0.000", { observationKind: "price", amountMinor: 1235 })).toBe(0);
   });
 });

@@ -27,6 +27,7 @@ import {
   quantityInPriceUnits,
 } from "@/lib/prices";
 import { readCurrentMovements, readPositionHistory, readPositionValuations } from "@/lib/ledger";
+import { holdingKey } from "@/lib/investments/returns";
 
 export async function getAssets(options?: { includeArchived?: boolean }) {
   const includeArchived = options?.includeArchived === true;
@@ -36,13 +37,13 @@ export async function getAssets(options?: { includeArchived?: boolean }) {
       ? query.orderBy(asc(assets.id))
       : query.where(eq(assets.archived, false)).orderBy(asc(assets.id)));
     const positions = new Map(readPositionValuations(raw, todayKey())
-      .map((position) => [`${position.instrumentId}\u0000${position.currency}`, position]));
+      .map((position) => [holdingKey(position.instrumentId, position.currency), position]));
     return rows.flatMap((asset) => {
-      const key = `${asset.instrumentId}\u0000${asset.currency}`;
-      const position = positions.get(key);
-      if (asset.category !== "Cash" && asset.instrumentId && !position) return [];
+      const position = positions.get(holdingKey(asset.instrumentId, asset.currency));
+      // Sold-out holdings leave the holdings list; Reports keep their history and realized gain.
+      if (asset.category !== "Cash" && asset.instrumentId && (!position || position.quantity === "0")) return [];
       const currentValueCents = position ? position.valueMinor as Cents : asset.currentValueCents;
-      const costBasisCents = position?.cashInvestedMinor;
+      const costBasisCents = position?.costBasisCents;
       const quantity = position ? Number(position.quantity) : asset.quantity;
       if (quantity !== null && !Number.isFinite(quantity)) throw new Error("Position quantity cannot be represented by assets");
       return [{
@@ -62,11 +63,12 @@ export async function getAssets(options?: { includeArchived?: boolean }) {
 const INVESTMENT_CATEGORIES = new Set(["Investments", "Crypto", "Commodities"]);
 
 export type InvestmentHistoryRow = {
-  realizedGainCents: Cents | null;
   assetId: number;
   dateKey: string;
   valueCents: Cents;
   costBasisCents: Cents | null;
+  realizedGainCents: Cents | null;
+  closed: boolean;
   category: string;
   currency: string;
   label: string;
@@ -81,8 +83,9 @@ export async function getInvestmentHistory(): Promise<InvestmentHistoryRow[]> {
       assetId: row.assetId!,
       dateKey: row.dateKey,
       valueCents: row.valueMinor as Cents,
-      costBasisCents: row.cashInvestedMinor as Cents | null,
+      costBasisCents: row.costBasisCents,
       realizedGainCents: row.realizedGainCents,
+      closed: row.quantity === "0",
       category: row.category,
       currency: row.currency,
       label: row.label,

@@ -69,6 +69,20 @@ export function getExactPositions(raw: Database): ExactInstrumentPosition[] {
   ).map(positionFromRow);
 }
 
+export type ValuedObservation = {
+  observationKind: "price" | "valuation";
+  amountMinor: number;
+  unitPrice?: string | null;
+};
+
+// A sold-out holding is worth nothing, even if its last manual valuation was positive.
+export function observedHoldingValue(quantity: string, observation: ValuedObservation | null): number {
+  if (observation === null || canonicalDecimal(quantity) === "0") return 0;
+  return observation.observationKind === "valuation"
+    ? observation.amountMinor
+    : quantityValueMinor(quantity, observation.amountMinor, observation.unitPrice);
+}
+
 function assetCategory(category: string | null, kind: string): string {
   if (category) return category;
   if (kind === "commodity") return "Commodities";
@@ -83,11 +97,7 @@ export function positionHoldingValues(
   const instrument = findInstrument(raw, position.instrumentId);
   if (!instrument) throw new Error(`No instrument ${position.instrumentId}`);
   const observation = latestPositionObservation(raw, position.instrumentId, position.currency);
-  const valueMinor = observation === null
-    ? 0
-    : observation.observationKind === "valuation"
-      ? observation.amountMinor
-      : quantityValueMinor(position.quantity, observation.amountMinor, observation.unitPrice);
+  const valueMinor = observedHoldingValue(position.quantity, observation);
   const quantity = Number(position.quantity);
   if (!Number.isFinite(quantity)) throw new Error("Position quantity cannot be represented by assets");
   const spec = instrument.symbol ? pricedHolding(instrument.symbol) : null;

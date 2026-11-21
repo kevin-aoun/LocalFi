@@ -28,6 +28,14 @@ type Props = {
   range: { startKey: DateKey; endKey: DateKey };
 };
 
+function gainTone(cents: number) {
+  return cents > 0 ? "text-emerald-700 dark:text-emerald-400" : cents < 0 ? "text-destructive" : undefined;
+}
+
+function SignedMoney({ cents, currency }: { cents: number; currency: string }) {
+  return <>{cents > 0 ? "+" : ""}{formatMoney(cents, currency)}</>;
+}
+
 export function InvestmentPerformance({ rows, range }: Props) {
   const { enabled: privacyEnabled } = usePrivacyMode();
   const model = useMemo(() => buildInvestmentHistory(rows, range), [rows, range]);
@@ -65,7 +73,7 @@ export function InvestmentPerformance({ rows, range }: Props) {
               <div key={String(entry.dataKey)} className="flex items-center justify-between gap-5">
                 <span className="flex items-center gap-2 text-muted-foreground">
                   <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
-                  {item.label}{entry.dataKey === item.costKey ? " · net cash invested" : " · value"}
+                  {item.label}{entry.dataKey === item.costKey ? " · cost basis" : " · value"}
                 </span>
                 <span className="font-mono font-medium">
                   {formatMoney(cents, item.currency)}
@@ -85,8 +93,8 @@ export function InvestmentPerformance({ rows, range }: Props) {
       <CardHeader>
         <CardTitle>Investment performance</CardTitle>
         <CardDescription>
-          Solid lines show holding value; matching dashed lines show cash paid, including fees, minus net sale proceeds.
-          Above the dashed line means net positive. Click a holding to show or hide both lines.
+          Solid lines show market value; matching dashed lines show what the units still held cost, at average price including fees.
+          The gap is the unrealized gain. Sales move gains into realized; total return adds both. Click a holding to show or hide its lines.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -94,12 +102,17 @@ export function InvestmentPerformance({ rows, range }: Props) {
           <div className="mb-6 divide-y rounded-md border px-4" data-private-value>
             {model.summaries.map((item) => (
               <div key={item.key} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 py-3 text-sm">
-                <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} /><span className="font-medium">{item.label}</span></div>
+                <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} /><span className="font-medium">{item.label}</span>{item.closed && <span className="text-xs text-muted-foreground">Sold</span>}</div>
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-1 tabular-nums">
-                  <span>{formatMoney(item.valueCents, item.currency)} <span className="text-muted-foreground">value</span></span>
-                  <span className="text-muted-foreground">{item.costBasisCents === null ? "Purchase cost unavailable" : `${formatMoney(item.costBasisCents, item.currency)} net cash invested`}</span>
-                  {item.realizedGainCents !== null && <span className="text-muted-foreground">{formatMoney(item.realizedGainCents, item.currency)} realized</span>}
-                  {item.profitLossCents !== null && <span className={item.profitLossCents > 0 ? "font-medium text-emerald-700 dark:text-emerald-400" : item.profitLossCents < 0 ? "font-medium text-destructive" : "font-medium"}>{item.profitLossCents > 0 ? "+" : ""}{formatMoney(item.profitLossCents, item.currency)} · {item.profitLossCents > 0 ? "Net positive" : item.profitLossCents < 0 ? "Net negative" : "Break-even"}</span>}
+                  {!item.closed && <span>{formatMoney(item.valueCents, item.currency)} <span className="text-muted-foreground">value</span></span>}
+                  {item.costBasisCents === null
+                    ? <span className="text-muted-foreground">Cost unknown: opened without a cash purchase</span>
+                    : <>
+                        {!item.closed && <span className="text-muted-foreground">{formatMoney(item.costBasisCents, item.currency)} cost basis</span>}
+                        {!item.closed && <span className="text-muted-foreground"><SignedMoney cents={item.unrealizedGainCents!} currency={item.currency} /> unrealized</span>}
+                        {(item.closed || item.realizedGainCents !== 0) && <span className="text-muted-foreground"><SignedMoney cents={item.realizedGainCents!} currency={item.currency} /> realized</span>}
+                        <span className={cn("font-medium", gainTone(item.totalReturnCents!))}><SignedMoney cents={item.totalReturnCents!} currency={item.currency} /> total return</span>
+                      </>}
                 </div>
               </div>
             ))}
@@ -181,7 +194,7 @@ export function InvestmentPerformance({ rows, range }: Props) {
                       hide={hidden.has(item.key)}
                       isAnimationActive={false}
                     />,
-                    <Line key={item.costKey} type="stepAfter" dataKey={item.costKey} name={`${item.label} · cash invested`} stroke={item.color} strokeWidth={2} strokeDasharray="6 4" dot={false} connectNulls={false} hide={hidden.has(item.key)} isAnimationActive={false} />,
+                    <Line key={item.costKey} type="stepAfter" dataKey={item.costKey} name={`${item.label} · cost basis`} stroke={item.color} strokeWidth={2} strokeDasharray="6 4" dot={false} connectNulls={false} hide={hidden.has(item.key)} isAnimationActive={false} />,
                   ])}
                 </LineChart>
               </ChartContainer>

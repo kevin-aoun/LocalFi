@@ -1,10 +1,10 @@
 import type { Database } from "sql.js";
 
 import { isDateKey, type DateKey } from "@/lib/dates";
-import { quantityValueMinor } from "@/lib/investments/positions";
-import { sumCents, type Cents } from "@/lib/money";
+import { observedHoldingValue } from "@/lib/investments/positions";
+import type { Cents } from "@/lib/money";
 import { pricedHolding } from "@/lib/prices";
-import { readInvestmentReturns } from "@/lib/investments/returns";
+import { holdingKey, readHoldingReturns } from "@/lib/investments/returns";
 import { addCanonicalDecimals, canonicalDecimal } from "./decimal";
 
 type SqlValue = string | number | Uint8Array | null;
@@ -375,8 +375,9 @@ export function readPositionStates(
 }
 
 export type PositionValuation = ExactPositionState & {
+  /** Average cost of the units still held; null when an opening has no cash cost. */
+  costBasisCents: Cents | null;
   realizedGainCents: Cents | null;
-  cashInvestedMinor: number | null;
   assetId: number | null;
   archived: boolean;
   label: string;
@@ -419,8 +420,7 @@ export function readPositionValuations(
 ): PositionValuation[] {
   if (!isDateKey(asOfKey)) throw new Error(`Invalid asOfKey: ${asOfKey}`);
   const current = movementsInRange(readPortfolioMovements(raw, currentMovements), undefined, asOfKey);
-  const cashBasis = readPositionCashBasis(current);
-  const returns = readInvestmentReturns(current);
+  const returns = readHoldingReturns(current);
   const out: PositionValuation[] = [];
   for (const state of readPositionStates(raw, asOfKey, current)) {
     const instrument = rows(
@@ -446,14 +446,12 @@ export function readPositionValuations(
         WHERE instrument_id = ? AND currency = ? ORDER BY id LIMIT 1`,
       [state.instrumentId, state.currency],
     )[0];
-    const observedAmount = observation
-      ? safeInteger(observation.amount_minor, "observation amount")
-      : 0;
     const observationKind = observation?.observation_kind === "valuation" ? "valuation" : "price";
+    const holdingReturns = returns.get(holdingKey(state.instrumentId, state.currency));
     out.push({
       ...state,
-      cashInvestedMinor: cashBasis.get(`${state.instrumentId}\u0000${state.currency}`) ?? null,
-      realizedGainCents: returns.get(`${state.instrumentId}\u0000${state.currency}`)?.realizedGainCents ?? null,
+      costBasisCents: holdingReturns?.costBasisCents ?? null,
+      realizedGainCents: holdingReturns?.realizedGainCents ?? null,
       assetId: projection ? targetId(projection.id, "asset projection") : null,
       archived: projection ? Number(projection.archived) === 1 : false,
       label: instrument.category === "Crypto"
@@ -462,31 +460,14 @@ export function readPositionValuations(
       category: instrument.category == null ? "Other" : String(instrument.category),
       observationKind,
       observedDay: observation ? String(observation.observed_day) as DateKey : null,
-      valueMinor: !observation
-        ? 0
-        : observationKind === "valuation"
-        ? observedAmount
-        : quantityValueMinor(state.quantity, observedAmount, observation.unit_price == null ? null : String(observation.unit_price)),
+      valueMinor: observedHoldingValue(state.quantity, observation ? {
+        observationKind,
+        amountMinor: safeInteger(observation.amount_minor, "observation amount"),
+        unitPrice: observation.unit_price == null ? null : String(observation.unit_price),
+      } : null),
     });
   }
   return out;
-}
-
-// Opening valuations have no cash purchase to establish a break-even baseline.
-export function readPositionCashBasis(current: readonly CurrentLedgerMovement[]): Map<string, Cents | null> {
-  const cashChains = new Set(current.filter((row) => row.targetType === "real_account")
-    .map((row) => row.chainRootEventId));
-  const basis = new Map<string, Cents | null>();
-  for (const row of current) {
-    if (row.targetType !== "instrument") continue;
-    const key = `${row.instrumentId}\u0000${row.currency}`;
-    if (!cashChains.has(row.chainRootEventId) && !(row.amountMinor === 0 && row.quantityDelta?.startsWith("-"))) {
-      basis.set(key, null);
-    } else if (basis.get(key) !== null) {
-      basis.set(key, sumCents([basis.get(key) ?? 0, row.amountMinor]));
-    }
-  }
-  return basis;
 }
 
 export type PositionHistoryPoint = PositionValuation & { dateKey: DateKey };

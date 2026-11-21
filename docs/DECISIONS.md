@@ -100,8 +100,8 @@ This file records durable choices and rejected alternatives. See the
 - **Cash break-even includes fees.** A purchase posts principal plus fees as one
   cash outflow and instrument book amount. The original event records their
   split in `investmentCost` metadata. Reports derive each baseline from current
-  ledger purchase movements, including corrections, before filtering the display
-  range. Manual opening valuations without a cash purchase have no cash baseline.
+  ledger trade movements, including corrections, before filtering the display
+  range. Manual opening valuations without a cash purchase have no cost basis.
 - **One category-driven transaction form.** Categories configure optional stock,
   crypto, or commodity fields through `investment_kind`; renaming a category
   preserves that behavior. Stock, Crypto, and Commodities are supplied by default,
@@ -111,10 +111,15 @@ This file records durable choices and rejected alternatives. See the
 - **Ledger sales.** A sale records a negative exact quantity and credits its
   receiving account with units × frozen price minus fees. Instrument cash amounts
   use the same sign as cash invested: buys add cost, sales subtract net proceeds.
-  Reports compare remaining value to that net cash baseline and show realized
-  gains using weighted average acquisition cost, including fees. Unknown opening
-  costs remain unknown. Trades on one calendar day use that day's pooled purchase
-  cost before sales. Create, correction, confirmation and deletion reject negative
+  Reports plot market value against the weighted average cost of the units still
+  held, including buy fees, so the gap is the unrealized gain. A sale releases
+  its share of that cost and books the difference from net proceeds as realized
+  gain; total return adds both. A net-cash baseline was rejected because it goes
+  negative after profitable sales and double counts realized gains beside it.
+  Unknown opening costs remain unknown. Trades on one calendar day use that day's
+  pooled purchase cost before sales. A holding with zero units is worth zero, even
+  after a positive manual valuation; it leaves Home and the sidebar while Reports
+  keep its history, draw its drop to zero once, and report its realized gain. Create, correction, confirmation and deletion reject negative
   holdings at any effective calendar day, including later sales. Eventless trade
   drafts retain their price and fee split in `investment_draft` until confirmation
   moves those facts into immutable event metadata.
