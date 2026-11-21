@@ -19,7 +19,10 @@ This file records durable choices and rejected alternatives. See the
   replace full-disk encryption. Privileged or compromised processes can inspect
   an unlocked vault.
 - **Independent authorization.** `proxy.ts` improves stale-session UX; routes,
-  actions, and database access still fail closed independently.
+  actions, and database access still fail closed independently. Only explicit
+  activity touches the idle deadline; background reads and snapshots do not.
+  Resolve session authorization before entering the DB queue so locking can
+  close the database without a circular wait.
 - **Explicit export boundaries.** CSV and JSON are plaintext. Database exports
   remain encrypted. Each download states its boundary first.
 
