@@ -108,8 +108,7 @@ export class VaultSessionManager {
     this.authorization = null;
     this.sessions.clear();
     this.lastActivity = 0;
-    await closeDb();
-    if (authorization) destroyDatabaseVaultAuthorization(authorization);
+    await closeDb(authorization ?? undefined);
   }
 
   private async expireIfDue(): Promise<void> {
@@ -273,7 +272,7 @@ export class VaultSessionManager {
 
   async authorizationForToken(
     token: string | null | undefined,
-    touch = true,
+    touch = false,
   ): Promise<DatabaseVaultAuthorization | null> {
     return this.exclusive(async () => {
       if (!this.authorization) return null;
@@ -290,7 +289,7 @@ export class VaultSessionManager {
     });
   }
 
-  async authorizationForActiveVault(touch = true): Promise<DatabaseVaultAuthorization | null> {
+  async authorizationForActiveVault(touch = false): Promise<DatabaseVaultAuthorization | null> {
     return this.exclusive(async () => {
       if (!this.authorization) return null;
       if (this.clock.now() >= this.deadline()) {

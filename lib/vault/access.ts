@@ -69,7 +69,7 @@ export async function withActiveVaultAuthorization<T>(
 ): Promise<T> {
   if (fixtureAccess()) return task();
   const authorization = await vaultSessionManager.authorizationForActiveVault(
-    options.touch ?? true,
+    options.touch ?? false,
   );
   if (!authorization) throw new VaultLockedError();
   return authorizationContext.run(authorization, task);

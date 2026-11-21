@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   destroyDatabaseVaultAuthorization,
+  closeDb,
+  installDatabaseVaultAuthorizationProvider,
   readDb,
   unlockDatabaseVault,
   withDb,
@@ -26,6 +28,7 @@ let directory: string;
 let dbPath: string;
 let originalMode: string | undefined;
 let originalDbPath: string | undefined;
+let uninstallProvider: (() => void) | undefined;
 
 beforeEach(() => {
   directory = mkdtempSync(path.join(os.tmpdir(), "localfi-session-test-"));
@@ -37,7 +40,10 @@ beforeEach(() => {
   delete process.env.LOCALFI_VAULT_TEST_MODE;
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await closeDb();
+  uninstallProvider?.();
+  uninstallProvider = undefined;
   if (originalMode === undefined) delete process.env.LOCALFI_VAULT_TEST_MODE;
   else process.env.LOCALFI_VAULT_TEST_MODE = originalMode;
   if (originalDbPath === undefined) delete process.env.BUDGET_DB_PATH;
@@ -101,9 +107,9 @@ describe.sequential("single-owner vault sessions", () => {
     expect(manager.timeoutMinutes).toBe(15);
 
     advance(14 * 60_000);
-    expect(await manager.authorizationForToken(setup.token)).not.toBeNull();
+    expect(await manager.authorizationForToken(setup.token, true)).not.toBeNull();
     advance(14 * 60_000);
-    expect(await manager.authorizationForToken(setup.token)).not.toBeNull();
+    expect(await manager.authorizationForToken(setup.token, true)).not.toBeNull();
 
     advance(2 * 60_000);
     await manager.setInactivityTimeout(1);
@@ -118,6 +124,61 @@ describe.sequential("single-owner vault sessions", () => {
     expect(await manager.authorizationForActiveVault(false)).not.toBeNull();
     advance(60_001);
     expect(await manager.authorizationForToken(setup.token)).toBeNull();
+  });
+
+  it("expires despite background database reads, without deadlocking the first expired read", async () => {
+    const { manager, advance } = controlledManager();
+    const setup = await manager.setup(PASSPHRASE, dbPath);
+    await manager.setInactivityTimeout(1);
+    uninstallProvider = installDatabaseVaultAuthorizationProvider(() =>
+      manager.authorizationForToken(setup.token));
+
+    advance(30_000);
+    await expect(readDb(() => "background")).resolves.toBe("background");
+    advance(30_001);
+    await expect(readDb(() => "expired")).rejects.toBeInstanceOf(VaultLockedError);
+    expect(await manager.authorizationForActiveVault()).toBeNull();
+  });
+
+  it("serializes explicit locking with a simultaneous read and rejects subsequent access", async () => {
+    const { manager } = controlledManager();
+    const setup = await manager.setup(PASSPHRASE, dbPath);
+    uninstallProvider = installDatabaseVaultAuthorizationProvider(() =>
+      manager.authorizationForToken(setup.token));
+    await readDb(() => null);
+
+    const [read, locked] = await Promise.all([
+      readDb(() => "read").then(() => "read", (error: unknown) => error),
+      manager.lock(setup.token),
+    ]);
+    expect(read === "read" || read instanceof VaultLockedError).toBe(true);
+    expect(locked).toBe(true);
+    await expect(readDb(() => null)).rejects.toBeInstanceOf(VaultLockedError);
+  });
+
+  it("finishes an in-flight encrypted write before locking and destroying its key", async () => {
+    const { manager } = controlledManager();
+    const setup = await manager.setup(PASSPHRASE, dbPath);
+    uninstallProvider = installDatabaseVaultAuthorizationProvider(() => manager.authorizationForToken(setup.token));
+    let entered!: () => void;
+    let finish!: () => void;
+    const writing = new Promise<void>((resolve) => { entered = resolve; });
+    const release = new Promise<void>((resolve) => { finish = resolve; });
+    const write = withDb(async (_db, raw) => {
+      raw.run("INSERT INTO settings (id, user_name) VALUES (7, 'Synthetic writer')");
+      entered();
+      await release;
+    });
+    await writing;
+    const lock = manager.lock(setup.token);
+    finish();
+    await expect(write).resolves.toBeUndefined();
+    await expect(lock).resolves.toBe(true);
+    const token = await manager.unlock(PASSPHRASE, dbPath);
+    uninstallProvider();
+    uninstallProvider = installDatabaseVaultAuthorizationProvider(() => manager.authorizationForToken(token));
+    expect(await readDb((_db, raw) => raw.exec("SELECT user_name FROM settings WHERE id = 7")[0].values[0][0])).toBe("Synthetic writer");
+    await manager.lock(token);
   });
 
   it("loads the persisted timeout after a process-style restart and expires on it", async () => {

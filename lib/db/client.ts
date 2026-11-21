@@ -155,8 +155,7 @@ export function plaintextFixtureAccessAllowed(file = resolveDbPath()): boolean {
   return plaintextFixtureMode(file);
 }
 
-async function authorizedKey(file: string): Promise<UnlockedVaultKey> {
-  const authorization = await vaultRuntime.provider();
+function authorizedKey(file: string, authorization: DatabaseVaultAuthorization | null): UnlockedVaultKey {
   const state = authorization ? vaultAuthorizationStates.get(authorization) : undefined;
   if (!state || state.key.destroyed || path.resolve(state.file) !== path.resolve(file)) {
     throw new VaultLockedError();
@@ -457,11 +456,17 @@ function applySessionPragmas(raw: Database) {
 }
 
 
-async function ensureLoaded(): Promise<LoadedDb> {
+// Resolve the session before entering the DB queue: locking a session closes the DB.
+async function withAuthorizedDb<T>(task: (entry: LoadedDb) => Promise<T>): Promise<T> {
+  const authorization = plaintextFixtureMode(resolveDbPath()) ? null : await vaultRuntime.provider();
+  return runExclusive(async () => task(await ensureLoaded(authorization)));
+}
+
+async function ensureLoaded(authorization: DatabaseVaultAuthorization | null): Promise<LoadedDb> {
   for (;;) {
     const file = resolveDbPath();
     const plaintextFixture = plaintextFixtureMode(file);
-    const accessKey = plaintextFixture ? null : await authorizedKey(file);
+    const accessKey = plaintextFixture ? null : authorizedKey(file, authorization);
 
     if (dbRuntime.loaded) {
       if (dbRuntime.loaded.file !== file) {
@@ -629,8 +634,7 @@ async function flush(entry: LoadedDb) {
 
 
 export function withDb<T>(fn: BudgetDbCallback<T>): Promise<T> {
-  return runExclusive(async () => {
-    const entry = await ensureLoaded();
+  return withAuthorizedDb(async (entry) => {
     let transactionOpen = false;
     try {
 
@@ -661,8 +665,7 @@ export function withDb<T>(fn: BudgetDbCallback<T>): Promise<T> {
 
 
 export function readDb<T>(fn: BudgetDbCallback<T>): Promise<T> {
-  return runExclusive(async () => {
-    const entry = await ensureLoaded();
+  return withAuthorizedDb(async (entry) => {
     entry.lease.assertOwned();
     const result = await fn(entry.orm, entry.raw);
     entry.lease.assertOwned();
@@ -672,14 +675,12 @@ export function readDb<T>(fn: BudgetDbCallback<T>): Promise<T> {
 
 
 export async function getDb(): Promise<BudgetDb> {
-  const entry = await ensureLoaded();
-  return entry.orm;
+  return withAuthorizedDb(async (entry) => entry.orm);
 }
 
 
 export async function saveDb(): Promise<void> {
-  await runExclusive(async () => {
-    const entry = await ensureLoaded();
+  await withAuthorizedDb(async (entry) => {
     try {
       await flush(entry);
     } catch (error) {
@@ -695,8 +696,7 @@ export type EncryptedDatabaseGeneration = {
 };
 
 export function snapshotEncryptedDatabaseGeneration(): Promise<EncryptedDatabaseGeneration> {
-  return runExclusive(async () => {
-    const entry = await ensureLoaded();
+  return withAuthorizedDb(async (entry) => {
     if (entry.plaintextFixture) {
       throw new VaultLockedError("Plaintext fixtures cannot be exported as vault generations.");
     }
@@ -714,13 +714,15 @@ export function snapshotEncryptedDatabaseGeneration(): Promise<EncryptedDatabase
 }
 
 
-export async function closeDb(): Promise<void> {
+export async function closeDb(authorization?: DatabaseVaultAuthorization): Promise<void> {
   await runExclusive(async () => {
     if (dbRuntime.loading) await dbRuntime.loading.promise.catch(() => undefined);
     const entry = dbRuntime.loaded;
     dbRuntime.loaded = null;
-    if (entry) {
-      await disposeLoaded(entry);
+    try {
+      if (entry) await disposeLoaded(entry);
+    } finally {
+      if (authorization) destroyDatabaseVaultAuthorization(authorization);
     }
   });
 }
