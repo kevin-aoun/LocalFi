@@ -1,8 +1,16 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTempDb, execOn, type TempDb } from "./support/temp-db";
-import { GRAMS_PER_TROY_OUNCE } from "@/lib/prices";
-import { postAssetOpeningPosition } from "@/lib/investments";
+import { withDb } from "@/lib/db/client";
+import { GRAMS_PER_TROY_OUNCE, fetchHoldingValueCents, pricedHolding } from "@/lib/prices";
+import {
+  ensurePricedInstrument,
+  observationDay,
+  postAssetOpeningPosition,
+  projectPositionHolding,
+  recordInstrumentObservation,
+} from "@/lib/investments";
+import { tryParseAmount } from "@/lib/money";
 
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
@@ -13,11 +21,7 @@ const COINGECKO_OK = {
   ethereum: { usd: 3781.22 },
 };
 
-const {
-  createLivePricedAsset,
-  getLivePriceQuote,
-  updateLivePricedAsset,
-} = await import("../crypto");
+const { getLivePriceQuote, updateLivePricedAsset } = await import("../crypto");
 const { recordNetWorthToday } = await import("../accounts");
 const { calculateCommodityValue } = await import("../commodities");
 const { getAssets } = await import("../assets");
@@ -69,6 +73,48 @@ function holdingForm(over: Record<string, string> = {}) {
   return fd;
 }
 
+// Seeds a legacy live-priced holding the way the removed create action did, priced by the mocked feed.
+async function seedLiveHolding(
+  symbol: string,
+  quantity: number,
+  { notes = null, paidCents }: { notes?: string | null; paidCents?: number } = {},
+) {
+  const spec = pricedHolding(symbol)!;
+  const priced = await fetchHoldingValueCents(symbol, quantity, spec.defaultUnit);
+  if (!priced.ok) throw new Error(priced.error.message);
+  const observedAt = Math.floor(priced.quote.fetchedAt / 1000);
+  await withDb((_db, raw) => {
+    const instrument = ensurePricedInstrument(raw, symbol);
+    recordInstrumentObservation(raw, {
+      instrumentId: instrument.id,
+      observationKind: "price",
+      observedDay: observationDay(observedAt),
+      observedAt,
+      amountMinor: tryParseAmount(String(priced.quote.pricePerUnitUsd))!,
+      unitPrice: String(priced.quote.pricePerUnitUsd),
+      currency: "USD",
+      source: priced.quote.provider,
+    });
+    const assetId = Number(raw.exec(
+      `INSERT INTO assets (category, current_value_cents, currency, instrument_id, notes)
+       VALUES (?, ?, 'USD', ?, ?) RETURNING id`,
+      [spec.assetCategory, priced.valueCents, instrument.id, notes],
+    )[0].values[0][0]);
+    postAssetOpeningPosition(raw, {
+      assetId,
+      instrumentId: instrument.id,
+      currency: "USD",
+      quantity: String(quantity),
+      bookAmountMinor: paidCents ?? priced.valueCents,
+      effectiveDate: observationDay(observedAt),
+      description: `Opening position for ${spec.label}`,
+      recordedAt: observedAt,
+      source: "manual-live-holding",
+    });
+    projectPositionHolding(raw, instrument.id, "USD");
+  });
+}
+
 describe("getLivePriceQuote", () => {
   it("quotes proxied gold and bitcoin through the shared CoinGecko request", async () => {
     expect(await getLivePriceQuote("XAU")).toMatchObject({
@@ -94,120 +140,9 @@ describe("the legacy metals value wrapper", () => {
   });
 });
 
-describe("createLivePricedAsset", () => {
-  it("forces USD even when a caller tries to relabel the provider quote", async () => {
-    const result = await createLivePricedAsset(
-      holdingForm({ quantity: "1", currency: "EUR" }),
-    );
-    expect(result).toMatchObject({ success: true, data: { currency: "USD" } });
-    expect(storedAssets()[0].currency).toBe("USD");
-  });
-
-  it("stores a fractional bitcoin holding with its symbol, quantity and value", async () => {
-    const result = await createLivePricedAsset(
-      holdingForm({ quantity: "0.0345", notes: "cold wallet" }),
-    );
-
-    expect(result).toMatchObject({ success: true });
-    expect(storedAssets()).toEqual([
-      {
-        id: 1,
-        category: "Crypto",
-        current_value_cents: 408_590,
-        currency: "USD",
-        commodity_type: null,
-        price_symbol: "BTC",
-        quantity: 0.0345,
-        unit: "coins",
-        use_live_price: 1,
-        priced_at: expect.any(Number),
-      },
-    ]);
-    expect(temp.query("SELECT book_amount_minor FROM instrument_positions")).toEqual([
-      { book_amount_minor: 10_000 },
-    ]);
-  });
-
-  it("preserves manual crypto openings for audit without treating them as transaction inventory", async () => {
-    expect(await createLivePricedAsset(holdingForm({ quantity: "1", paidAmount: "" }))).toEqual({
-      error: "Enter what you paid for this coin.",
-    });
-    await createLivePricedAsset(holdingForm({ quantity: "1", paidAmount: "90000" }));
-    serve({ coingecko: { bitcoin: { usd: 100_000 } } });
-    await updateLivePricedAsset(1, holdingForm({ quantity: "1", paidAmount: "90000" }));
-    expect(temp.query("SELECT book_amount_minor FROM instrument_positions")).toEqual([
-      { book_amount_minor: 9_000_000 },
-    ]);
-    expect(storedAssets()[0]).toMatchObject({ current_value_cents: 10_000_000 });
-    expect(await getAssets()).toEqual([]);
-  });
-
-  it("files a metal under Commodities and keeps commodity_type working", async () => {
-    expect(
-      await createLivePricedAsset(holdingForm({ priceSymbol: "XAU", quantity: "1.1376", unit: "oz" })),
-    ).toMatchObject({ success: true });
-
-    expect(storedAssets()[0]).toMatchObject({
-      category: "Commodities",
-      commodity_type: "Gold",
-      price_symbol: "XAU",
-      current_value_cents: 377_180,
-      unit: "oz",
-    });
-  });
-
-  it("stores nothing at all when the price fetch fails", async () => {
-    serve({ status: 503 });
-    const result = await createLivePricedAsset(holdingForm({ quantity: "0.0345" }));
-
-    expect(result).toMatchObject({ error: expect.stringContaining("Bitcoin") });
-    expect(result).toMatchObject({ error: expect.stringContaining("stored value is kept") });
-    expect(storedAssets()).toEqual([]);
-  });
-
-  it("stores nothing when the machine is offline", async () => {
-    fetchMock.mockImplementation(async () => {
-      throw new TypeError("fetch failed");
-    });
-    const result = await createLivePricedAsset(holdingForm({ quantity: "1" }));
-    expect(result).toMatchObject({ error: expect.stringMatching(/offline|unreachable/i) });
-    expect(storedAssets()).toEqual([]);
-  });
-
-  it("accepts a quantity of exactly 0 and stores $0.00 deliberately", async () => {
-    const result = await createLivePricedAsset(holdingForm({ quantity: "0" }));
-    expect(result).toMatchObject({ success: true });
-    expect(storedAssets()[0]).toMatchObject({
-      price_symbol: "BTC",
-      quantity: 0,
-      current_value_cents: 0,
-    });
-  });
-
-  it("refuses an absent or unparseable quantity before touching the network", async () => {
-    expect(await createLivePricedAsset(holdingForm({}))).toEqual({
-      error: "Enter a quantity before enabling live pricing.",
-    });
-    expect(await createLivePricedAsset(holdingForm({ quantity: "  " }))).toMatchObject({
-      error: "Enter a quantity before enabling live pricing.",
-    });
-    expect(await createLivePricedAsset(holdingForm({ quantity: "one bitcoin" }))).toMatchObject({
-      error: expect.stringContaining("not a valid quantity"),
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(storedAssets()).toEqual([]);
-  });
-
-  it("refuses an unknown symbol", async () => {
-    expect(await createLivePricedAsset(holdingForm({ priceSymbol: "DOGE", quantity: "1" })))
-      .toMatchObject({ error: expect.stringContaining("live price") });
-    expect(storedAssets()).toEqual([]);
-  });
-});
-
 describe("updateLivePricedAsset", () => {
   it("re-prices an existing holding", async () => {
-    await createLivePricedAsset(holdingForm({ quantity: "0.0345" }));
+    await seedLiveHolding("BTC", 0.0345, { paidCents: 10_000 });
     const [before] = storedAssets();
 
     serve({ coingecko: { bitcoin: { usd: 100_000 }, ethereum: { usd: 3000 } } });
@@ -218,7 +153,7 @@ describe("updateLivePricedAsset", () => {
   });
 
   it("leaves the stored value untouched when the refresh fails", async () => {
-    await createLivePricedAsset(holdingForm({ quantity: "0.0345" }));
+    await seedLiveHolding("BTC", 0.0345, { paidCents: 10_000 });
     const [before] = storedAssets();
     expect(before.current_value_cents).toBe(408_590);
 
@@ -227,6 +162,61 @@ describe("updateLivePricedAsset", () => {
 
     expect(result).toMatchObject({ error: expect.stringContaining("stored value is kept") });
     expect(storedAssets()).toEqual([before]);
+  });
+
+  it("preserves manual crypto openings for audit without treating them as transaction inventory", async () => {
+    await seedLiveHolding("BTC", 1, { paidCents: 9_000_000 });
+    serve({ coingecko: { bitcoin: { usd: 100_000 } } });
+    await updateLivePricedAsset(1, holdingForm({ quantity: "1", paidAmount: "90000" }));
+    expect(temp.query("SELECT book_amount_minor FROM instrument_positions")).toEqual([
+      { book_amount_minor: 9_000_000 },
+    ]);
+    expect(storedAssets()[0]).toMatchObject({ current_value_cents: 10_000_000 });
+    expect(await getAssets()).toEqual([]);
+  });
+
+  it("forces USD even when a caller tries to relabel the provider quote", async () => {
+    await seedLiveHolding("BTC", 1, { paidCents: 10_000 });
+    const result = await updateLivePricedAsset(1, holdingForm({ quantity: "1", currency: "EUR" }));
+    expect(result).toMatchObject({ success: true, data: { currency: "USD" } });
+    expect(storedAssets()[0].currency).toBe("USD");
+  });
+
+  it("accepts a quantity of exactly 0 and stores $0.00 deliberately", async () => {
+    await seedLiveHolding("BTC", 0.0345, { paidCents: 10_000 });
+    const result = await updateLivePricedAsset(1, holdingForm({ quantity: "0" }));
+    expect(result).toMatchObject({ success: true });
+    expect(storedAssets()[0]).toMatchObject({
+      price_symbol: "BTC",
+      quantity: 0,
+      current_value_cents: 0,
+    });
+  });
+
+  it("refuses an absent or unparseable quantity before touching the network", async () => {
+    await seedLiveHolding("BTC", 0.0345, { paidCents: 10_000 });
+    const before = storedAssets();
+    fetchMock.mockClear();
+
+    expect(await updateLivePricedAsset(1, holdingForm({}))).toEqual({
+      error: "Enter a quantity before enabling live pricing.",
+    });
+    expect(await updateLivePricedAsset(1, holdingForm({ quantity: "  " }))).toMatchObject({
+      error: "Enter a quantity before enabling live pricing.",
+    });
+    expect(await updateLivePricedAsset(1, holdingForm({ quantity: "one bitcoin" }))).toMatchObject({
+      error: expect.stringContaining("not a valid quantity"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(storedAssets()).toEqual(before);
+  });
+
+  it("refuses an unknown symbol", async () => {
+    await seedLiveHolding("BTC", 0.0345, { paidCents: 10_000 });
+    const before = storedAssets();
+    expect(await updateLivePricedAsset(1, holdingForm({ priceSymbol: "DOGE", quantity: "1" })))
+      .toMatchObject({ error: expect.stringContaining("live price") });
+    expect(storedAssets()).toEqual(before);
   });
 
   it("refuses to touch a missing asset or the derived Cash row", async () => {
@@ -316,18 +306,10 @@ describe("recordNetWorthToday", () => {
   });
 
   it("refreshes every live-priced commodity and crypto holding in one request", async () => {
-    await createLivePricedAsset(
-      holdingForm({ priceSymbol: "XAU", quantity: "1", unit: "oz", notes: "Gold" }),
-    );
-    await createLivePricedAsset(
-      holdingForm({ priceSymbol: "XAG", quantity: "10", unit: "oz", notes: "Silver" }),
-    );
-    await createLivePricedAsset(
-      holdingForm({ priceSymbol: "BTC", quantity: "0.5", notes: "Bitcoin" }),
-    );
-    await createLivePricedAsset(
-      holdingForm({ priceSymbol: "ETH", quantity: "2", notes: "Ethereum" }),
-    );
+    await seedLiveHolding("XAU", 1, { notes: "Gold" });
+    await seedLiveHolding("XAG", 10, { notes: "Silver" });
+    await seedLiveHolding("BTC", 0.5, { notes: "Bitcoin", paidCents: 10_000 });
+    await seedLiveHolding("ETH", 2, { notes: "Ethereum", paidCents: 10_000 });
 
     fetchMock.mockClear();
     serve({
@@ -363,9 +345,7 @@ describe("recordNetWorthToday", () => {
   });
 
   it("keeps only the sixth and latest recording when run six times in one day", async () => {
-    await createLivePricedAsset(
-      holdingForm({ priceSymbol: "XAU", quantity: "1", notes: "Gold" }),
-    );
+    await seedLiveHolding("XAU", 1, { notes: "Gold" });
     fetchMock.mockClear();
     const openingEvents = temp.query("SELECT COUNT(*) AS count FROM ledger_events");
     const openingJournal = JSON.stringify({
@@ -408,9 +388,7 @@ describe("recordNetWorthToday", () => {
   });
 
   it("records the last stored value when the live quote is unavailable", async () => {
-    await createLivePricedAsset(
-      holdingForm({ priceSymbol: "XAU", quantity: "1", notes: "Gold" }),
-    );
+    await seedLiveHolding("XAU", 1, { notes: "Gold" });
     fetchMock.mockClear();
     serve({ status: 503 });
 
