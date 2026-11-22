@@ -89,40 +89,29 @@ function loadMigrationEntries(): MigrationEntry[] {
   });
 }
 
-function tableExists(db: Database, table: string): boolean {
+/** The object's SQL ("" when SQLite stores none), or null when it does not exist. */
+function schemaObject(db: Database, type: "table" | "trigger" | "index", name: string): string | null {
   const statement = db.prepare(
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+    "SELECT sql FROM sqlite_master WHERE type = ? AND name = ? LIMIT 1",
   );
   try {
-    statement.bind([table]);
-    return statement.step();
+    statement.bind([type, name]);
+    return statement.step() ? String(statement.get()[0] ?? "") : null;
   } finally {
     statement.free();
   }
+}
+
+function tableExists(db: Database, table: string): boolean {
+  return schemaObject(db, "table", table) !== null;
 }
 
 function triggerExists(db: Database, trigger: string): boolean {
-  const statement = db.prepare(
-    "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = ? LIMIT 1",
-  );
-  try {
-    statement.bind([trigger]);
-    return statement.step();
-  } finally {
-    statement.free();
-  }
+  return schemaObject(db, "trigger", trigger) !== null;
 }
 
 function indexExists(db: Database, index: string): boolean {
-  const statement = db.prepare(
-    "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ? LIMIT 1",
-  );
-  try {
-    statement.bind([index]);
-    return statement.step();
-  } finally {
-    statement.free();
-  }
+  return schemaObject(db, "index", index) !== null;
 }
 
 function columns(db: Database, table: string): Set<string> {
@@ -134,16 +123,7 @@ function columns(db: Database, table: string): Set<string> {
 }
 
 function tableDefinition(db: Database, table: string): string {
-  const statement = db.prepare(
-    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
-  );
-  try {
-    statement.bind([table]);
-    if (!statement.step()) return "";
-    return String(statement.get()[0] ?? "");
-  } finally {
-    statement.free();
-  }
+  return schemaObject(db, "table", table) ?? "";
 }
 
 function allOrNone(values: boolean[]): SchemaState {
@@ -246,17 +226,7 @@ function migrationState(db: Database, idx: number): SchemaState {
         columns(db, "asset_history").has("currency"),
         columns(db, "asset_history").has("recorded_day"),
         columns(db, "net_worth_snapshots").has("currency"),
-        (() => {
-          const statement = db.prepare(
-            "SELECT 1 FROM sqlite_master WHERE type = 'index' " +
-              "AND name = 'asset_history_asset_day_unique' LIMIT 1",
-          );
-          try {
-            return statement.step();
-          } finally {
-            statement.free();
-          }
-        })(),
+        indexExists(db, "asset_history_asset_day_unique"),
         tableDefinition(db, "asset_history").includes("asset_history_currency_valid"),
         tableDefinition(db, "asset_history").includes("asset_history_recorded_day_valid"),
       ];
