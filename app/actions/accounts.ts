@@ -728,21 +728,6 @@ export async function recordNetWorthToday() {
 }
 
 
-export async function deleteNetWorthSnapshot(dateKey: DateKey) {
-  try {
-    if (!isDateKey(dateKey)) throw new Error(`Invalid dateKey: ${String(dateKey)}`);
-    await withDb(async (db) => {
-      await db.delete(netWorthSnapshots).where(eq(netWorthSnapshots.date, dateKey));
-      await db.delete(assetHistory).where(eq(assetHistory.recordedDay, dateKey));
-    });
-    revalidate("/", "/accounts");
-    return { success: true as const, data: { dateKey } };
-  } catch (error) {
-    console.error("Failed to delete snapshot:", error);
-    return { error: (error as Error).message || "Failed to delete snapshot" };
-  }
-}
-
 function eventMetadata(raw: Database, eventId: string): CanonicalMetadata {
   const statement = raw.prepare("SELECT metadata_json FROM ledger_events WHERE event_id = ?");
   try {

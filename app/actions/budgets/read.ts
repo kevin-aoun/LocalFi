@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { asc } from "drizzle-orm";
 import { readDb } from "@/lib/db/client";
 import { budgets, type Budget } from "@/lib/db/schema";
 import {
@@ -31,16 +31,6 @@ export async function getBudgets(): Promise<Budget[]> {
     .select()
     .from(budgets)
     .orderBy(asc(budgets.displayOrder), asc(budgets.id)));
-}
-
-export async function getBudgetsForCategory(categoryId: number): Promise<Budget[]> {
-  return readDb((db) =>
-    db
-      .select()
-      .from(budgets)
-      .where(eq(budgets.categoryId, categoryId))
-      .orderBy(asc(budgets.effectiveFrom)),
-  );
 }
 
 function resolveDateKey(options?: { dateKey?: DateKey }): DateKey {

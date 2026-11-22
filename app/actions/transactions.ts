@@ -157,22 +157,6 @@ export async function getLedgerReportMovements() {
 }
 
 
-export async function getTransfers() {
-  return (await getTransactions()).filter((transaction) => transaction.direction === "transfer");
-}
-
-export async function syncCashAssetManually() {
-  try {
-    await withDb((db) => syncCashAssetWithin(db));
-    revalidate("/");
-    return { success: true };
-  } catch (error) {
-    console.error("Failed to sync cash asset:", error);
-    return { error: "Failed to sync cash asset" };
-  }
-}
-
-
 function requireCalendarDate(raw: FormDataEntryValue | null, label = "date"): Date {
   if (raw === null || raw === "") return new Date();
   if (typeof raw !== "string") throw new Error(`Invalid ${label}: expected a calendar day`);

@@ -340,60 +340,6 @@ export async function deleteBudget(id: number): Promise<ActionResult<{ id: numbe
 }
 
 
-export async function importLegacyBudgets(): Promise<ActionResult<{ created: number }>> {
-  try {
-    const created = await withDb(async (db) => {
-      const categoryRows = await db.select().from(categories);
-      const existing = await db.select().from(budgets);
-
-
-      const todayForCoverage = todayKey();
-      const covered = new Set(
-        existing
-          .filter((b) => b.period === "monthly")
-          .filter((b) => b.effectiveTo === null || b.effectiveTo >= todayForCoverage)
-          .map((b) => b.categoryId),
-      );
-      const txRows = await db.select().from(transactions);
-      const earliest = txRows.reduce<Date | null>(
-        (min, tx) => (min === null || tx.date < min ? tx.date : min),
-        null,
-      );
-      const effectiveFrom = earliest
-        ? periodContaining("monthly", toDateKey(earliest)).startKey
-        : todayKey();
-
-      let count = 0;
-      let nextOrder = existing.reduce(
-        (maximum, budget) => Math.max(maximum, budget.displayOrder),
-        -1,
-      ) + 1;
-      for (const category of categoryRows) {
-        if (category.type === "Income") continue;
-        if (category.monthlyLimitCents === null || covered.has(category.id)) continue;
-        await db.insert(budgets).values({
-          categoryId: category.id,
-          period: "monthly",
-          limitCents: category.monthlyLimitCents,
-          effectiveFrom,
-          effectiveTo: null,
-          rollover: false,
-          displayOrder: nextOrder++,
-        });
-        count++;
-      }
-      return count;
-    });
-
-    revalidate("/budgets");
-    return { success: true, data: { created } };
-  } catch (error) {
-    console.error("Failed to import legacy budgets:", error);
-    return { error: (error as Error).message || "Failed to import legacy budgets" };
-  }
-}
-
-
 function previousDayKey(key: DateKey): DateKey {
   const [y, m, d] = key.split("-").map(Number);
   return toDateKey(new Date(y, m - 1, d - 1));

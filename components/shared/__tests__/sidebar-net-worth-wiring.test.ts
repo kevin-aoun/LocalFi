@@ -11,7 +11,8 @@ import {
 } from "@/app/actions/__tests__/support/domain-fixture";
 import { getAccountBalances, getNetWorth } from "@/app/actions/accounts";
 import { getAssets } from "@/app/actions/assets";
-import { syncCashAssetManually } from "@/app/actions/transactions";
+import { withDb } from "@/lib/db/client";
+import { syncCashAssetWithin } from "@/lib/db/sync-cash";
 import { todayKey } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { buildSidebarView, type SidebarViewInput } from "../sidebar-assets";
@@ -73,8 +74,7 @@ describe("the sidebar cannot disagree with the home page", () => {
     seedTransaction(temp, { categoryId: 2, accountId: 1, amountCents: 250_000, dateKey: todayKey() });
     seedAsset(temp, { category: "Savings", currentValueCents: 25_000 });
 
-    const synced = await syncCashAssetManually();
-    expect(synced).not.toHaveProperty("error");
+    await withDb((db) => syncCashAssetWithin(db));
 
     const input = await loadSidebarInput();
     const view = buildSidebarView(input);
