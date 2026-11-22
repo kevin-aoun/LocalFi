@@ -125,12 +125,29 @@ describe("investment inventory comes from transaction movements", () => {
     expect((await verifyLedger()).failures).toEqual([]);
   });
 
-  it("refuses to delete an opening holding with purchases still attached", async () => {
+  it("deletes a holding together with its buys and sells, and gives their cash back", async () => {
     await opening("XAU", false);
     await createTransaction(purchase("XAU", "1.25"));
+    await createTransaction(purchase("XAU", "0.5", { investmentSide: "sell", date: "2026-06-02" }));
     const [holding] = (await getAssets()).filter((row) => row.priceSymbol === "XAU");
-    expect(await deleteAsset(holding.id, { confirmed: true })).toHaveProperty("error");
-    expect((await getAssets()).find((row) => row.id === holding.id)?.quantityExact).toBe("5");
+    expect(holding.quantityExact).toBe("4.5");
+
+    expect(await deleteAsset(holding.id, { confirmed: true })).toMatchObject({ success: true });
+    expect((await getAssets()).filter((row) => row.priceSymbol === "XAU")).toEqual([]);
+    expect(await getTransactions()).toEqual([]);
+    expect(await getNetWorth()).toMatchObject({ aggregate: { netWorthCents: 200_000 } });
+    expect((await verifyLedger()).failures).toEqual([]);
+  });
+
+  it("deletes only the chosen holding when an opening and a purchase hold the same metal separately", async () => {
+    await opening("XAU", true);
+    const bought = await createTransaction(purchase("XAU", "1.25"));
+    if ("error" in bought) throw new Error(bought.error);
+    const legacy = (await getAssets()).find((row) => row.instrumentId === "instrument:legacy-asset:fixture-XAU")!;
+
+    expect(await deleteAsset(legacy.id, { confirmed: true })).toMatchObject({ success: true });
+    expect((await getAssets()).filter((row) => row.priceSymbol === "XAU")).toMatchObject([{ quantityExact: "1.25" }]);
+    expect((await getTransactions()).map((row) => row.id)).toEqual([bought.data.id]);
     expect((await verifyLedger()).failures).toEqual([]);
   });
 
