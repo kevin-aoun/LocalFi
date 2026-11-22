@@ -334,6 +334,40 @@ describe("lock lifecycle", () => {
     await withDb((_db, raw) => raw.run("INSERT INTO items (name) VALUES ('kept')"));
     expect(await readNames(dbPath)).toEqual(["kept", "seed"]);
   });
+
+  it("keeps the cached image after a rolled-back callback error instead of reloading", async () => {
+    await seedItemsDb(["seed"]);
+    const cached = await readDb((_db, raw) => raw);
+
+    await expect(
+      withDb((_db, raw) => {
+        raw.run("INSERT INTO items (name) VALUES ('rejected')");
+        throw new Error("validation failed");
+      }),
+    ).rejects.toThrow("validation failed");
+
+    expect(await readDb((_db, raw) => raw)).toBe(cached);
+    expect(await readDb((_db, raw) => raw.exec("SELECT name FROM items")[0].values)).toEqual([
+      ["seed"],
+    ]);
+  });
+
+  it("disposes the cached image when the flush after COMMIT fails", async () => {
+    await seedItemsDb(["seed"]);
+    const cached = await readDb((_db, raw) => raw);
+    const backup = `${dbPath}.bak`;
+    mkdirSync(backup);
+
+    await expect(
+      withDb((_db, raw) => raw.run("INSERT INTO items (name) VALUES ('doomed')")),
+    ).rejects.toThrow(/Could not refresh recoverable database backup/);
+    rmSync(backup, { recursive: true, force: true });
+
+    expect(await readDb((_db, raw) => raw)).not.toBe(cached);
+    expect(await readDb((_db, raw) => raw.exec("SELECT name FROM items")[0].values)).toEqual([
+      ["seed"],
+    ]);
+  });
 });
 
 describe("readDb", () => {
