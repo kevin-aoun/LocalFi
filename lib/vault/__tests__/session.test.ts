@@ -13,7 +13,6 @@ import {
   withDb,
 } from "../../db/client";
 import { buildInitialDatabaseImage } from "../../db/init";
-import { withDatabaseVaultAuthorization } from "../access";
 import { decryptVaultGeneration, destroyVaultKey, unlockVaultEnvelopeWithRecovery } from "../envelope";
 import { VaultLockedError, VaultPermissionError } from "../errors";
 import {
@@ -97,14 +96,12 @@ describe.sequential("single-owner vault sessions", () => {
     expect(await manager.authorizationForToken("forged")).toBeNull();
     expect(await manager.authorizationForToken(setup.token)).not.toBeNull();
     expect(await manager.status(dbPath)).toBe("unlocked");
-    await expect(Promise.resolve().then(() =>
-      withDatabaseVaultAuthorization(null, () => readDb(() => null))
-    ))
-      .rejects.toBeInstanceOf(VaultLockedError);
-    const authorization = await manager.authorizationForToken(setup.token);
-    expect(await withDatabaseVaultAuthorization(authorization, () =>
-      readDb((_db, raw) => Number(raw.exec("SELECT COUNT(*) FROM categories")[0].values[0][0]))
-    )).toBe(18);
+    uninstallProvider = installDatabaseVaultAuthorizationProvider(() => manager.authorizationForToken("forged"));
+    await expect(readDb(() => null)).rejects.toBeInstanceOf(VaultLockedError);
+    uninstallProvider();
+    uninstallProvider = installDatabaseVaultAuthorizationProvider(() => manager.authorizationForToken(setup.token));
+    expect(await readDb((_db, raw) => Number(raw.exec("SELECT COUNT(*) FROM categories")[0].values[0][0])))
+      .toBe(18);
 
     const restarted = new VaultSessionManager();
     expect(await restarted.authorizationForToken(setup.token)).toBeNull();
@@ -199,11 +196,10 @@ describe.sequential("single-owner vault sessions", () => {
   it("loads the persisted timeout after a process-style restart and expires on it", async () => {
     const first = controlledManager();
     const setup = await first.manager.setup(PASSPHRASE, dbPath);
-    const authorization = await first.manager.authorizationForToken(setup.token, false);
-    await withDatabaseVaultAuthorization(authorization, async () => {
-      await withDb((_db, raw) => {
-        raw.run("INSERT INTO settings (id, idle_timeout_minutes) VALUES (7, 1)");
-      });
+    uninstallProvider = installDatabaseVaultAuthorizationProvider(() =>
+      first.manager.authorizationForToken(setup.token, false));
+    await withDb((_db, raw) => {
+      raw.run("INSERT INTO settings (id, idle_timeout_minutes) VALUES (7, 1)");
     });
     await first.manager.lock(setup.token);
 

@@ -39,17 +39,35 @@ afterEach(async () => {
 
 describe("record-today entry points", () => {
   it("routes both buttons and the scheduled endpoint through one service", () => {
-    const sources = [
+    const [shared, home, accountsPage, route] = [
+      "components/dashboard/net-worth-shared.tsx",
       "components/dashboard/net-worth-section.tsx",
       "app/(dashboard)/accounts/accounts-client.tsx",
       "app/api/snapshot/route.ts",
     ].map((file) => readFileSync(path.join(projectRoot, file), "utf8"));
 
-    for (const source of sources.slice(0, 2)) {
-      expect(source).toMatch(/await recordNetWorthToday\(\)/);
+    expect(shared).toMatch(/await recordNetWorthToday\(\)/);
+    for (const source of [home, accountsPage]) {
+      expect(source).toMatch(/useRecordNetWorthToday\(/);
+      expect(source).not.toMatch(/\brecordNetWorthToday\(/);
     }
-    expect(sources[2]).toMatch(/withActiveVaultAuthorization\(\(\) => recordNetWorthToday\(\)\)/);
-    expect(sources[2]).not.toMatch(/refreshLivePricedAssets/);
+    expect(route).toMatch(/withActiveVaultAuthorization\(\(\) => recordNetWorthToday\(\)\)/);
+    expect(route).not.toMatch(/refreshLivePricedAssets/);
+  });
+
+  it("keeps one copy of the net-worth buckets, rendered inside the privacy-masked page", () => {
+    const [shared, home, accountsPage] = [
+      "components/dashboard/net-worth-shared.tsx",
+      "components/dashboard/net-worth-section.tsx",
+      "app/(dashboard)/accounts/accounts-client.tsx",
+    ].map((file) => readFileSync(path.join(projectRoot, file), "utf8"));
+
+    for (const source of [home, accountsPage]) {
+      expect(source).toMatch(/from "(@\/components\/dashboard|\.)\/net-worth-shared"/);
+      expect(source).not.toMatch(/function (formatDateKey|bucketLabel|BucketValues)\b|type BucketMoneyField\b/);
+    }
+    expect(shared).toMatch(/formatMoney\(total\[field\], total\.currency\)/);
+    expect(shared).not.toMatch(/data-privacy-exempt|data-private-chart/);
   });
 });
 

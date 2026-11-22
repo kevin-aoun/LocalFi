@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { Database, SqlValue } from "sql.js";
 
+import { allRows } from "@/lib/db/sql";
 import { toDateKey } from "@/lib/dates";
 import { canonicalDecimal } from "@/lib/ledger/decimal";
 import { canonicalStringify } from "@/lib/ledger/canonical";
@@ -10,20 +11,6 @@ import { postLedgerEventRaw } from "@/lib/ledger/post-event";
 import { recordInstrumentObservation } from "@/lib/investments/observations";
 import { projectAllPositionHoldings } from "@/lib/investments/positions";
 import { registerLedgerAccount } from "@/lib/ledger/targets";
-
-type Row = Record<string, SqlValue>;
-
-function rows(raw: Database, query: string, parameters: SqlValue[] = []): Row[] {
-  const statement = raw.prepare(query);
-  try {
-    statement.bind(parameters);
-    const result: Row[] = [];
-    while (statement.step()) result.push(statement.getAsObject());
-    return result;
-  } finally {
-    statement.free();
-  }
-}
 
 function executeMigrationSql(raw: Database, sql: string): void {
   for (const statement of sql.split("--> statement-breakpoint")) {
@@ -87,7 +74,7 @@ function openingDateEvidence(
 ): OpeningDateEvidence {
   if (linkedTransactionIds.length > 0) {
     const placeholders = linkedTransactionIds.map(() => "?").join(", ");
-    const candidates = rows(
+    const candidates = allRows(
       raw,
       `SELECT id, date FROM transactions
        WHERE pending = 0 AND id IN (${placeholders})
@@ -161,7 +148,7 @@ function categoryTarget(raw: Database, id: number | null, currency: string, crea
 }
 
 function backfillAccounts(raw: Database): void {
-  for (const account of rows(
+  for (const account of allRows(
     raw,
     `SELECT id, kind, opening_balance_cents, opening_balance_date, currency, created_at, updated_at
      FROM accounts ORDER BY opening_balance_date, id`,
@@ -220,7 +207,7 @@ function instrumentKind(category: string): "security" | "commodity" | "manual" {
 }
 
 function backfillAssets(raw: Database): void {
-  for (const asset of rows(
+  for (const asset of allRows(
     raw,
     `SELECT id, category, current_value_cents, currency, quantity, unit, price_symbol,
             linked_transaction_ids, created_at
@@ -321,12 +308,12 @@ function backfillAssets(raw: Database): void {
 
 function backfillTransactions(raw: Database): void {
   const accountCurrencies = new Map<number, string>(
-    rows(raw, "SELECT id, currency FROM accounts").map((row) => [
+    allRows(raw, "SELECT id, currency FROM accounts").map((row) => [
       asSafeInteger(row.id, "account id"),
       isoCurrency(row.currency),
     ]),
   );
-  for (const transaction of rows(
+  for (const transaction of allRows(
     raw,
     `SELECT id, date, category_id, account_id, transfer_account_id, amount_cents,
             direction, currency, comment, pending, recurring_id, recurring_occurrence,

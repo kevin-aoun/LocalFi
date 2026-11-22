@@ -607,7 +607,12 @@ describe("no calendar day is serialized through UTC", () => {
   }
 
   it("the accounts page renders DateKeys through lib/dates", () => {
-    expect(read("app/(dashboard)/accounts/accounts-client.tsx")).toMatch(/fromDateKey/);
+    expect(read("app/(dashboard)/accounts/accounts-client.tsx")).toMatch(
+      /import \{[^}]*\bformatDateKey\b[^}]*\} from "@\/components\/dashboard\/net-worth-shared"/,
+    );
+    const shared = stripComments(read("components/dashboard/net-worth-shared.tsx"));
+    expect(shared).toMatch(/fromDateKey/);
+    expect(shared).not.toMatch(/toISOString\(\)/);
   });
 });
 

@@ -19,11 +19,10 @@ import {
   type BudgetReallocationRow,
   type BudgetRow,
 } from "@/lib/budgets";
-import { isDateKey, todayKey, type DateKey } from "@/lib/dates";
+import { todayKey, type DateKey } from "@/lib/dates";
 import { parseAmount, type Cents } from "@/lib/money";
 import { readCategoryMovements } from "@/lib/ledger";
-
-export type ActionResult<T> = { success: true; data: T } | { error: string };
+import { str } from "../shared";
 
 export type BudgetPerformanceRow = BudgetPeriodResult & {
   categoryName: string;
@@ -38,25 +37,11 @@ export type BudgetPerformanceRow = BudgetPeriodResult & {
   effectiveTo?: DateKey | null;
 };
 
-export function str(formData: FormData, key: string): string | null {
-  const raw = formData.get(key);
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  return trimmed === "" ? null : trimmed;
-}
-
 export function parsePeriod(value: string | null): BudgetPeriod {
   if (!value || !(budgetPeriods as readonly string[]).includes(value)) {
     throw new Error(`Invalid budget period: ${String(value)}. Expected one of ${budgetPeriods.join(", ")}`);
   }
   return value as BudgetPeriod;
-}
-
-export function requireDateKey(value: string | null, label: string): DateKey {
-  if (!isDateKey(value)) {
-    throw new Error(`Invalid ${label}: expected 'YYYY-MM-DD', received ${JSON.stringify(value)}`);
-  }
-  return value;
 }
 
 export type BudgetGoalFields = {

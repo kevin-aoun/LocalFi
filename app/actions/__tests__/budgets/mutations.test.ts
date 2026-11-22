@@ -15,9 +15,7 @@ import {
   deleteBudget,
   getBudgetHistory,
   getBudgets,
-  getBudgetsForCategory,
   getSpendVsBudget,
-  importLegacyBudgets,
   reorderBudgets,
   updateBudget,
 } from "@/app/actions/budgets";
@@ -27,6 +25,10 @@ const SALARY = 2;
 const TRANSPORT = 3;
 
 let temp: DomainDb;
+
+async function budgetsForCategory(categoryId: number) {
+  return (await getBudgets()).filter((budget) => budget.categoryId === categoryId);
+}
 
 beforeEach(async () => {
   temp = await createDomainDb();
@@ -81,21 +83,6 @@ describe("legacy categories.monthly_limit_cents", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].periodKey).toBe("2025-06");
     expect(rows[0].spentCents).toBe(100);
-  });
-
-  it("can be promoted into real budget rows, idempotently", async () => {
-    seedCategory(temp, { id: 4, name: "Entertainment", type: "Expense", monthlyLimitCents: 2_000 });
-    seedCategory(temp, { id: 5, name: "Gifts", type: "Expense", monthlyLimitCents: 5_000 });
-    spend("2025-06-27", 100, 4);
-
-    expect(unwrap(await importLegacyBudgets()).created).toBe(2);
-    expect(unwrap(await importLegacyBudgets()).created).toBe(0);
-
-    const rows = await getBudgets();
-    expect(rows.map((r) => [r.categoryId, r.limitCents, r.effectiveFrom])).toEqual([
-      [4, 2_000, "2025-06-01"],
-      [5, 5_000, "2025-06-01"],
-    ]);
   });
 });
 
@@ -157,7 +144,7 @@ describe("an Income category cannot have a budget", () => {
     ).toMatchObject({ error: expect.stringMatching(/can't have a budget/i) });
 
     // The pre-existing row is untouched: not closed, not duplicated.
-    expect((await getBudgetsForCategory(SALARY)).map((b) => [b.id, b.limitCents, b.effectiveTo])).toEqual([
+    expect((await budgetsForCategory(SALARY)).map((b) => [b.id, b.limitCents, b.effectiveTo])).toEqual([
       [7, 400_000, null],
     ]);
   });
@@ -168,13 +155,13 @@ describe("an Income category cannot have a budget", () => {
     expect(await updateBudget(7, form({ limit: "999.00" }))).toMatchObject({
       error: expect.stringMatching(/can't have a budget/i),
     });
-    expect((await getBudgetsForCategory(SALARY))[0].limitCents).toBe(400_000);
+    expect((await budgetsForCategory(SALARY))[0].limitCents).toBe(400_000);
   });
 
   it("deleteBudget still removes a stranded row — that IS the way out", async () => {
     seedBudget(temp, { id: 7, categoryId: SALARY, period: "monthly", limitCents: 400_000, effectiveFrom: "2026-01-01" });
     unwrap(await deleteBudget(7));
-    expect(await getBudgetsForCategory(SALARY)).toEqual([]);
+    expect(await budgetsForCategory(SALARY)).toEqual([]);
   });
 
   it("does not read a legacy monthly_limit_cents on an income category as a budget", async () => {
@@ -183,17 +170,6 @@ describe("an Income category cannot have a budget", () => {
 
     const rows = await getSpendVsBudget({ dateKey: "2026-07-28" });
     expect(rows.find((r) => r.categoryId === 20)).toBeUndefined();
-  });
-
-  it("importLegacyBudgets skips an income category", async () => {
-    seedCategory(temp, { id: 20, name: "Bonus", type: "Income", monthlyLimitCents: 100_000 });
-    seedCategory(temp, { id: 21, name: "Utilities", type: "Expense", monthlyLimitCents: 20_000 });
-
-    // Only the expense limit is converted; converting the income one would
-    // create exactly the row createBudget refuses.
-    expect(unwrap(await importLegacyBudgets()).created).toBe(1);
-    expect((await getBudgets()).map((b) => [b.categoryId, b.limitCents])).toEqual([[21, 20_000]]);
-    expect(await getBudgetsForCategory(20)).toEqual([]);
   });
 
   it("keeps a stranded income row out of history as well as the current period", async () => {
@@ -354,7 +330,7 @@ describe("updateBudget / deleteBudget", () => {
       rollover: true,
     });
     expect(temp.scalar("SELECT monthly_limit_cents FROM categories WHERE id = 9")).toBeNull();
-    expect(await getBudgetsForCategory(9)).toHaveLength(1);
+    expect(await budgetsForCategory(9)).toHaveLength(1);
   });
 });
 
@@ -405,24 +381,6 @@ describe("coverage and guard regressions", () => {
     // and its $40 limit could not be recovered without editing the database.
     expect(subscriptions).toHaveLength(1);
     expect(subscriptions[0].limitCents).toBe(4_000);
-  });
-
-  it("importLegacyBudgets converts a limit that a closed budget was masking", async () => {
-    spend("2026-01-05", 1_000);  // anchor earliestKey; see above
-    seedCategory(temp, { id: 10, name: "Utilities", type: "Expense", monthlyLimitCents: 20_000 });
-    seedBudget(temp, {
-      id: 51,
-      categoryId: 10,
-      period: "monthly",
-      limitCents: 1_000,
-      effectiveFrom: "2026-02-01",
-      effectiveTo: "2026-02-28",
-    });
-
-    const { created } = unwrap(await importLegacyBudgets());
-    expect(created).toBeGreaterThanOrEqual(1);
-    const converted = (await getBudgetsForCategory(10)).filter((b) => b.limitCents === 20_000);
-    expect(converted).toHaveLength(1);
   });
 
   it("still treats an IN-FORCE budget as covering the category", async () => {

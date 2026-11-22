@@ -15,7 +15,6 @@ import {
   assignOrphanTransactions,
   createAccount,
   deleteAccount,
-  deleteNetWorthSnapshot,
   getAccountBalances,
   getAccounts,
   getDashboardData,
@@ -27,7 +26,7 @@ import {
   snapshotNetWorth,
   updateAccount,
 } from "@/app/actions/accounts";
-import { createTransaction, createTransfer, getTransfers, updateTransfer } from "@/app/actions/transactions";
+import { createTransaction, createTransfer, getTransactions, updateTransfer } from "@/app/actions/transactions";
 import { todayKey } from "@/lib/dates";
 import { verifyLedger } from "@/lib/ledger";
 
@@ -47,6 +46,10 @@ afterEach(async () => {
 function unwrap<T>(result: { success: true; data: T } | { error: string }): T {
   if ("error" in result) throw new Error(`action failed: ${result.error}`);
   return result.data;
+}
+
+async function getTransfers() {
+  return (await getTransactions()).filter((transaction) => transaction.direction === "transfer");
 }
 
 function balanceOf(rows: Awaited<ReturnType<typeof getAccountBalances>>, name: string) {
@@ -453,7 +456,7 @@ describe("createTransfer", () => {
     expect(await getTransfers()).toHaveLength(before);
   });
 
-  it("is listed by getTransfers and excluded from the derived Cash figure", async () => {
+  it("is listed as a transfer and excluded from the derived Cash figure", async () => {
     await createTransfer(form({ fromAccountId: 1, toAccountId: 2, amount: "1000.00", date: "2026-07-10" }));
     expect(await getTransfers()).toHaveLength(1);
     // 500000 income; the transfer contributes nothing.
@@ -585,9 +588,6 @@ describe("snapshotNetWorth", () => {
       { value_cents: 532_371 },
       { value_cents: 7_000 },
     ]);
-
-    unwrap(await deleteNetWorthSnapshot(day));
-    expect(temp.query("SELECT * FROM asset_history")).toEqual([]);
   });
 
   it("accrues history across days, oldest first", async () => {
@@ -622,12 +622,6 @@ describe("snapshotNetWorth", () => {
     expect(await snapshotNetWorth({ dateKey: "2026-13-99" })).toMatchObject({
       error: expect.stringMatching(/dateKey/),
     });
-  });
-
-  it("can delete one day", async () => {
-    await snapshotNetWorth({ dateKey: "2026-07-28" });
-    unwrap(await deleteNetWorthSnapshot("2026-07-28"));
-    expect(await getNetWorthHistory()).toEqual([]);
   });
 });
 
@@ -734,6 +728,18 @@ describe("assignOrphanTransactions", () => {
     const verification = await verifyLedger();
     expect(verification.failures).toEqual([]);
     expect(verification.ok).toBe(true);
+  });
+
+  it("reassigns a legacy orphan that has no category", async () => {
+    seedTransaction(temp, { id: 85, categoryId: null, accountId: null, amountCents: 2_500, dateKey: "2026-07-01" });
+
+    expect(unwrap(await assignOrphanTransactions(1))).toEqual({ moved: 1 });
+
+    expect(temp.query("SELECT account_id, category_id FROM transactions WHERE id = 85"))
+      .toEqual([{ account_id: 1, category_id: null }]);
+    expect(balanceOf(await getAccountBalances(), "Main").balanceCents).toBe(-2_500);
+    expect((await getNetWorth()).unassignedCents).toBe(0);
+    expect(await verifyLedger()).toMatchObject({ ok: true, failures: [] });
   });
 
   it("rolls the whole reassignment batch back when a posted orphan is corrupt", async () => {

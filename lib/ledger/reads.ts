@@ -1,26 +1,12 @@
-import type { Database } from "sql.js";
+import type { Database, SqlValue } from "sql.js";
 
+import { allRows, type SqlRow } from "@/lib/db/sql";
 import { isDateKey, type DateKey } from "@/lib/dates";
 import { observedHoldingValue } from "@/lib/investments/positions";
 import type { Cents } from "@/lib/money";
 import { pricedHolding } from "@/lib/prices";
 import { holdingKey, readHoldingReturns } from "@/lib/investments/returns";
 import { addCanonicalDecimals, canonicalDecimal } from "./decimal";
-
-type SqlValue = string | number | Uint8Array | null;
-type Row = Record<string, SqlValue>;
-
-function rows(raw: Database, sql: string, params: Array<string | number> = []): Row[] {
-  const statement = raw.prepare(sql);
-  try {
-    statement.bind(params);
-    const out: Row[] = [];
-    while (statement.step()) out.push(statement.getAsObject() as Row);
-    return out;
-  } finally {
-    statement.free();
-  }
-}
 
 function safeInteger(value: SqlValue, label: string): number {
   const parsed = Number(value);
@@ -78,7 +64,7 @@ export function readCurrentMovements(
   options: { fromKey?: DateKey; toKey?: DateKey } = {},
 ): CurrentLedgerMovement[] {
   validateRange(options.fromKey, options.toKey);
-  const events = rows(
+  const events = allRows(
     raw,
     `SELECT event_id, sequence, effective_date, amends_event_id
        FROM ledger_events ORDER BY sequence`,
@@ -101,7 +87,7 @@ export function readCurrentMovements(
     childByParent.set(event.amendsEventId, event);
   }
 
-  const movementRows = rows(
+  const movementRows = allRows(
     raw,
     `SELECT m.event_id, m.position, m.ledger_account_id, m.amount_minor, m.currency,
             m.quantity_delta, la.target_type, la.target_ref, la.instrument_id
@@ -110,7 +96,7 @@ export function readCurrentMovements(
        JOIN ledger_accounts la ON la.id = m.ledger_account_id
       ORDER BY e.sequence, m.position`,
   );
-  const movementsByEvent = new Map<string, Row[]>();
+  const movementsByEvent = new Map<string, SqlRow[]>();
   for (const movement of movementRows) {
     const eventId = String(movement.event_id);
     const bucket = movementsByEvent.get(eventId) ?? [];
@@ -405,7 +391,7 @@ export function readPortfolioMovements(
   raw: Database,
   current: readonly CurrentLedgerMovement[] = readCurrentMovements(raw),
 ): CurrentLedgerMovement[] {
-  const openings = rows(raw, `
+  const openings = allRows(raw, `
     SELECT DISTINCT e.event_id, a.instrument_id, i.category, i.symbol, m.currency
       FROM ledger_events e
       JOIN ledger_movements m ON m.event_id = e.event_id
@@ -428,7 +414,7 @@ export function readPortfolioMovements(
 
 
 // Priced holdings show their ticker (XAU, BTC, NVDA), whether a trade or an import created the instrument.
-function holdingLabel(instrument: Row): string {
+function holdingLabel(instrument: SqlRow): string {
   const spec = pricedHolding(instrument.symbol);
   if (!spec) return String(instrument.label);
   return spec.symbol.startsWith("STOCK:") ? spec.label : spec.symbol;
@@ -444,13 +430,13 @@ export function readPositionValuations(
   const returns = readHoldingReturns(current);
   const out: PositionValuation[] = [];
   for (const state of readPositionStates(raw, asOfKey, current)) {
-    const instrument = rows(
+    const instrument = allRows(
       raw,
       "SELECT kind, label, category, symbol FROM instruments WHERE id = ? LIMIT 1",
       [state.instrumentId],
     )[0];
     if (!instrument) throw new Error(`Missing instrument ${state.instrumentId}`);
-    const observation = rows(
+    const observation = allRows(
       raw,
       `SELECT *
          FROM instrument_observations
@@ -461,7 +447,7 @@ export function readPositionValuations(
         LIMIT 1`,
       [state.instrumentId, state.currency, asOfKey],
     )[0];
-    const projection = rows(
+    const projection = allRows(
       raw,
       `SELECT id, archived FROM assets
         WHERE instrument_id = ? AND currency = ? ORDER BY id LIMIT 1`,
@@ -498,7 +484,7 @@ export function readPositionHistory(raw: Database): PositionHistoryPoint[] {
     ...current
       .filter((movement) => movement.targetType === "instrument")
       .map((movement) => movement.dateKey),
-    ...rows(raw, "SELECT observed_day FROM instrument_observations")
+    ...allRows(raw, "SELECT observed_day FROM instrument_observations")
       .map((row) => String(row.observed_day) as DateKey),
   ])].sort();
   return days.flatMap((dateKey) =>

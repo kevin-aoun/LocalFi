@@ -17,7 +17,6 @@ import {
   type Account,
   type AccountKind,
   type AccountType,
-  type Transaction,
 } from "@/lib/db/schema";
 import {
   deriveNetWorth,
@@ -33,7 +32,8 @@ import { getCategories } from "./categories";
 import { refreshLivePricedAssets } from "./crypto";
 import { getSettings } from "./settings";
 import {
-  buildTransactionMovements,
+  buildProjectedTransactionMovements,
+  buildTransactionProjection,
   correctLedgerEventInput,
   deleteLedgerEventInput,
   postLedgerEventRaw,
@@ -48,8 +48,7 @@ import {
   type LedgerMovementInput,
 } from "@/lib/ledger";
 import type { Database } from "sql.js";
-
-export type ActionResult<T> = { success: true; data: T } | { error: string };
+import { requireMagnitude, str, type ActionResult } from "./shared";
 
 type LivePriceRefresh = Awaited<ReturnType<typeof refreshLivePricedAssets>>;
 
@@ -73,13 +72,6 @@ export type NetWorthView = NetWorth & {
   dateKey: DateKey;
 };
 
-function str(formData: FormData, key: string): string | null {
-  const raw = formData.get(key);
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  return trimmed === "" ? null : trimmed;
-}
-
 function parseType(value: string | null): AccountType {
   if (!value || !(accountTypes as readonly string[]).includes(value)) {
     throw new Error(`Invalid account type: ${String(value)}. Expected one of ${accountTypes.join(", ")}`);
@@ -99,11 +91,6 @@ function resolveKind(type: AccountType, requested: string | null): AccountKind {
     throw new Error(`An account of type ${type} must have kind '${implied}', not '${kind}'`);
   }
   return kind;
-}
-
-function requireMagnitude(cents: Cents, label: string): Cents {
-  if (cents < 0) throw new Error(`${label} cannot be negative`);
-  return cents;
 }
 
 function requireOpeningBalanceDate(value: string | null): DateKey {
@@ -414,6 +401,27 @@ export async function getDashboardData() {
     getNetWorthHistory(),
   ]);
   return { ...ledger, categories, userName: settings.userName || "", history };
+}
+
+/**
+ * Everything the sidebar shows, from one Server Action and one ledger replay. It reloads on every
+ * `localfi:financial-updated`, which Home dispatches after each live-price refresh.
+ */
+export async function getSidebarData() {
+  const dateKey = todayKey();
+  const [ledger, settings] = await Promise.all([
+    readDb(async (db, raw) => {
+      const current = readCurrentMovements(raw);
+      const assetRows = await db.select().from(assets).where(eq(assets.archived, false)).orderBy(asc(assets.id));
+      return {
+        netWorth: { ...worthFromJournal(await db.select().from(accounts), raw, dateKey, current), dateKey },
+        accounts: await accountsWithBalances(db, raw, dateKey, true, current),
+        assets: currentHoldings(assetRows, readPositionValuations(raw, dateKey, current)),
+      };
+    }),
+    getSettings(),
+  ]);
+  return { ...ledger, userName: settings.userName, showLedger: settings.showLedger };
 }
 
 
@@ -741,127 +749,6 @@ export async function recordNetWorthToday() {
 }
 
 
-export async function deleteNetWorthSnapshot(dateKey: DateKey) {
-  try {
-    if (!isDateKey(dateKey)) throw new Error(`Invalid dateKey: ${String(dateKey)}`);
-    await withDb(async (db) => {
-      await db.delete(netWorthSnapshots).where(eq(netWorthSnapshots.date, dateKey));
-      await db.delete(assetHistory).where(eq(assetHistory.recordedDay, dateKey));
-    });
-    revalidate("/", "/accounts");
-    return { success: true as const, data: { dateKey } };
-  } catch (error) {
-    console.error("Failed to delete snapshot:", error);
-    return { error: (error as Error).message || "Failed to delete snapshot" };
-  }
-}
-
-type OrphanAllocation = { categoryId: number; amountCents: Cents };
-
-function transactionEpoch(value: Date): number {
-  const seconds = Math.floor(value.getTime() / 1000);
-  if (!Number.isSafeInteger(seconds)) throw new Error("Transaction timestamp is invalid");
-  return seconds;
-}
-
-function orphanSnapshot(
-  row: Transaction,
-  allocations: readonly OrphanAllocation[],
-  accountId: number,
-  updatedAt: Date,
-) {
-  return {
-    id: row.id,
-    date: transactionEpoch(row.date),
-    categoryId: row.categoryId,
-    accountId,
-    transferAccountId: row.transferAccountId,
-    amountCents: row.amountCents,
-    direction: row.direction,
-    currency: row.currency,
-    comment: row.comment,
-    pending: false,
-    recurringId: row.recurringId,
-    recurringOccurrence: row.recurringOccurrence,
-    instrumentId: row.instrumentId,
-    quantityDelta: row.quantityDelta,
-    transferPrincipalAmountCents: row.transferPrincipalAmountCents,
-    ...(row.feeForTransferId == null ? {} : { feeForTransferId: row.feeForTransferId }),
-    allocations: allocations.map((allocation) => ({ ...allocation })),
-    createdAt: transactionEpoch(row.createdAt),
-    updatedAt: transactionEpoch(updatedAt),
-  };
-}
-
-function targetForCategory(raw: Database, categoryId: number | null, currency: string): string {
-  if (categoryId === null) throw new Error("A posted orphan transaction requires a category");
-  return registerLedgerAccount(raw, {
-    targetType: "category",
-    targetRef: categoryId,
-    currency,
-  });
-}
-
-function orphanCurrentMovements(
-  raw: Database,
-  row: Transaction,
-  allocations: readonly OrphanAllocation[],
-  sourceTargetId: string,
-): LedgerMovementInput[] {
-  const currency = normalizeLedgerCurrency(row.currency);
-  if (row.direction === "transfer") {
-    if (row.transferAccountId === null) throw new Error("A posted orphan transfer requires a destination account");
-    const destinationTargetId = registerLedgerAccount(raw, {
-      targetType: "real_account",
-      targetRef: row.transferAccountId,
-      currency,
-    });
-    const principal = row.transferPrincipalAmountCents ?? row.amountCents;
-    const allocationTotal = allocations.reduce((sum, allocation) => sum + allocation.amountCents, 0);
-    if (principal + allocationTotal !== row.amountCents) {
-      throw new Error("Transfer principal and allocations must equal the total source amount");
-    }
-    return [
-      { ledgerAccountId: sourceTargetId, amountMinor: -row.amountCents, currency },
-      { ledgerAccountId: destinationTargetId, amountMinor: principal, currency },
-      ...allocations.map((allocation) => ({
-        ledgerAccountId: targetForCategory(raw, allocation.categoryId, currency),
-        amountMinor: allocation.amountCents,
-        currency,
-      })),
-    ];
-  }
-
-  let instrumentTargetId: string | null = null;
-  let instrumentBookCounterTargetId: string | null = null;
-  if (row.instrumentId !== null || row.quantityDelta !== null) {
-    if (row.instrumentId === null || row.quantityDelta === null) {
-      throw new Error("Investment instrument and exact quantity must be stored together");
-    }
-    instrumentTargetId = registerLedgerAccount(raw, {
-      targetType: "instrument",
-      targetRef: row.instrumentId,
-      currency,
-      instrumentId: row.instrumentId,
-    });
-    instrumentBookCounterTargetId = registerLedgerAccount(raw, {
-      targetType: "system",
-      targetRef: `instrument-book:${row.instrumentId}`,
-      currency,
-    });
-  }
-  return buildTransactionMovements({
-    direction: row.direction,
-    amountMinor: row.amountCents,
-    currency,
-    accountTargetId: sourceTargetId,
-    categoryTargetId: targetForCategory(raw, row.categoryId, currency),
-    instrumentTargetId,
-    instrumentBookCounterTargetId,
-    quantityDelta: row.quantityDelta,
-  });
-}
-
 function eventMetadata(raw: Database, eventId: string): CanonicalMetadata {
   const statement = raw.prepare("SELECT metadata_json FROM ledger_events WHERE event_id = ?");
   try {
@@ -902,17 +789,6 @@ export async function assignOrphanTransactions(accountId: number) {
           );
         }
       }
-      const postedOrphans = orphans.filter((orphan) => !orphan.pending);
-      const realTarget = postedOrphans.length === 0 ? null : registerLedgerAccount(raw, {
-        targetType: "real_account",
-        targetRef: accountId,
-        currency: account.currency,
-      });
-      const legacyTarget = postedOrphans.length === 0 ? null : registerLedgerAccount(raw, {
-        targetType: "system",
-        targetRef: "legacy-unassigned-account",
-        currency: account.currency,
-      });
       for (const orphan of orphans) {
         const now = new Date();
         if (orphan.pending) {
@@ -925,8 +801,8 @@ export async function assignOrphanTransactions(accountId: number) {
         const allocations = allocationRows
           .filter((allocation) => allocation.transactionId === orphan.id)
           .map(({ categoryId, amountCents }) => ({ categoryId, amountCents }));
-        const prior = orphanCurrentMovements(raw, orphan, allocations, legacyTarget!);
-        const next = orphanCurrentMovements(raw, orphan, allocations, realTarget!);
+        const prior = buildProjectedTransactionMovements(raw, orphan, allocations);
+        const next = buildProjectedTransactionMovements(raw, { ...orphan, accountId }, allocations);
         const priorMetadata = eventMetadata(raw, orphan.currentEventId!);
         const event = postLedgerEventRaw(raw, correctLedgerEventInput(
           orphan.currentEventId!,
@@ -938,7 +814,7 @@ export async function assignOrphanTransactions(accountId: number) {
             metadata: {
               ...priorMetadata,
               projectionKey: orphan.id,
-              transaction: orphanSnapshot(orphan, allocations, accountId, now),
+              transaction: buildTransactionProjection({ ...orphan, accountId, updatedAt: now }, allocations),
               reassignment: {
                 from: "legacy-unassigned-account",
                 toAccountId: accountId,

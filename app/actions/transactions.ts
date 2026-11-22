@@ -40,6 +40,7 @@ import { parsePurchaseQuantity, parsePurchaseUnitPrice, purchaseAmountCents, tra
 import { assertAvailableInvestmentUnits, type InvestmentSide } from "@/lib/investments/trades";
 import { assertAmountOnlyCategory, investmentKindForSymbol } from "@/lib/investments/categories";
 import { negateCanonicalDecimal } from "@/lib/ledger/decimal";
+import { requireMagnitude } from "./shared";
 
 async function resolveAccountId(db: BudgetDb, formData: FormData): Promise<number | null> {
   const raw = formData.get("accountId");
@@ -61,11 +62,6 @@ function requireId(value: FormDataEntryValue | null, label: string): number {
   const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : Number.NaN;
   if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`Invalid ${label}: ${String(value)}`);
   return parsed;
-}
-
-function requireMagnitude(cents: Cents, label = "Amount"): Cents {
-  if (cents < 0) throw new Error(`${label} cannot be negative`);
-  return cents;
 }
 
 async function accountCurrency(db: BudgetDb, accountId: number | null): Promise<string> {
@@ -158,22 +154,6 @@ export async function getLedgerReportMovements() {
       pending: false,
     })),
   );
-}
-
-
-export async function getTransfers() {
-  return (await getTransactions()).filter((transaction) => transaction.direction === "transfer");
-}
-
-export async function syncCashAssetManually() {
-  try {
-    await withDb((db) => syncCashAssetWithin(db));
-    revalidate("/");
-    return { success: true };
-  } catch (error) {
-    console.error("Failed to sync cash asset:", error);
-    return { error: "Failed to sync cash asset" };
-  }
 }
 
 
@@ -368,6 +348,8 @@ function isManualInstrument(raw: Database, instrumentId: string | null): boolean
   return instrumentId !== null && findInstrument(raw, instrumentId)?.kind === "manual";
 }
 
+// Only a NEW confirmed state needs a real account and category. Prior states use
+// buildProjectedTransactionMovements directly, so legacy 0012 rows can still be corrected.
 function buildCurrentMovements(
   raw: Database,
   row: TransactionState,
@@ -421,7 +403,7 @@ async function deleteTransactionWithin(db: BudgetDb, raw: Database, existing: Tr
   if (!existing.pending) {
     if (!existing.currentEventId) throw new Error("Confirmed transaction is missing its current ledger event");
     const allocations = await loadAllocations(db, existing.id);
-    postLedgerEventRaw(raw, deleteLedgerEventInput(existing.currentEventId, buildCurrentMovements(raw, existing, allocations), {
+    postLedgerEventRaw(raw, deleteLedgerEventInput(existing.currentEventId, buildProjectedTransactionMovements(raw, existing, allocations), {
       effectiveDate: toDateKey(existing.date), description: existing.comment ?? "",
       metadata: { projectionKey: existing.id, transaction: null },
     }));
@@ -457,7 +439,7 @@ async function syncTransferFeeWithin(db: BudgetDb, raw: Database, transfer: Tran
   if (row.pending) return;
   const event = existing && !existing.pending
     ? postLedgerEventRaw(raw, correctLedgerEventInput(
-      existing.currentEventId!, buildCurrentMovements(raw, existing, []), buildCurrentMovements(raw, row, []),
+      existing.currentEventId!, buildProjectedTransactionMovements(raw, existing, []), buildCurrentMovements(raw, row, []),
       { effectiveDate: toDateKey(row.date), description: row.comment ?? "", metadata: { projectionKey: row.id, transaction: buildTransactionProjection(row, []) }, recordedAt: row.updatedAt },
     ))
     : postFirstTransactionEvent(raw, row, []);
@@ -721,7 +703,7 @@ export async function updateTransaction(id: number, formData: FormData) {
       if (!existing.currentEventId) {
         throw new Error("Confirmed transaction is missing its current ledger event");
       }
-      const priorMovements = buildCurrentMovements(raw, existing, []);
+      const priorMovements = buildProjectedTransactionMovements(raw, existing, []);
       const nextMovements = buildCurrentMovements(raw, next, []);
       const investmentUnitPrice = fields?.unitPrice ?? priorMetadata.investmentUnitPrice;
       const event = postLedgerEventRaw(raw, correctLedgerEventInput(
@@ -1062,7 +1044,7 @@ export async function updateTransfer(id: number, formData: FormData) {
       if (!existing.currentEventId) {
         throw new Error("Confirmed transfer is missing its current ledger event");
       }
-      const priorMovements = buildCurrentMovements(raw, existing, priorAllocations);
+      const priorMovements = buildProjectedTransactionMovements(raw, existing, priorAllocations);
       const nextMovements = buildCurrentMovements(raw, next, split.allocations);
       const event = postLedgerEventRaw(raw, correctLedgerEventInput(
         existing.currentEventId,

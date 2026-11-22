@@ -16,7 +16,8 @@ import {
 import { isDateKey, type DateKey } from "@/lib/dates";
 import { formatMoney, parseAmount, type Cents } from "@/lib/money";
 import { readCategoryMovements } from "@/lib/ledger";
-import { str, toBudgetRow, type ActionResult } from "./shared";
+import { toBudgetRow } from "./shared";
+import { str, type ActionResult } from "../shared";
 
 export type BudgetReallocationView = BudgetReallocation & {
   fromCategoryName: string;
