@@ -5,7 +5,15 @@ import path from "node:path";
 import initSqlJs, { type Database } from "sql.js";
 
 import { deriveCashBalanceCents } from "@/lib/cash-balance";
-import { CENTS_ONLY_COLUMNS } from "../migrate-to-cents";
+// Money columns added by 0003; they are integer cents from the start.
+const CENTS_ONLY_COLUMNS = [
+  { table: "accounts", column: "opening_balance_cents", notNull: true },
+  { table: "budgets", column: "limit_cents", notNull: true },
+  { table: "recurring_transactions", column: "amount_cents", notNull: true },
+  { table: "net_worth_snapshots", column: "total_assets_cents", notNull: true },
+  { table: "net_worth_snapshots", column: "total_liabilities_cents", notNull: true },
+  { table: "net_worth_snapshots", column: "net_worth_cents", notNull: true },
+];
 
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..", "..");
 const MIGRATIONS_DIR = path.join(PROJECT_ROOT, "drizzle", "migrations");
@@ -388,9 +396,6 @@ describe("0003 — schema after replaying from empty", () => {
   it("stores every money column added by 0003 as integer cents", () => {
     const db = replay();
     try {
-      // The inventory lives in migrate-to-cents.ts alongside MONEY_COLUMNS, so
-      // "which columns hold money?" has one answer in one place.
-      expect(CENTS_ONLY_COLUMNS.length).toBeGreaterThan(0);
       for (const spec of CENTS_ONLY_COLUMNS) {
         const column = columnInfo(db, spec.table).get(spec.column);
         expect(column, `${spec.table}.${spec.column} missing`).toBeDefined();

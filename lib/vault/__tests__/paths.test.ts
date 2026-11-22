@@ -16,7 +16,7 @@ import path from "node:path";
 import initSqlJs from "sql.js";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { createVaultEnvelope, destroyVaultKey } from "../envelope";
+import { createVaultEnvelope, destroyVaultKey, encryptVaultGeneration } from "../envelope";
 import { VaultPathError, VaultPermissionError } from "../errors";
 import {
   copyEncryptedGenerationAtomically,
@@ -24,6 +24,19 @@ import {
   readEncryptedGeneration,
   writeEncryptedGenerationAtomically,
 } from "../paths";
+
+const fsyncFaults = vi.hoisted(() => ({ directory: false, file: false }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const fsyncSync = (descriptor: number) => {
+    const isDirectory = actual.fstatSync(descriptor).isDirectory();
+    if (isDirectory ? fsyncFaults.directory : fsyncFaults.file) {
+      throw Object.assign(new Error("injected fsync failure"), { code: "EIO" });
+    }
+    actual.fsyncSync(descriptor);
+  };
+  return { ...actual, fsyncSync };
+});
 
 const directories: string[] = [];
 let sqliteImage: Uint8Array;
@@ -95,6 +108,34 @@ describe.sequential("owner-only encrypted generation paths", () => {
     expect(statSync(backup).mode & 0o777).toBe(0o600);
     expect(await readEncryptedGeneration(live)).toEqual(Buffer.from(created.envelope));
     expect(readdirSync(vaultDirectory).sort()).toEqual(["budget.db", "budget.db.bak"]);
+    destroyVaultKey(created.key);
+  });
+
+  it("treats the post-rename directory fsync as best effort but keeps the file fsync strict", async () => {
+    const root = directory();
+    const live = path.join(root, "budget.db");
+    const created = await createVaultEnvelope(sqliteImage, "directory fsync passphrase");
+    await writeEncryptedGenerationAtomically(live, created.envelope, { replace: false });
+    const next = await encryptVaultGeneration(sqliteImage, created.key);
+
+    fsyncFaults.directory = true;
+    try {
+      await expect(writeEncryptedGenerationAtomically(live, next, { replace: true }))
+        .resolves.toBeUndefined();
+    } finally {
+      fsyncFaults.directory = false;
+    }
+    expect(readFileSync(live)).toEqual(Buffer.from(next));
+
+    fsyncFaults.file = true;
+    try {
+      await expect(writeEncryptedGenerationAtomically(live, created.envelope, { replace: true }))
+        .rejects.toThrow(/injected fsync failure/);
+    } finally {
+      fsyncFaults.file = false;
+    }
+    expect(readFileSync(live)).toEqual(Buffer.from(next));
+    expect(readdirSync(root)).toEqual(["budget.db"]);
     destroyVaultKey(created.key);
   });
 

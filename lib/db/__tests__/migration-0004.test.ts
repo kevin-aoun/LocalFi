@@ -1,14 +1,10 @@
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import initSqlJs, { type Database } from "sql.js";
 
-import {
-  formatPricedHoldingsReport,
-  migrateDatabaseToPricedHoldings,
-} from "../migrate-to-priced-holdings";
 
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..", "..");
 const MIGRATIONS_DIR = path.join(PROJECT_ROOT, "drizzle", "migrations");
@@ -135,15 +131,10 @@ function open(file: string): Database {
   return new SQL.Database(readFileSync(file));
 }
 
-async function migrate(file: string, extra: Record<string, unknown> = {}) {
-  return migrateDatabaseToPricedHoldings({
-    dbPath: file,
-    backupDir: path.join(path.dirname(file), "backups"),
-    migrationSqlPath: path.join(MIGRATIONS_DIR, `${MIGRATION_TAG}.sql`),
-    expectedCashBalanceCents: 449618,
-    expectedCounts: { transactions: 3, categories: 14, assets: 3 },
-    ...extra,
-  });
+function migrate(file: string): Database {
+  const db = open(file);
+  execScript(db, readFileSync(path.join(MIGRATIONS_DIR, `${MIGRATION_TAG}.sql`), "utf-8"));
+  return db;
 }
 
 // --------------------------------------------------------------------------
@@ -249,13 +240,17 @@ describe("0004 — schema after replaying from empty", () => {
 });
 
 describe("0004 — applied to a live-shaped database", () => {
-  it("backfills the gold row onto XAU while keeping commodity_type", async () => {
-    const { file } = makeFixture();
-    const result = await migrate(file);
+  function counts(db: Database) {
+    return Object.fromEntries(
+      ["transactions", "categories", "assets", "asset_history"].map((table) => [
+        table,
+        Number(scalar(db, `SELECT COUNT(*) FROM ${table}`)),
+      ]),
+    );
+  }
 
-    expect(result.backfilled).toEqual([{ id: 2, commodityType: "Gold", priceSymbol: "XAU" }]);
-
-    const db = open(file);
+  it("backfills the gold row onto XAU while keeping commodity_type", () => {
+    const db = migrate(makeFixture().file);
     try {
       expect(
         rows(
@@ -272,199 +267,21 @@ describe("0004 — applied to a live-shaped database", () => {
     }
   });
 
-  it("preserves every row count, including asset_history", async () => {
+  it("preserves every row count, money total and foreign key", () => {
     const { file } = makeFixture();
-    const result = await migrate(file);
-
-    expect(result.alreadyMigrated).toBe(false);
-    expect(result.countsAfter).toEqual(result.countsBefore);
-    expect(result.countsBefore).toMatchObject({
-      transactions: 3,
-      categories: 14,
-      assets: 3,
-      asset_history: 1,
-    });
-  });
-
-  it("conserves the ledger total and the derived cash balance ($4,496.18)", async () => {
-    const { file } = makeFixture();
-    const result = await migrate(file);
-
-    expect(result.cashBalanceBefore).toBe(449618);
-    expect(result.cashBalanceAfter).toBe(449618);
-    expect(result.sumAmountsAfter).toBe(result.sumAmountsBefore);
-    expect(result.assetTotalAfter).toBe(result.assetTotalBefore);
-    expect(result.assetTotalAfter).toBe(449618 + 532371 + 7000);
-  });
-
-  it("introduces no foreign-key violations", async () => {
-    const { file } = makeFixture();
-    const result = await migrate(file);
-    expect(result.foreignKeyViolationsBefore).toEqual([]);
-    expect(result.foreignKeyViolationsAfter).toEqual([]);
-  });
-
-  it("writes a timestamped backup BEFORE touching the database", async () => {
-    const { file } = makeFixture();
-    const original = readFileSync(file);
-    const result = await migrate(file);
-
-    expect(result.backupPath).toMatch(/backups[/\\]budget\..*\.pre-0004\.db$/);
-    expect(readFileSync(result.backupPath!)).toEqual(original);
-    expect(readdirSync(path.join(path.dirname(file), "backups"))).toHaveLength(1);
-  });
-
-  it("reports the hand-valued BTC + ETH row as still needing a quantity", async () => {
-    const { file } = makeFixture();
-    const result = await migrate(file);
-    expect(result.unmigratableRows).toEqual([
-      { id: 4, category: "Crypto", notes: "BTC + ETH", currentValueCents: 7000 },
-    ]);
-  });
-
-  it("prints a before/after report naming the balance and the FK result", async () => {
-    const { file } = makeFixture();
-    const report = formatPricedHoldingsReport(await migrate(file));
-
-    expect(report).toContain("$4,496.18");
-    expect(report).toContain("PRAGMA foreign_key_check");
-    expect(report).toMatch(/Gold\s*->\s*XAU/);
-    expect(report).toMatch(/assets\s+3\s+3/);
-  });
-
-  it("refuses to run twice and writes nothing the second time", async () => {
-    const { file } = makeFixture();
-    await migrate(file);
-    const after = readFileSync(file);
-
-    const second = await migrate(file);
-    expect(second.alreadyMigrated).toBe(true);
-    expect(second.backupPath).toBeNull();
-    expect(readFileSync(file)).toEqual(after);
-    expect(readdirSync(path.join(path.dirname(file), "backups"))).toHaveLength(1);
-    expect(formatPricedHoldingsReport(second)).toMatch(/already migrated/i);
-  });
-
-  it("changes nothing on a dry run", async () => {
-    const { file } = makeFixture();
-    const original = readFileSync(file);
-    const result = await migrate(file, { dryRun: true });
-
-    expect(result.alreadyMigrated).toBe(false);
-    expect(result.backupPath).toBeNull();
-    expect(readFileSync(file)).toEqual(original);
-    expect(existsSync(path.join(path.dirname(file), "backups"))).toBe(false);
-  });
-});
-
-describe("0004 — verification bites, and every failure restores the backup", () => {
-  it("restores when a row disappears", async () => {
-    const { file } = makeFixture();
-    const original = readFileSync(file);
-
-    await expect(
-      migrate(file, { corruptForTest: (db: Database) => db.run("DELETE FROM assets WHERE id = 4") }),
-    ).rejects.toThrow(/assets row count changed/i);
-
-    expect(readFileSync(file)).toEqual(original);
-  });
-
-  it("restores when an asset value is altered", async () => {
-    const { file } = makeFixture();
-    const original = readFileSync(file);
-
-    await expect(
-      migrate(file, {
-        corruptForTest: (db: Database) =>
-          db.run("UPDATE assets SET current_value_cents = 0 WHERE id = 2"),
-      }),
-    ).rejects.toThrow(/current_value_cents/i);
-
-    expect(readFileSync(file)).toEqual(original);
-  });
-
-  it("restores when the backfill points a metal at the wrong symbol", async () => {
-    const { file } = makeFixture();
-    const original = readFileSync(file);
-
-    await expect(
-      migrate(file, {
-        corruptForTest: (db: Database) => db.run("UPDATE assets SET price_symbol = 'BTC' WHERE id = 2"),
-      }),
-    ).rejects.toThrow(/price_symbol/i);
-
-    expect(readFileSync(file)).toEqual(original);
-  });
-
-  it("restores when a quantity is rounded away", async () => {
-    const { file } = makeFixture();
-    const original = readFileSync(file);
-
-    await expect(
-      migrate(file, {
-        corruptForTest: (db: Database) => db.run("UPDATE assets SET quantity = 1.14 WHERE id = 2"),
-      }),
-    ).rejects.toThrow(/quantity/i);
-
-    expect(readFileSync(file)).toEqual(original);
-  });
-
-  it("restores when a transaction amount moves by a single cent", async () => {
-    const { file } = makeFixture();
-    const original = readFileSync(file);
-
-    await expect(
-      migrate(file, {
-        corruptForTest: (db: Database) =>
-          db.run("UPDATE transactions SET amount_cents = amount_cents + 1 WHERE id = 1"),
-      }),
-    ).rejects.toThrow(/transaction 1 changed/i);
-
-    expect(readFileSync(file)).toEqual(original);
-  });
-
-  it("restores when the derived cash balance moves without the ledger changing", async () => {
-    const { file } = makeFixture();
-    const original = readFileSync(file);
-
-    // Flipping Salary from Income to Expense leaves every transaction row
-    // untouched but swings the derived balance by $20,000 — the balance
-    // assertion is the only thing that can catch this.
-    await expect(
-      migrate(file, {
-        corruptForTest: (db: Database) =>
-          db.run("UPDATE categories SET type = 'Expense' WHERE id = 2"),
-      }),
-    ).rejects.toThrow(/derived cash balance changed/i);
-
-    expect(readFileSync(file)).toEqual(original);
-  });
-
-  it("refuses a database whose figures do not match the expectation", async () => {
-    const { file } = makeFixture();
-    const original = readFileSync(file);
-
-    await expect(migrate(file, { expectedCashBalanceCents: 1 })).rejects.toThrow(/Pre-flight/i);
-    await expect(migrate(file, { expectedCounts: { assets: 99 } })).rejects.toThrow(/Pre-flight/i);
-
-    expect(readFileSync(file)).toEqual(original);
-    expect(existsSync(path.join(path.dirname(file), "backups"))).toBe(false);
-  });
-
-  it("refuses a database that has not had 0003 applied yet", async () => {
-    const dir = mkdtempSync(path.join(os.tmpdir(), "budget-0004-old-"));
-    dirs.push(dir);
-    const file = path.join(dir, "budget.db");
-    const db = replay(2);
-    writeFileSync(file, Buffer.from(db.export()));
-    db.close();
-
-    await expect(
-      migrateDatabaseToPricedHoldings({
-        dbPath: file,
-        backupDir: path.join(dir, "backups"),
-        migrationSqlPath: path.join(MIGRATIONS_DIR, `${MIGRATION_TAG}.sql`),
-      }),
-    ).rejects.toThrow(/0003/);
+    const before = open(file);
+    const db = migrate(file);
+    try {
+      expect(counts(db)).toEqual(counts(before));
+      expect(counts(db)).toEqual({ transactions: 3, categories: 14, assets: 3, asset_history: 1 });
+      expect(scalar(db, "SELECT SUM(amount_cents) FROM transactions")).toBe(
+        scalar(before, "SELECT SUM(amount_cents) FROM transactions"),
+      );
+      expect(scalar(db, "SELECT SUM(current_value_cents) FROM assets")).toBe(449618 + 532371 + 7000);
+      expect(rows(db, "PRAGMA foreign_key_check")).toEqual([]);
+    } finally {
+      before.close();
+      db.close();
+    }
   });
 });

@@ -7,13 +7,13 @@ import { formatMoney } from "@/lib/money";
 import {
   assetHoldingDetail,
   assetHoldingName,
-  auditSidebarTotals,
   buildSidebarView,
   countedAssets,
   DERIVED_CASH_CATEGORY,
   type SidebarAssetRow,
   type SidebarViewInput,
 } from "../sidebar-assets";
+import { auditSidebarTotals } from "./support/sidebar-audit";
 
 type SeedAccount = {
   id: number;

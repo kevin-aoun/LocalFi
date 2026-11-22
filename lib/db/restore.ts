@@ -24,6 +24,7 @@ import {
 } from "../vault/envelope";
 import { VaultLockedError } from "../vault/errors";
 import {
+  fsyncDirectory,
   readEncryptedGeneration,
   writeEncryptedGenerationAtomically,
 } from "../vault/paths";
@@ -149,19 +150,6 @@ export async function validateRestoreImage(
     );
   }
   await validateSqliteImage(bytes, label);
-}
-
-function fsyncDirectory(directory: string): void {
-  try {
-    const fd = openSync(directory, "r");
-    try {
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-  } catch {
-
-  }
 }
 
 function writeDurably(file: string, bytes: Uint8Array, exclusive = false): void {
