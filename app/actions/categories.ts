@@ -1,7 +1,7 @@
 "use server";
 
 import { readDb, withDb } from "@/lib/db/client";
-import { categories, transactions } from "@/lib/db/schema";
+import { categories, transactionAllocations, transactions } from "@/lib/db/schema";
 import { asc, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { INVESTMENT_KINDS, type InvestmentKind } from "@/lib/investments/categories";
@@ -103,6 +103,17 @@ export async function updateCategory(id: number, formData: FormData) {
 
       let displayOrder: number | undefined;
       if (existing.type !== type) {
+        // The type decides whether posted rows count as income, spending or investment; changing it would rewrite history.
+        const [direct] = await db.select({ count: sql<number>`count(*)` }).from(transactions).where(eq(transactions.categoryId, id));
+        const [split] = await db.select({ count: sql<number>`count(*)` }).from(transactionAllocations).where(eq(transactionAllocations.categoryId, id));
+        const uses = Number(direct.count) + Number(split.count);
+        if (uses > 0) {
+          throw new CategoryInUseError(
+            `This category is used by ${uses} transaction${uses === 1 ? "" : "s"}, so its type cannot change. ` +
+              "Create a new category with the type you want and move the transactions to it.",
+          );
+        }
+
         const [{ nextOrder }] = await db
           .select({
             nextOrder: sql<number>`COALESCE(MAX(${categories.displayOrder}), -1) + 1`,
@@ -134,7 +145,7 @@ export async function updateCategory(id: number, formData: FormData) {
     revalidateCategorySurfaces();
     return { success: true, data: category };
   } catch (error) {
-    if (error instanceof NotFoundError) return { error: error.message };
+    if (error instanceof NotFoundError || error instanceof CategoryInUseError) return { error: error.message };
     console.error("Failed to update category:", error);
     return { error: describeWriteFailure(error, name, "update") };
   }
