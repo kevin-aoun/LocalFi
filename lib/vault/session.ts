@@ -178,10 +178,16 @@ export class VaultSessionManager {
   ): Promise<{ token: string; recoverySecret: string }> {
     return this.exclusive(async () => {
       const file = path.resolve(dbPath);
+      if (!existsSync(file)) throw new VaultLockedError();
+      // Check the secret before closing an open session, so a wrong secret cannot lock the owner out.
+      const probe = await unlockVaultEnvelopeWithRecovery(await readEncryptedGeneration(file), recoverySecret);
+      probe.plaintext.fill(0);
+      destroyVaultKey(probe.key);
+      // A loaded database holds the writer lease; recovery must take it, even in this process.
+      await this.clearUnlockedState();
       const lease = await acquireWriterLease(file);
       let reset: Awaited<ReturnType<typeof recoverAndRewrapVaultEnvelope>> | null = null;
       try {
-        if (!existsSync(file)) throw new VaultLockedError();
         const originalLive = await readEncryptedGeneration(file);
         reset = await recoverAndRewrapVaultEnvelope(
           originalLive,
