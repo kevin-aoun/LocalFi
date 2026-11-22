@@ -43,7 +43,11 @@ export function quantityValueMinor(quantity: string, unitPriceMinor: Cents, unit
 
 export function purchaseAmountCents(quantity: string, unitPrice: string): Cents {
   const exact = parsePurchaseQuantity(quantity);
-  return quantityValueMinor(exact, 0, parsePurchaseUnitPrice(unitPrice));
+  const price = parsePurchaseUnitPrice(unitPrice);
+  const amount = quantityValueMinor(exact, 0, price);
+  // Only an exact zero price (a gift) may total zero; a real price must reach a cent.
+  if (amount === 0 && price !== "0") throw new Error("The purchase total must be at least one cent.");
+  return amount;
 }
 
 export function unitPriceFromAmountCents(paidAmount: Cents, quantity: string): string {
