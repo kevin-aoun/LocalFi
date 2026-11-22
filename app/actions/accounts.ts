@@ -403,6 +403,27 @@ export async function getDashboardData() {
   return { ...ledger, categories, userName: settings.userName || "", history };
 }
 
+/**
+ * Everything the sidebar shows, from one Server Action and one ledger replay. It reloads on every
+ * `localfi:financial-updated`, which Home dispatches after each live-price refresh.
+ */
+export async function getSidebarData() {
+  const dateKey = todayKey();
+  const [ledger, settings] = await Promise.all([
+    readDb(async (db, raw) => {
+      const current = readCurrentMovements(raw);
+      const assetRows = await db.select().from(assets).where(eq(assets.archived, false)).orderBy(asc(assets.id));
+      return {
+        netWorth: { ...worthFromJournal(await db.select().from(accounts), raw, dateKey, current), dateKey },
+        accounts: await accountsWithBalances(db, raw, dateKey, true, current),
+        assets: currentHoldings(assetRows, readPositionValuations(raw, dateKey, current)),
+      };
+    }),
+    getSettings(),
+  ]);
+  return { ...ledger, userName: settings.userName, showLedger: settings.showLedger };
+}
+
 
 export async function getLatestNetWorthSnapshot() {
   const rows = await readDb((db) =>

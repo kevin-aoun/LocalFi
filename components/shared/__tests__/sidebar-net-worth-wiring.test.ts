@@ -1,16 +1,20 @@
-
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   createDomainDb,
+  execOn,
   seedAccount,
   seedAsset,
   seedCategory,
   seedTransaction,
   type DomainDb,
 } from "@/app/actions/__tests__/support/domain-fixture";
-import { getAccountBalances, getNetWorth } from "@/app/actions/accounts";
+import { countLedgerReplays } from "@/app/actions/__tests__/support/ledger-replays";
+import { getAccountBalances, getNetWorth, getSidebarData } from "@/app/actions/accounts";
 import { getAssets } from "@/app/actions/assets";
+import { getSettings } from "@/app/actions/settings";
 import { withDb } from "@/lib/db/client";
 import { syncCashAssetWithin } from "@/lib/db/sync-cash";
 import { todayKey } from "@/lib/dates";
@@ -31,13 +35,41 @@ afterEach(async () => {
 });
 
 async function loadSidebarInput(): Promise<SidebarViewInput> {
-  const [netWorth, accounts, assets] = await Promise.all([
-    getNetWorth(),
-    getAccountBalances({ includeArchived: true }),
-    getAssets(),
-  ]);
+  const { netWorth, accounts, assets } = await getSidebarData();
   return { netWorth, accounts, assets };
 }
+
+describe("getSidebarData", () => {
+  it("is the sidebar's only financial load, so each financial-updated reload replays once", () => {
+    const sidebar = readFileSync(path.resolve(__dirname, "../sidebar.tsx"), "utf8");
+    expect(sidebar).toMatch(/const data = await getSidebarData\(\);/);
+    expect(sidebar).not.toMatch(/\b(getAssets|getNetWorth|getAccountBalances)\b/);
+  });
+
+  it("returns exactly what the separate sidebar reads returned, from one ledger replay", async () => {
+    seedAccount(temp, { name: "Checking", kind: "asset", type: "Checking", openingBalanceCents: 500_000 });
+    seedAccount(temp, { name: "Visa", kind: "liability", type: "CreditCard", openingBalanceCents: 60_000 });
+    seedAccount(temp, { name: "Old", kind: "asset", type: "Checking", openingBalanceCents: 1_000, archived: true });
+    seedAsset(temp, { category: "Properties", currentValueCents: 30_000_000, notes: "Flat" });
+    seedAsset(temp, { category: "Vehicles", currentValueCents: 900_000, notes: "Sold car" });
+    execOn(temp, (db) => db.run("UPDATE assets SET archived = 1 WHERE notes = 'Sold car'"));
+    seedTransaction(temp, { categoryId: 2, accountId: 1, amountCents: 300_000, dateKey: todayKey() });
+    seedTransaction(temp, { categoryId: 1, accountId: null, amountCents: 4_500, dateKey: todayKey() });
+    execOn(temp, (db) => db.run("INSERT INTO settings (id, user_name, show_ledger) VALUES (1, 'Sam', 1)"));
+
+    const { result, replays } = await countLedgerReplays(() => getSidebarData());
+
+    expect(replays).toBe(1);
+    expect(result.netWorth).toEqual(await getNetWorth());
+    expect(result.accounts).toEqual(await getAccountBalances({ includeArchived: true }));
+    expect(result.assets).toEqual(await getAssets());
+    const settings = await getSettings();
+    expect({ userName: result.userName, showLedger: result.showLedger })
+      .toEqual({ userName: settings.userName, showLedger: settings.showLedger });
+    expect(result.userName).toBe("Sam");
+    expect(result.showLedger).toBe(true);
+  });
+});
 
 describe("the sidebar cannot disagree with the home page", () => {
   it("echoes getNetWorth() and lists rows that add up to it", async () => {
