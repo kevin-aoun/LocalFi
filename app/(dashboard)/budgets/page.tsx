@@ -1,9 +1,7 @@
 import {
-  getBudgetHistory,
+  getBudgetOverview,
   getBudgetReallocations,
   getBudgets,
-  getCategorySpend,
-  getSpendVsBudget,
 } from "@/app/actions/budgets";
 import { getCategories } from "@/app/actions/categories";
 import { historyRange } from "@/components/budgets/budget-view-logic";
@@ -21,14 +19,13 @@ export default async function BudgetsPage() {
   const month = periodContaining("monthly", today);
   const monthlyHistory = historyRange("monthly", today, INITIAL_HISTORY_PERIODS);
 
-  const [categories, budgets, currentPeriod, history, reallocations, monthlySpendByCategory] = await Promise.all([
+  const [categories, budgets, overview, reallocations] = await Promise.all([
     getCategories(),
     getBudgets(),
-    getSpendVsBudget({ dateKey: today }),
-    getBudgetHistory({ ...monthlyHistory, period: "monthly" }),
+    getBudgetOverview({ dateKey: today, history: { ...monthlyHistory, period: "monthly" } }),
     getBudgetReallocations(),
-    getCategorySpend({ dateKey: today }),
   ]);
+  const { currentPeriod, history, monthlySpendByCategory } = overview;
 
   return (
     <BudgetsClient

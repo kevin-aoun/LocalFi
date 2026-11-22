@@ -546,3 +546,44 @@ describe("immutable interactive transaction flows", () => {
     expect((await verifyLedger()).ok).toBe(true);
   });
 });
+
+describe("getTransactions allocations", () => {
+  it("attaches each transaction's own allocations, in position order", async () => {
+    const idOf = (result: unknown) => (result as { data: { id: number } }).data.id;
+    const payment = idOf(await createTransfer(form({
+      fromAccountId: 1,
+      toAccountId: 2,
+      amount: "110.00",
+      principalAmount: "100.00",
+      interestCategoryId: 11,
+      date: "2026-08-02T00:00:00",
+    })));
+    const groceries = idOf(await createTransaction(form({
+      accountId: 1,
+      categoryId: 10,
+      amount: "10.00",
+      date: "2026-08-03T00:00:00",
+    })));
+    const second = idOf(await createTransfer(form({
+      fromAccountId: 1,
+      toAccountId: 2,
+      amount: "105.00",
+      principalAmount: "100.00",
+      interestCategoryId: 14,
+      date: "2026-08-04T00:00:00",
+    })));
+    // A projection-only second split row; getTransactions reports allocations as stored.
+    execOn(temp, (db) => db.run(
+      "INSERT INTO transaction_allocations (transaction_id, position, category_id, amount_cents) VALUES (?, 1, 10, 300)",
+      [payment],
+    ));
+
+    const byId = new Map((await getTransactions()).map((row) => [row.id, row.allocations]));
+    expect(byId.get(payment)).toEqual([
+      { categoryId: 11, amountCents: 1_000 },
+      { categoryId: 10, amountCents: 300 },
+    ]);
+    expect(byId.get(second)).toEqual([{ categoryId: 14, amountCents: 500 }]);
+    expect(byId.get(groceries)).toEqual([]);
+  });
+});

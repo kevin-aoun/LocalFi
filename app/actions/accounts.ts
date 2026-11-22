@@ -3,13 +3,14 @@
 import { and, asc, desc, eq, gte, lte, isNull, or } from "drizzle-orm";
 import { revalidate } from "@/lib/revalidate";
 
-import { readDb, withDb } from "@/lib/db/client";
+import { readDb, withDb, type BudgetDb } from "@/lib/db/client";
 import {
   accountKindForType,
   accountKinds,
   accountTypes,
   accounts,
   assetHistory,
+  assets,
   netWorthSnapshots,
   transactionAllocations,
   transactions,
@@ -26,7 +27,11 @@ import {
 } from "@/lib/cash-balance";
 import { fromDateKey, isDateKey, toDateKey, todayKey, type DateKey } from "@/lib/dates";
 import { parseAmount, type Cents } from "@/lib/money";
+import { dailyCashRows } from "@/components/dashboard/cash-series";
+import { currentHoldings } from "@/lib/investments/holdings";
+import { getCategories } from "./categories";
 import { refreshLivePricedAssets } from "./crypto";
+import { getSettings } from "./settings";
 import {
   buildTransactionMovements,
   correctLedgerEventInput,
@@ -34,10 +39,12 @@ import {
   postLedgerEventRaw,
   readAccountMovements,
   readAccountBalances,
+  readCurrentMovements,
   readPositionValuations,
   readUnassignedAccountMovements,
   registerLedgerAccount,
   type CanonicalMetadata,
+  type CurrentLedgerMovement,
   type LedgerMovementInput,
 } from "@/lib/ledger";
 import type { Database } from "sql.js";
@@ -211,11 +218,12 @@ function journalBalances(
   accountRows: readonly Account[],
   raw: Database,
   asOfKey: DateKey,
+  currentMovements?: readonly CurrentLedgerMovement[],
 ): AccountBalance[] {
-  const posted = readAccountBalances(raw, { asOfKey });
+  const posted = readAccountBalances(raw, { asOfKey, currentMovements });
   const byId = new Map(posted.map((row) => [row.accountId, { ...row }]));
   const unassigned = new Map<string, Cents[]>();
-  for (const movement of readUnassignedAccountMovements(raw, { toKey: asOfKey })) {
+  for (const movement of readUnassignedAccountMovements(raw, { toKey: asOfKey, currentMovements })) {
     const bucket = unassigned.get(movement.currency) ?? [];
     bucket.push(movement.amountCents as Cents);
     unassigned.set(movement.currency, bucket);
@@ -257,9 +265,10 @@ function worthFromJournal(
   accountRows: readonly Account[],
   raw: Database,
   asOfKey: DateKey,
+  currentMovements?: readonly CurrentLedgerMovement[],
 ): NetWorth {
-  const balances = journalBalances(accountRows, raw, asOfKey);
-  const valuations = readPositionValuations(raw, asOfKey);
+  const balances = journalBalances(accountRows, raw, asOfKey, currentMovements);
+  const valuations = readPositionValuations(raw, asOfKey, currentMovements);
   return deriveNetWorth({
     accounts: balances.map((balance) => ({
       id: balance.accountId!,
@@ -307,34 +316,15 @@ export async function getDefaultAccountId(): Promise<number | null> {
 }
 
 
-export async function getLedgerCashMovements() {
-  return readDb((_db, raw) => {
-    const movements = [
-      ...readAccountMovements(raw),
-      ...readUnassignedAccountMovements(raw).map((movement) => ({ ...movement, accountId: null })),
-    ];
-    return movements.map((movement) => ({
-      date: fromDateKey(movement.dateKey),
-      categoryId: null,
-      amountCents: Math.abs(movement.amountCents) as Cents,
-      direction: movement.amountCents < 0 ? "outflow" as const : "inflow" as const,
-      currency: movement.currency,
-      pending: false,
-      accountId: movement.accountId,
-      transferAccountId: null,
-    }));
-  });
-}
-
-
-export async function getAccountBalances(options?: {
-  includeArchived?: boolean;
-}): Promise<AccountWithBalance[]> {
-  const includeArchived = options?.includeArchived !== false;
-  const { rows, balances } = await readDb(async (db, raw) => {
-    const rows = await db.select().from(accounts).orderBy(asc(accounts.id));
-    return { rows, balances: journalBalances(rows, raw, todayKey()) };
-  });
+async function accountsWithBalances(
+  db: BudgetDb,
+  raw: Database,
+  asOfKey: DateKey,
+  includeArchived: boolean,
+  currentMovements?: readonly CurrentLedgerMovement[],
+): Promise<AccountWithBalance[]> {
+  const rows = await db.select().from(accounts).orderBy(asc(accounts.id));
+  const balances = journalBalances(rows, raw, asOfKey, currentMovements);
 
   const byId = new Map<number, AccountBalance>();
   for (const balance of balances) {
@@ -353,6 +343,14 @@ export async function getAccountBalances(options?: {
         balanceKind: (balance?.balanceCents ?? 0) < 0 ? "liability" : "asset",
       };
     });
+}
+
+
+export async function getAccountBalances(options?: {
+  includeArchived?: boolean;
+}): Promise<AccountWithBalance[]> {
+  const includeArchived = options?.includeArchived !== false;
+  return readDb((db, raw) => accountsWithBalances(db, raw, todayKey(), includeArchived));
 }
 
 
@@ -389,6 +387,33 @@ export async function getNetWorthHistory(options?: {
       ? query.where(and(...conditions)).orderBy(asc(netWorthSnapshots.date))
       : query.orderBy(asc(netWorthSnapshots.date));
   });
+}
+
+/**
+ * Everything Home shows, from one Server Action and one ledger replay. The client runs actions
+ * one at a time, and each separate read (holdings, cash, net worth, balances) replayed the ledger.
+ */
+export async function getDashboardData() {
+  const dateKey = todayKey();
+  const [ledger, categories, settings, history] = await Promise.all([
+    readDb(async (db, raw) => {
+      const current = readCurrentMovements(raw);
+      const assetRows = await db.select().from(assets).orderBy(asc(assets.id));
+      return {
+        assets: currentHoldings(assetRows, readPositionValuations(raw, dateKey, current)),
+        cashMovements: dailyCashRows([
+          ...readAccountMovements(raw, { currentMovements: current }),
+          ...readUnassignedAccountMovements(raw, { currentMovements: current }),
+        ]),
+        netWorth: { ...worthFromJournal(await db.select().from(accounts), raw, dateKey, current), dateKey },
+        accounts: await accountsWithBalances(db, raw, dateKey, true, current),
+      };
+    }),
+    getCategories(),
+    getSettings(),
+    getNetWorthHistory(),
+  ]);
+  return { ...ledger, categories, userName: settings.userName || "", history };
 }
 
 

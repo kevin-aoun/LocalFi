@@ -1,12 +1,14 @@
 
 import { describe, expect, it } from "vitest";
-import { deriveCashBalanceCents } from "@/lib/cash-balance";
+import { deriveCashBalanceCents, deriveCashBalancesByCurrency } from "@/lib/cash-balance";
+import { fromDateKey, type DateKey } from "@/lib/dates";
 import { sumCents } from "@/lib/money";
 import {
   buildCashCandles,
   cashContributionCents,
   computeCashGrowth,
   countsTowardsCash,
+  dailyCashRows,
   formatPeriodLabel,
   groupKey,
 } from "../cash-series";
@@ -323,5 +325,61 @@ describe("computeCashGrowth replaces the hardcoded zero", () => {
     );
     expect(growth.baselineCents).toBe(100000);
     expect(growth.growthAmountCents).toBe(0);
+  });
+});
+
+describe("dailyCashRows nets account movements without changing the chart", () => {
+  const movement = (dateKey: DateKey, amountCents: number, currency = "USD") => ({ dateKey, amountCents, currency });
+  // Openings, same-day transfer legs, a day that nets to zero, and a currency that nets to zero.
+  const movements = [
+    movement("2026-04-01", 100_000),
+    movement("2026-04-01", 50_000, "EUR"),
+    movement("2026-04-15", -20_000),
+    movement("2026-04-15", 20_000),
+    movement("2026-04-30", -5_000),
+    movement("2026-04-30", 1_250, "GBP"),
+    movement("2026-05-01", -2_500),
+    movement("2026-05-01", -7_500),
+    movement("2026-05-03", -50_000, "EUR"),
+    movement("2026-05-03", 12_000),
+    movement("2026-05-31", -1_250, "GBP"),
+    movement("2026-06-02", 3_000),
+    movement("2026-06-02", -3_000),
+    movement("2026-06-02", 4_000, "EUR"),
+    movement("2026-06-07", -11_000),
+  ];
+  // The rows Home received before netting: one per account movement.
+  const perMovement = movements.map((row) => ({
+    date: fromDateKey(row.dateKey),
+    categoryId: null,
+    amountCents: Math.abs(row.amountCents),
+    direction: row.amountCents < 0 ? "outflow" as const : "inflow" as const,
+    currency: row.currency,
+    pending: false,
+    accountId: 1,
+    transferAccountId: null,
+  }));
+  const daily = dailyCashRows(movements);
+
+  it("sends one row per day and currency", () => {
+    expect(daily).toHaveLength(12);
+    expect(daily.filter((row) => row.amountCents === 0)).toEqual([
+      expect.objectContaining({ date: fromDateKey("2026-04-15"), currency: "USD", direction: "inflow" }),
+      expect.objectContaining({ date: fromDateKey("2026-06-02"), currency: "USD", direction: "inflow" }),
+    ]);
+  });
+
+  it("keeps every balance, growth figure, and candle identical", () => {
+    expect(deriveCashBalancesByCurrency(daily, [])).toEqual(deriveCashBalancesByCurrency(perMovement, []));
+    expect(deriveCashBalancesByCurrency(daily, []).map((row) => row.currency)).toEqual(["EUR", "GBP", "USD"]);
+    for (const currency of ["USD", "EUR", "GBP", undefined]) {
+      for (const period of ["daily", "weekly", "monthly"] as const) {
+        expect(buildCashCandles(daily, [], period, currency)).toEqual(buildCashCandles(perMovement, [], period, currency));
+      }
+      if (currency === undefined) continue;
+      for (const now of [new Date(2026, 4, 2), new Date(2026, 5, 20)]) {
+        expect(computeCashGrowth(daily, [], now, currency)).toEqual(computeCashGrowth(perMovement, [], now, currency));
+      }
+    }
   });
 });

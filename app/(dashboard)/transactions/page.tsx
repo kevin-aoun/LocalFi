@@ -175,10 +175,10 @@ export default function TransactionsPage() {
   useEffect(() => {
     void loadData();
     const refresh = () => { void loadData(); };
-    window.addEventListener("localfi:financial-updated", refresh);
+    // Not "localfi:financial-updated": while this page is open only its own writes dispatch it, and
+    // each already calls loadData; listening too reloaded the whole list twice per save or delete.
     window.addEventListener("focus", refresh);
     return () => {
-      window.removeEventListener("localfi:financial-updated", refresh);
       window.removeEventListener("focus", refresh);
     };
   }, [loadData]);
