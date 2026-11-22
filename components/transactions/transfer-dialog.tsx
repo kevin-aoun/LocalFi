@@ -19,6 +19,7 @@ import {
   emptyTransferForm,
   toTransferFormData,
   transferFormFromTransaction,
+  transferDebitPreview,
   validateTransferForm,
   type StoredTransfer,
   type TransferFormState,
@@ -72,12 +73,8 @@ export function TransferDialog({
   const currencyOf = (id: string) => accounts.find((a) => String(a.id) === id)?.currency ?? "USD";
 
   const previewCents = tryParseAmount(form.amount);
-  const principalPreview = form.principalAmount.trim() === ""
-    ? previewCents
-    : tryParseAmount(form.principalAmount);
-  const interestPreview = previewCents !== null && principalPreview !== null
-    ? previewCents - principalPreview
-    : null;
+  const feePreview = tryParseAmount(form.fees.trim() || "0");
+  const totalDebitPreview = transferDebitPreview(form.amount, form.fees);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,6 +101,7 @@ export function TransferDialog({
       }
 
       onSuccess();
+      window.dispatchEvent(new Event("localfi:financial-updated"));
       onOpenChange(false);
     } catch (err) {
       console.error("Failed to save transfer:", err);
@@ -139,12 +137,11 @@ export function TransferDialog({
             {transfer ? "Edit Transfer" : "New Transfer"}
           </DialogTitle>
           <DialogDescription>
-            Moving money between your own accounts. A transfer has no category: it is
-            neither income nor expense and leaves your net worth unchanged.
+            Move money between your accounts. Any fee is recorded as a separate expense.
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
           {error && (
             <div
               role="alert"
@@ -161,7 +158,7 @@ export function TransferDialog({
             </div>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-end">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-end">
             <div className="space-y-2">
               <Label htmlFor="transfer-from">From</Label>
               <Select
@@ -204,7 +201,7 @@ export function TransferDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="transfer-amount">Amount</Label>
+            <Label htmlFor="transfer-amount">Amount transferred</Label>
             <Input
               id="transfer-amount"
               type="number"
@@ -215,48 +212,43 @@ export function TransferDialog({
               placeholder="0.00"
               required
             />
-            {previewCents !== null && form.fromAccountId !== "" && form.toAccountId !== "" && (
+            {previewCents !== null && totalDebitPreview !== null && form.fromAccountId !== "" && form.toAccountId !== "" && (
               <p className="text-xs text-muted-foreground">
-                {nameOf(form.fromAccountId)} −{formatMoney(previewCents, currencyOf(form.fromAccountId))}
+                {nameOf(form.fromAccountId)} −{formatMoney(totalDebitPreview, currencyOf(form.fromAccountId))}
                 {" · "}
                 {nameOf(form.toAccountId)} +{formatMoney(previewCents, currencyOf(form.toAccountId))}
               </p>
             )}
           </div>
 
-          <div className="space-y-3 rounded-md border p-3">
-            <div>
-              <p className="text-sm font-medium">Principal and interest (optional)</p>
-              <p className="text-xs text-muted-foreground">
-                Leave blank for a normal transfer. For a debt payment, enter the amount that
-                reduces principal; the remainder is recorded once as interest or a fee.
-              </p>
-            </div>
+          <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="transfer-principal">Principal amount</Label>
+                <Label htmlFor="transfer-fees">Fees</Label>
                 <Input
-                  id="transfer-principal"
+                  id="transfer-fees"
                   type="number"
                   step="0.01"
                   min="0"
-                  value={form.principalAmount}
-                  onChange={(event) => set("principalAmount", event.target.value)}
-                  placeholder="Same as total"
+                  value={form.fees}
+                  onChange={(event) => set("fees", event.target.value)}
+                  placeholder="0.00"
                 />
+                <p className="text-xs text-muted-foreground">Paid on top of the transferred amount. Leave at 0 if none.</p>
               </div>
+              {feePreview !== null && feePreview > 0 && (
               <div className="space-y-2">
-                <Label htmlFor="transfer-interest-category">Interest / fee category</Label>
+                <Label htmlFor="transfer-fee-category">Fee category</Label>
                 <Select
-                  value={form.interestCategoryId}
-                  onValueChange={(value) => set("interestCategoryId", value)}
+                  value={form.feeCategoryId}
+                  onValueChange={(value) => set("feeCategoryId", value)}
                 >
-                  <SelectTrigger id="transfer-interest-category">
+                  <SelectTrigger id="transfer-fee-category">
                     <SelectValue placeholder="Choose category" />
                   </SelectTrigger>
                   <SelectContent>
                     {expenseCategories
-                      .filter((category) => category.type.toLowerCase() !== "income")
+                      .filter((category) => category.type === "Expense")
                       .map((category) => (
                         <SelectItem key={category.id} value={String(category.id)}>
                           {category.name}
@@ -265,11 +257,12 @@ export function TransferDialog({
                   </SelectContent>
                 </Select>
               </div>
+              )}
             </div>
-            {interestPreview !== null && interestPreview > 0 && (
+            {feePreview !== null && feePreview > 0 && previewCents !== null && (
               <p className="text-xs text-muted-foreground">
-                Principal {formatMoney(principalPreview ?? 0, currencyOf(form.toAccountId))}
-                {" · "}Interest / fee {formatMoney(interestPreview, currencyOf(form.fromAccountId))}
+                Creates two transactions: a {formatMoney(previewCents, currencyOf(form.fromAccountId))} transfer
+                {" and a "}{formatMoney(feePreview, currencyOf(form.fromAccountId))} fee expense.
               </p>
             )}
           </div>

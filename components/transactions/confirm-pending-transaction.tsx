@@ -14,12 +14,14 @@ type ConfirmPendingTransactionProps = {
   transactionId: number;
   onConfirmed: () => Promise<void> | void;
   onError: (message: string) => void;
+  label?: string;
 };
 
 export function ConfirmPendingTransaction({
   transactionId,
   onConfirmed,
   onError,
+  label = "Confirm transaction",
 }: ConfirmPendingTransactionProps) {
   const [open, setOpen] = useState(false);
   const today = todayKey();
@@ -34,6 +36,7 @@ export function ConfirmPendingTransaction({
     }
     setOpen(false);
     await onConfirmed();
+    window.dispatchEvent(new Event("localfi:financial-updated"));
   };
 
   return (
@@ -41,12 +44,12 @@ export function ConfirmPendingTransaction({
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="sm" aria-label="Confirm transaction">
+            <Button variant="ghost" size="sm" aria-label={label}>
               <Check className="h-4 w-4 text-green-600" />
             </Button>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent>Confirm transaction</TooltipContent>
+        <TooltipContent>{label}</TooltipContent>
       </Tooltip>
       <PopoverContent className="w-auto p-3" align="end">
         <div className="flex flex-col gap-2">

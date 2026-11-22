@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -28,6 +28,19 @@ describe("DatePicker contract", () => {
     expect(datePickerSource).toContain("<Popover");
     expect(datePickerSource).not.toMatch(/type\s*=\s*["'](?:date|month)["']/);
     expect(datePickerSource).not.toContain("toISOString");
+  });
+
+  it("uses the shared shadcn picker for purchases and leaves no native calendar inputs in the UI", () => {
+    const purchaseFields = readFileSync(resolve(process.cwd(), "components/assets/asset-form-fields.tsx"), "utf8");
+    expect(purchaseFields).toContain('from "@/components/ui/date-picker"');
+    expect(purchaseFields).toContain('<DatePicker id="purchaseDate"');
+    for (const root of ["app", "components"]) {
+      for (const relative of readdirSync(resolve(process.cwd(), root), { recursive: true })) {
+        if (typeof relative !== "string" || !relative.endsWith(".tsx") || relative.includes("__tests__")) continue;
+        const source = readFileSync(resolve(process.cwd(), root, relative), "utf8");
+        expect(source, `${root}/${relative}`).not.toMatch(/type\s*=\s*\{?\s*["'](?:date|datetime-local|month)["']/);
+      }
+    }
   });
 
   it("keeps report custom ranges on DatePicker", () => {

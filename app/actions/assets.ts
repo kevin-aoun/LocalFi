@@ -6,6 +6,7 @@ import { asc, eq } from "drizzle-orm";
 import { revalidate } from "@/lib/revalidate";
 import { calculateCommodityValue } from "./commodities";
 import { negateCents, sumCents, tryParseAmount, type Cents } from "@/lib/money";
+import { todayKey } from "@/lib/dates";
 import { normalizeLedgerCurrency } from "@/lib/cash-balance";
 import {
   createManualInstrument,
@@ -25,7 +26,8 @@ import {
   pricedHolding,
   quantityInPriceUnits,
 } from "@/lib/prices";
-import { readPositionHistory } from "@/lib/ledger";
+import { readCurrentMovements, readPositionHistory, readPositionValuations } from "@/lib/ledger";
+import { holdingKey } from "@/lib/investments/returns";
 
 export async function getAssets(options?: { includeArchived?: boolean }) {
   const includeArchived = options?.includeArchived === true;
@@ -34,19 +36,26 @@ export async function getAssets(options?: { includeArchived?: boolean }) {
     const rows = await (includeArchived
       ? query.orderBy(asc(assets.id))
       : query.where(eq(assets.archived, false)).orderBy(asc(assets.id)));
-    return rows.map((asset) => {
-      const position = asset.category === "Crypto" && asset.instrumentId
-        ? getExactPosition(raw, asset.instrumentId, asset.currency)
-        : null;
-      const costBasisCents = position?.bookAmountMinor as Cents | undefined;
-      return {
+    const positions = new Map(readPositionValuations(raw, todayKey())
+      .map((position) => [holdingKey(position.instrumentId, position.currency), position]));
+    return rows.flatMap((asset) => {
+      const position = positions.get(holdingKey(asset.instrumentId, asset.currency));
+      // Sold-out holdings leave the holdings list; Reports keep their history and realized gain.
+      if (asset.category !== "Cash" && asset.instrumentId && (!position || position.quantity === "0")) return [];
+      const currentValueCents = position ? position.valueMinor as Cents : asset.currentValueCents;
+      const costBasisCents = position?.costBasisCents;
+      const quantity = position ? Number(position.quantity) : asset.quantity;
+      if (quantity !== null && !Number.isFinite(quantity)) throw new Error("Position quantity cannot be represented by assets");
+      return [{
         ...asset,
+        quantity,
+        currentValueCents,
         quantityExact: position?.quantity ?? null,
         costBasisCents: costBasisCents ?? null,
-        profitLossCents: costBasisCents === undefined
+        profitLossCents: costBasisCents == null
           ? null
-          : sumCents([asset.currentValueCents, negateCents(costBasisCents)]),
-      };
+          : sumCents([currentValueCents, negateCents(costBasisCents)]),
+      }];
     });
   });
 }
@@ -57,6 +66,9 @@ export type InvestmentHistoryRow = {
   assetId: number;
   dateKey: string;
   valueCents: Cents;
+  costBasisCents: Cents | null;
+  realizedGainCents: Cents | null;
+  closed: boolean;
   category: string;
   currency: string;
   label: string;
@@ -71,6 +83,9 @@ export async function getInvestmentHistory(): Promise<InvestmentHistoryRow[]> {
       assetId: row.assetId!,
       dateKey: row.dateKey,
       valueCents: row.valueMinor as Cents,
+      costBasisCents: row.costBasisCents,
+      realizedGainCents: row.realizedGainCents,
+      closed: row.quantity === "0",
       category: row.category,
       currency: row.currency,
       label: row.label,
@@ -452,7 +467,10 @@ export async function deleteAsset(id: number, options?: { confirmed?: boolean })
       if (asset.instrumentId) {
         const opening = findAssetOpeningChain(raw, id);
         const position = getExactPosition(raw, asset.instrumentId, asset.currency);
-        if (position && !opening) {
+        const hasTransactions = readCurrentMovements(raw).some((movement) =>
+          movement.instrumentId === asset.instrumentId && movement.currency === asset.currency &&
+          movement.quantityDelta !== null && movement.chainRootEventId !== opening?.rootEventId);
+        if ((position && !opening) || hasTransactions) {
           return {
             error: "This holding is transaction-backed; delete its purchase transaction instead.",
           } as const;

@@ -8,6 +8,7 @@ export const categories = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull().unique(),
     type: text("type", { enum: ["Income", "Expense", "Investment"] }).notNull(),
+    investmentKind: text("investment_kind", { enum: ["stock", "crypto", "commodity"] }),
 
     monthlyLimitCents: integer("monthly_limit_cents").$type<Cents>(),
 

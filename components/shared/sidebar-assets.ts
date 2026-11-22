@@ -29,6 +29,7 @@ export type SidebarAssetRow = {
   notes?: string | null;
   commodityType?: string | null;
   priceSymbol?: string | null;
+  instrumentId?: string | null;
   costBasisCents?: Cents | null;
   profitLossCents?: Cents | null;
 
@@ -133,8 +134,11 @@ export function derivedCashAssets<T extends { category: string }>(
 
 export function assetHoldingName(asset: SidebarAssetRow): string {
   const notes = trimOrNull(asset.notes);
+  const spec = pricedHolding(asset.priceSymbol);
+  if (spec?.assetCategory === "Crypto" && notes !== null &&
+      firstLine(notes).toLowerCase() === spec.label.toLowerCase()) return spec.symbol;
   if (notes !== null) return firstLine(notes);
-  const symbol = trimOrNull(asset.commodityType) ?? trimOrNull(asset.priceSymbol);
+  const symbol = trimOrNull(asset.commodityType) ?? (asset.priceSymbol?.startsWith("STOCK:") ? pricedHolding(asset.priceSymbol)?.label : null) ?? trimOrNull(asset.priceSymbol);
   if (symbol !== null) return symbol;
   return `${asset.category} holding`;
 }
@@ -142,13 +146,14 @@ export function assetHoldingName(asset: SidebarAssetRow): string {
 
 export function assetHoldingDetail(asset: SidebarAssetRow): string | null {
   const parts: string[] = [];
-  const symbol = trimOrNull(asset.commodityType) ?? trimOrNull(asset.priceSymbol);
+  const symbol = trimOrNull(asset.commodityType) ?? (asset.priceSymbol?.startsWith("STOCK:") ? pricedHolding(asset.priceSymbol)?.label : null) ?? trimOrNull(asset.priceSymbol);
   if (symbol !== null && assetHoldingName(asset) !== symbol) parts.push(symbol);
 
   const quantity = asset.quantity;
   if (quantity !== null && quantity !== undefined && Number.isFinite(quantity)) {
     const unit = trimOrNull(asset.unit);
-    parts.push(unit === null ? formatQuantity(quantity) : `${formatQuantity(quantity)} ${unit}`);
+    const exact = asset.quantityExact ?? formatQuantity(quantity);
+    parts.push(unit === null ? exact : `${exact} ${unit}`);
   }
 
   return parts.length === 0 ? null : parts.join(" · ");

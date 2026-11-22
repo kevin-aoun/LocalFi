@@ -110,7 +110,7 @@ describe.sequential("encrypted sql.js client boundary", () => {
     await authorize();
     expect(await readDb((_db, raw) =>
       Number(raw.exec("SELECT COUNT(*) FROM categories")[0].values[0][0])
-    )).toBe(15);
+    )).toBe(18);
   });
 
   it("fails locked without opening or changing an encrypted generation", async () => {
@@ -128,7 +128,7 @@ describe.sequential("encrypted sql.js client boundary", () => {
     await authorize();
     expect(await readDb((_db, raw) =>
       Number(raw.exec("SELECT COUNT(*) FROM categories")[0].values[0][0])
-    )).toBe(15);
+    )).toBe(18);
     await closeDb();
 
     vi.resetModules();
@@ -136,7 +136,7 @@ describe.sequential("encrypted sql.js client boundary", () => {
 
     expect(await secondClient.readDb((_db, raw) =>
       Number(raw.exec("SELECT COUNT(*) FROM categories")[0].values[0][0])
-    )).toBe(15);
+    )).toBe(18);
     await secondClient.closeDb();
 
     secondClient.destroyDatabaseVaultAuthorization(authorization!);

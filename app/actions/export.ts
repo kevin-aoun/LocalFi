@@ -147,6 +147,7 @@ export async function exportTransactionsCsv(
         transferAccountName:
           tx.transferAccountId == null ? null : (accountById.get(tx.transferAccountId)?.name ?? `#${tx.transferAccountId}`),
         currency,
+        direction: tx.direction,
       });
     }
 
@@ -210,7 +211,7 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
           instants: "ISO-8601 UTC",
           fx: "none applied: each row carries its own currency",
           amounts:
-            "transaction amounts are MAGNITUDES; the direction comes from the category type, or from transferTo for a transfer",
+            "transaction amounts are MAGNITUDES; direction says whether money entered (inflow) or left (outflow) the account, or moved between accounts (transfer). Investment trades also carry an instrumentId and a signed exact quantity",
         },
       },
       accounts: raw.accounts.map((row) => ({
@@ -242,6 +243,10 @@ export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> 
         accountId: row.accountId,
         transferAccountId: row.transferAccountId,
         amount: money(row.amountCents),
+        direction: row.direction,
+        currency: row.currency,
+        instrumentId: row.instrumentId,
+        quantity: row.quantityDelta,
         comment: row.comment,
         pending: row.pending,
         recurringId: row.recurringId,

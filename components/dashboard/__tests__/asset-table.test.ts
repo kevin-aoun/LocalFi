@@ -46,6 +46,7 @@ function asset(values: Partial<SidebarAssetRow> & { category: string }): Sidebar
     quantity: values.quantity ?? null,
     quantityExact: values.quantityExact ?? null,
     unit: values.unit ?? null,
+    instrumentId: values.instrumentId ?? null,
   };
 }
 
@@ -232,10 +233,11 @@ describe("cash is a row in the table, not a footnote", () => {
     expect(holding.tone).toBe("negative");
   });
 
-  it("an account with a balance of exactly 0 is a real row, not a missing one", () => {
+  it("shows an account with exactly zero balance when explicitly requested", () => {
     const view = buildAssetTable({
       assets: [asset({ category: "Crypto", currentValueCents: 100_00 })],
       accounts: [account({ id: 1, name: "Main", balanceCents: 0 })],
+      showZeroCashBalances: true,
     });
     const cash = view.categories.find((category) => category.name === CASH_CATEGORY)!;
     expect(cash.count).toBe(1);
@@ -764,6 +766,7 @@ describe("the table and the allocation bar cannot disagree", () => {
     [
       "a portfolio with zeros",
       {
+        showZeroCashBalances: true,
         assets: [
           asset({ category: "Crypto", currentValueCents: 0 }),
           asset({ category: "Savings", currentValueCents: 0 }),
@@ -959,6 +962,37 @@ describe("mixed currencies are never summed", () => {
 // ---------------------------------------------------------------------------
 
 describe("zero is a real value, not an absent one", () => {
+  it("hides zero cash accounts by default without hiding positive, negative or zero-valued investments", () => {
+    const view = buildAssetTable({
+      accounts: [
+        account({ id: 101, name: "Demo checking", balanceCents: 50000 }),
+        account({ id: 102, name: "Settled loan", balanceCents: 0, type: "Loan" }),
+        account({ id: 103, name: "Settled receivable", balanceCents: 0 }),
+        account({ id: 104, name: "Overdraft", balanceCents: -100 }),
+      ],
+      assets: [asset({ category: "Investments", currentValueCents: 0 })],
+    });
+    expect(view.categories.find((row) => row.name === CASH_CATEGORY)?.holdings.map((row) => row.key)).toEqual(["account-101", "account-104"]);
+    expect(view.categories.find((row) => row.name === "Investments")?.count).toBe(1);
+    expect(view.zeroBalanceAccountCount).toBe(2);
+    expect(view.visibleTotalsLabel).toBe("$499.00");
+    expect(view.filter.active).toBe(false);
+  });
+
+  it("keeps an all-zero cash portfolio available to reveal", () => {
+    const input = { accounts: [account({ id: 101, name: "Demo checking", balanceCents: 0 })], assets: [] };
+    const view = buildAssetTable(input);
+    expect(view).toMatchObject({ isEmpty: false, zeroBalanceAccountCount: 1, categories: [] });
+    expect(buildAssetTable({ ...input, showZeroCashBalances: true }).categories[0].holdings).toHaveLength(1);
+    expect(buildAssetTable({ ...input, accounts: [{ ...input.accounts[0], balanceCents: 1 }] }).categories[0].holdings).toHaveLength(1);
+  });
+
+  it("keeps nonzero cash accounts whose combined balance is zero", () => {
+    const view = buildAssetTable({ assets: [], accounts: [account({ name: "Demo checking", balanceCents: 100 }), account({ name: "Demo overdraft", balanceCents: -100 })] });
+    expect(view.categories[0].count).toBe(2);
+    expect(view.zeroBalanceAccountCount).toBe(0);
+  });
+
   it("lists a holding worth exactly $0.00", () => {
     const view = buildAssetTable({
       assets: [
@@ -1219,5 +1253,24 @@ describe("the owner's portfolio, row by row", () => {
     const total = view.allocations.reduce((sum, entry) => sum + (entry.percentage ?? 0), 0);
     expect(total).toBeCloseTo(100, 10);
     expect(view.visibleTotalsLabel).toBe("$699.34");
+  });
+});
+
+describe("sell actions on Home rows", () => {
+  it("sells manual holdings in full, priced holdings by units, and never cash accounts", () => {
+    const view = buildAssetTable({
+      assets: [
+        asset({ id: 501, category: "Properties", notes: "Demo flat", currentValueCents: 100_00, quantityExact: "1", instrumentId: "instrument:manual:a" }),
+        asset({ id: 502, category: "Crypto", priceSymbol: "BTC", currentValueCents: 50_00, quantityExact: "0.25", instrumentId: "instrument:security:BTC" }),
+        asset({ id: 503, category: "Other", notes: "Legacy", currentValueCents: 10_00 }),
+      ],
+      accounts: [account({ name: "Checking", balanceCents: 20_00 })],
+    });
+    const holdings = view.categories.flatMap((category) => category.holdings);
+    const saleOf = (name: string) => holdings.find((holding) => holding.name === name)?.sale;
+    expect(saleOf("Demo flat")).toEqual({ kind: "manual", assetId: 501, label: "Demo flat", currency: "USD" });
+    expect(saleOf("BTC")).toMatchObject({ kind: "priced", symbol: "BTC", quantity: "0.25", unit: "coins" });
+    expect(saleOf("Legacy")).toBeNull();
+    expect(saleOf("Checking")).toBeNull();
   });
 });

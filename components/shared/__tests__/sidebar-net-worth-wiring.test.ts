@@ -129,7 +129,7 @@ describe("the sidebar cannot disagree with the home page", () => {
     expect(before.summary.netWorthLabel).toBe(formatMoney(100_000));
 
     seedTransaction(temp, { categoryId: 1, accountId: 1, amountCents: 30_000, dateKey: todayKey() });
-    seedAsset(temp, { category: "Crypto", currentValueCents: 45_000 });
+    seedAsset(temp, { category: "Investments", currentValueCents: 45_000 });
 
     const input = await loadSidebarInput();
     const after = buildSidebarView(input);

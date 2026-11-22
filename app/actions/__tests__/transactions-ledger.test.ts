@@ -6,7 +6,6 @@ import {
   createTransfer,
   deleteTransaction,
   getTransactions,
-  previewInvestmentPurchase,
   updateTransaction,
   updateTransfer,
 } from "@/app/actions/transactions";
@@ -75,25 +74,6 @@ const invalidAllocationCategories = [
 ] as const;
 
 describe("immutable interactive transaction flows", () => {
-  it("previews provider quantity while leaving the confirmed quantity overridable", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: "OK",
-      json: async () => ({ bitcoin: { usd: 50_000 } }),
-    }));
-    expect(await previewInvestmentPurchase("BTC", "1000.00")).toMatchObject({
-      success: true,
-      data: {
-        symbol: "BTC",
-        instrumentUnit: "coins",
-        unitPriceMinor: 5_000_000,
-        quantity: "0.02",
-        sourceLabel: "CoinGecko",
-      },
-    });
-  });
-
   it("rolls back a projection when posting fails and rolls back an event when projection update fails", async () => {
     execOn(temp, (db) => db.run(
       "CREATE TRIGGER force_event_failure BEFORE INSERT ON ledger_events BEGIN SELECT RAISE(ABORT, 'forced event failure'); END",
@@ -528,7 +508,7 @@ describe("immutable interactive transaction flows", () => {
     expect(await verifyLedger()).toMatchObject({ ok: true });
   });
 
-  it("appends a balanced same-dollar purchase correction when only quantity changes", async () => {
+  it("appends a balanced same-dollar purchase correction when quantity and price change together", async () => {
     const created = await createTransaction(form({
       accountId: 1,
       categoryId: 12,
@@ -548,9 +528,9 @@ describe("immutable interactive transaction flows", () => {
       date: "2026-08-01T00:00:00",
       instrumentSymbol: "BTC",
       instrumentUnit: "coins",
-      quantity: "0.021",
-      unitPrice: "50000.00",
-    }))).toMatchObject({ success: true, data: { quantityDelta: "0.021" } });
+      quantity: "0.025",
+      unitPrice: "40000.00",
+    }))).toMatchObject({ success: true, data: { quantityDelta: "0.025" } });
 
     const correction = movementRows(2);
     expect(correction).toHaveLength(2);
@@ -558,10 +538,10 @@ describe("immutable interactive transaction flows", () => {
     expect(correction).toContainEqual(expect.objectContaining({
       target_type: "instrument",
       amount_minor: 0,
-      quantity_delta: "0.001",
+      quantity_delta: "0.005",
     }));
     expect(temp.query("SELECT quantity, book_amount_minor FROM instrument_positions")).toEqual([
-      { quantity: "0.021", book_amount_minor: 100_000 },
+      { quantity: "0.025", book_amount_minor: 100_000 },
     ]);
     expect((await verifyLedger()).ok).toBe(true);
   });

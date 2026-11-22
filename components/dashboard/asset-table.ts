@@ -16,6 +16,7 @@ import {
   type SidebarAssetRow,
   type SidebarHolding,
 } from "@/components/shared/sidebar-assets";
+import { pricedSaleTarget, saleTargetFor, type SaleTarget } from "@/components/assets/sell-holding-logic";
 import { formatMoney, negateCents, sumCents, type Cents } from "@/lib/money";
 import { addCanonicalDecimals } from "@/lib/ledger/decimal";
 
@@ -23,7 +24,10 @@ export const CASH_CATEGORY = DERIVED_CASH_CATEGORY;
 
 export const ACCOUNT_MANAGE_HREF = "/accounts";
 
-export type AssetTableHolding<T extends SidebarAssetRow> = SidebarHolding &
+export type AssetTableHolding<T extends SidebarAssetRow> = SidebarHolding & {
+  /** What the Sell action sells, or null when the row cannot be sold from Home. */
+  sale: SaleTarget | null;
+} &
   (
     | {
         source: "asset";
@@ -109,6 +113,7 @@ export type AssetTableView<T extends SidebarAssetRow> = {
   derivedCashLabel: string | null;
 
   cashAccountCount: number;
+  zeroBalanceAccountCount: number;
 };
 
 export const ASSET_TABLE_AUTO_EXPAND_LIMIT = 8;
@@ -163,6 +168,7 @@ export type AssetTableInput<T extends SidebarAssetRow> = {
   accounts: readonly AccountRow[];
 
   hidden?: HiddenKeys;
+  showZeroCashBalances?: boolean;
 };
 
 type ListedRow<T extends SidebarAssetRow> = {
@@ -181,6 +187,7 @@ function listedRows<T extends SidebarAssetRow>(input: AssetTableInput<T>): Liste
     if ((account.balanceKind ?? account.kind) === "liability") continue;
     const holding: AssetTableHolding<T> = {
       ...accountHolding(account),
+      sale: null,
       source: "account",
       asset: null,
       account,
@@ -204,8 +211,10 @@ function listedRows<T extends SidebarAssetRow>(input: AssetTableInput<T>): Liste
       else cryptoGroups.set(key, [asset]);
       continue;
     }
+    const display = assetHolding(asset);
     const holding: AssetTableHolding<T> = {
-      ...assetHolding(asset),
+      ...display,
+      sale: saleTargetFor(asset, display.name),
       source: "asset",
       asset,
       account: null,
@@ -234,6 +243,7 @@ function listedRows<T extends SidebarAssetRow>(input: AssetTableInput<T>): Liste
       amountLabel: formatMoney(valueCents, first.currency),
       note: null,
       tone: valueCents > 0 ? "positive" : valueCents < 0 ? "negative" : "neutral",
+      sale: pricedSaleTarget(symbol, quantity, first.currency, symbol),
       source: "crypto-summary",
       asset: null,
       account: null,
@@ -290,7 +300,9 @@ function buildFilter<T extends SidebarAssetRow>(
 export function buildAssetTable<T extends SidebarAssetRow>(
   input: AssetTableInput<T>,
 ): AssetTableView<T> {
-  const all = listedRows(input);
+  const listed = listedRows(input);
+  const zeroBalanceAccountCount = listed.filter((row) => row.holding.source === "account" && row.currentValueCents === 0).length;
+  const all = input.showZeroCashBalances ? listed : listed.filter((row) => row.holding.source !== "account" || row.currentValueCents !== 0);
   const hiddenKeys = asKeySet(input.hidden);
 
   const visible: ListedRow<T>[] = [];
@@ -365,12 +377,13 @@ export function buildAssetTable<T extends SidebarAssetRow>(
 
     visibleTotalsLabel: formatCurrencyTotals(currencyTotals),
     mixed: currencyTotals.length > 1,
-    isEmpty: all.length === 0,
+    isEmpty: listed.length === 0,
     filter: buildFilter(all, hiddenRows),
     derivedCashCount: cashRows.length,
     derivedCashLabel:
       cashRows.length === 0 ? null : formatCurrencyTotals(totalsByCurrency(cashRows)),
-    cashAccountCount: all.filter((row) => row.holding.source === "account").length,
+    cashAccountCount: listed.filter((row) => row.holding.source === "account").length,
+    zeroBalanceAccountCount,
   };
 }
 

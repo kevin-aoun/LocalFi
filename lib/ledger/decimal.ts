@@ -58,3 +58,10 @@ export function negateCanonicalDecimal(value: string): string {
   const canonical = canonicalDecimal(value);
   return canonical === "0" ? "0" : canonical.startsWith("-") ? canonical.slice(1) : `-${canonical}`;
 }
+
+/** numerator ÷ denominator for a non-negative numerator, rounded half up. */
+export function divideRoundHalfUp(numerator: bigint, denominator: bigint): bigint {
+  if (denominator <= BigInt(0)) throw new Error("Division needs a positive denominator");
+  const quotient = numerator / denominator;
+  return (numerator % denominator) * BigInt(2) >= denominator ? quotient + BigInt(1) : quotient;
+}

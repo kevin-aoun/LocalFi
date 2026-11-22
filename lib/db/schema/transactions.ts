@@ -1,4 +1,4 @@
-import { sqliteTable, integer, text, index, uniqueIndex, check, primaryKey } from "drizzle-orm/sqlite-core";
+import { sqliteTable, integer, text, index, uniqueIndex, check, primaryKey, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import { categories } from "./categories";
 import { accounts } from "./accounts";
@@ -41,7 +41,9 @@ export const transactions = sqliteTable(
     }),
 
     quantityDelta: text("quantity_delta"),
+    investmentDraft: text("investment_draft"),
     transferPrincipalAmountCents: integer("transfer_principal_amount_cents").$type<Cents>(),
+    feeForTransferId: integer("fee_for_transfer_id").references((): AnySQLiteColumn => transactions.id),
     comment: text("comment"),
     pending: integer("pending", { mode: "boolean" }).notNull().default(false),
 
@@ -61,6 +63,7 @@ export const transactions = sqliteTable(
     accountIdx: index("transactions_account_idx").on(table.accountId),
     categoryIdx: index("transactions_category_idx").on(table.categoryId),
     dateIdx: index("transactions_date_idx").on(table.date),
+    transferFeeUnique: uniqueIndex("transactions_transfer_fee_unique").on(table.feeForTransferId),
 
     recurringOccurrenceUnique: uniqueIndex("transactions_recurring_occurrence_unique")
       .on(table.recurringId, table.recurringOccurrence)

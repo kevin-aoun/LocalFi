@@ -8,6 +8,7 @@ import {
   toTransferFormData,
   transferFormFromTransaction,
   validateTransferForm,
+  transferDebitPreview,
   type TransferFormState,
 } from "../transfer-form-logic";
 
@@ -19,8 +20,8 @@ function state(over: Partial<TransferFormState> = {}): TransferFormState {
     comment: "To savings",
     date: new Date(2026, 6, 28),
     pending: false,
-    principalAmount: "",
-    interestCategoryId: "",
+    fees: "0",
+    feeCategoryId: "",
     ...over,
   };
 }
@@ -34,6 +35,8 @@ describe("buildTransferFormValues", () => {
       comment: "To savings",
       date: "2026-07-28T00:00:00",
       pending: "false",
+      fees: "0",
+      feeCategoryId: "",
     });
   });
 
@@ -56,13 +59,13 @@ describe("buildTransferFormValues", () => {
     expect(formData.get("pending")).toBe("true");
   });
 
-  it("adds principal and interest fields only for an explicit split", () => {
+  it("sends fees separately from the amount transferred", () => {
     expect(buildTransferFormValues(state())).not.toHaveProperty("principalAmount");
     expect(buildTransferFormValues(state({
-      amount: "110.00",
-      principalAmount: "100.00",
-      interestCategoryId: "9",
-    }))).toMatchObject({ principalAmount: "100.00", interestCategoryId: "9" });
+      amount: "100.00",
+      fees: "10.00",
+      feeCategoryId: "9",
+    }))).toMatchObject({ amount: "100.00", fees: "10.00", feeCategoryId: "9" });
   });
 
   it("serializes the picked day, not its UTC equivalent", () => {
@@ -131,22 +134,24 @@ describe("validateTransferForm", () => {
     expect(buildTransferFormValues(state({ comment: "" })).comment).toBe("");
   });
 
-  it("validates a principal and interest split", () => {
+  it("validates fees and requires their expense category only when fees are positive", () => {
     expect(validateTransferForm(state({
       amount: "110.00",
-      principalAmount: "100.00",
-      interestCategoryId: "9",
+      fees: "10.00",
+      feeCategoryId: "9",
     }))).toBeNull();
     expect(validateTransferForm(state({
       amount: "110.00",
-      principalAmount: "100.00",
-      interestCategoryId: "",
+      fees: "10.00",
+      feeCategoryId: "",
     }))).toMatch(/category/i);
     expect(validateTransferForm(state({
       amount: "110.00",
-      principalAmount: "120.00",
-      interestCategoryId: "9",
-    }))).toMatch(/exceed/i);
+      fees: "-1",
+      feeCategoryId: "9",
+    }))).toMatch(/fees/i);
+    expect(validateTransferForm(state({ fees: "bad" }))).toMatch(/fees/i);
+    expect(validateTransferForm(state({ fees: "" }))).toBeNull();
   });
 });
 
@@ -195,9 +200,20 @@ describe("transferFormFromTransaction", () => {
       allocations: [{ categoryId: 9, amountCents: 1_000 }],
       date: new Date(2026, 6, 28),
     });
-    expect(form.principalAmount).toBe("100");
-    expect(form.interestCategoryId).toBe("9");
+    expect(form.amount).toBe("100");
+    expect(form.fees).toBe("10");
+    expect(form.feeCategoryId).toBe("9");
     expect(validateTransferForm(form)).toBeNull();
+  });
+
+  it("hydrates a transfer and its separate fee without subtracting the fee twice", () => {
+    const form = transferFormFromTransaction({ id: 12, accountId: 10, transferAccountId: 11, amountCents: 10000,
+      transferPrincipalAmountCents: 10000, feeAmountCents: 250, feeCategoryId: 9, date: new Date(2026, 6, 28) });
+    expect(form).toMatchObject({ amount: "100", fees: "2.5", feeCategoryId: "9" });
+    expect(transferDebitPreview(form.amount, form.fees)).toBe(10250);
+    expect(transferDebitPreview("0", "0")).toBe(0);
+    expect(transferDebitPreview("100", "-1")).toBeNull();
+    expect(transferDebitPreview("90071992547409.91", "0.01")).toBeNull();
   });
 
   it("survives a row whose accounts are missing", () => {

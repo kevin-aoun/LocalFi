@@ -19,6 +19,9 @@ function value(argv: string[], name: string): string | undefined {
 
 async function main() {
   const argv = process.argv.slice(2);
+  if (flag(argv, "days") || flag(argv, "carry-unpriced")) {
+    throw new Error("Historical prices are no longer fetched. Use --from and --to to replay recorded ledger observations.");
+  }
   const dbPath = path.resolve(value(argv, "db") ?? process.env.BUDGET_DB_PATH ?? path.join("data", "budget.db"));
   const isLiveFile = dbPath === path.resolve(path.join("data", "budget.db"));
   const apply = flag(argv, "apply") && !flag(argv, "dry-run");
@@ -68,17 +71,10 @@ async function main() {
     console.log("");
   }
 
-  const daysFlag = value(argv, "days");
   const run = await runNetWorthReconstruction({
     fromKey: value(argv, "from"),
     toKey: value(argv, "to"),
     today: value(argv, "today"),
-    days: daysFlag === undefined ? undefined : Number(daysFlag),
-    carryUnpriced: flag(argv, "carry-unpriced"),
-    onPriceRateLimitRetry: (symbol, delayMs) =>
-      console.log(
-        `  CoinGecko rate-limited ${symbol}; waiting ${Math.ceil(delayMs / 1000)}s, then retrying once...`,
-      ),
     apply,
   });
 

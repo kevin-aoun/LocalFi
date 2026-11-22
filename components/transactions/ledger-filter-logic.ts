@@ -4,6 +4,7 @@ import { monthKey, toDateKey, type DateKey, type MonthKey } from "@/lib/dates";
 import type { Cents } from "@/lib/money";
 
 export type LedgerRow = {
+  direction?: "inflow" | "outflow" | "transfer" | null;
   id?: number;
   date: Date | string | number;
 

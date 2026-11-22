@@ -241,6 +241,7 @@ describe("0003 — schema after replaying from empty", () => {
         "account_id->accounts",
         "category_id->categories",
         "current_event_id->ledger_events",
+        "fee_for_transfer_id->transactions",
         "instrument_id->instruments",
         "recurring_id->recurring_transactions",
         "transfer_account_id->accounts",

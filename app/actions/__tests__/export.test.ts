@@ -337,3 +337,17 @@ describe("exportDatabaseFile / describeDatabaseLocation", () => {
     expect("error" in result && result.error).toMatch(/truncated/i);
   });
 });
+
+describe("exports state each transaction's direction", () => {
+  it("marks an investment sale as an inflow in CSV and JSON instead of implying a purchase", async () => {
+    seedTransaction(temp, { id: 8, categoryId: 3, accountId: 10, amountCents: 50_000, dateKey: "2026-02-15", comment: "Sold shares" });
+    execOn(temp, (db) => db.run("UPDATE transactions SET direction = 'inflow' WHERE id = 8"));
+    const csv = ok(await exportTransactionsCsv({ fromKey: "2026-02-15", toKey: "2026-02-15" })).csv.replace(/^﻿/, "");
+    const [header, row] = csv.split("\r\n");
+    expect(header.split(",").at(-1)).toBe("Direction");
+    expect(row.split(",").at(-1)).toBe("inflow");
+    const payload = JSON.parse(ok(await exportJsonBackup()).json);
+    expect(payload.transactions.find((tx: { id: number }) => tx.id === 8)).toMatchObject({ direction: "inflow", currency: "USD", instrumentId: null, quantity: null });
+    expect(payload.meta.conventions.amounts).not.toMatch(/comes from the category type/);
+  });
+});

@@ -758,6 +758,7 @@ function orphanSnapshot(
     instrumentId: row.instrumentId,
     quantityDelta: row.quantityDelta,
     transferPrincipalAmountCents: row.transferPrincipalAmountCents,
+    ...(row.feeForTransferId == null ? {} : { feeForTransferId: row.feeForTransferId }),
     allocations: allocations.map((allocation) => ({ ...allocation })),
     createdAt: transactionEpoch(row.createdAt),
     updatedAt: transactionEpoch(updatedAt),

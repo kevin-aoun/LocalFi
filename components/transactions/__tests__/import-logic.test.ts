@@ -325,7 +325,8 @@ describe("duplicate detection", () => {
       currency: "eur",
       direction: "outflow" as const,
     };
-    expect(dedupeKey(complete)).toBe("2026-07-28|4500|1|7|EUR|outflow|spinneys");
+    expect(dedupeKey(complete)).toBe("2026-07-28|4500|1|7|EUR|outflow|confirmed|spinneys");
+    expect(dedupeKey({ ...complete, pending: true })).not.toBe(dedupeKey(complete));
     expect(dedupeKey({ ...complete, accountId: 8 })).not.toBe(dedupeKey(complete));
     expect(dedupeKey({ ...complete, currency: "USD" })).not.toBe(dedupeKey(complete));
     expect(dedupeKey({ ...complete, direction: "inflow" })).not.toBe(dedupeKey(complete));
