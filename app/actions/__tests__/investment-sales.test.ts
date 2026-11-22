@@ -48,6 +48,25 @@ describe("ledger asset sales", () => {
     expect((await verifyLedger()).failures).toEqual([]);
   });
 
+  it("records a gifted holding at zero cost without pricing the market at zero", async () => {
+    await save(trade("BTC", { quantity: "1", unitPrice: "100", fees: "0" }));
+    const gift = await save(trade("BTC", { quantity: "1", unitPrice: "0", fees: "0", date: "2026-01-03" }));
+    expect(gift).toMatchObject({ amountCents: 0, quantityDelta: "1" });
+    expect(temp.query("SELECT amount_minor FROM instrument_observations ORDER BY observed_day")).toEqual([
+      { amount_minor: 10_000 },
+    ]);
+    // Two coins cost 100.00 in total and are still valued at the last market price.
+    expect((await getInvestmentHistory()).at(-1)).toMatchObject({ valueCents: 20_000, costBasisCents: 10_000, realizedGainCents: 0 });
+    expect((await getAccountBalances()).find((row) => row.id === 9)?.balanceCents).toBe(90_000);
+    expect((await verifyLedger()).failures).toEqual([]);
+  });
+
+  it("keeps a gift as the only purchase at a known zero cost", async () => {
+    await save(trade("XAU", { quantity: "1", unitPrice: "0", fees: "0" }));
+    expect((await getInvestmentHistory()).at(-1)).toMatchObject({ costBasisCents: 0, realizedGainCents: 0, closed: false });
+    expect(temp.query("SELECT COUNT(*) AS count FROM instrument_observations")).toEqual([{ count: 0 }]);
+  });
+
   it("uses weighted average purchase cost for partial sales, including fees", async () => {
     await save(trade("BTC", { quantity: "1", unitPrice: "100", fees: "1" }));
     await save(trade("BTC", { quantity: "1", unitPrice: "200", fees: "1", date: "2026-01-03" }));

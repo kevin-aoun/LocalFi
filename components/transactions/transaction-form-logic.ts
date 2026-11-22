@@ -63,7 +63,7 @@ export function validateTransactionForm(state: TransactionFormState): string | n
       return "Enter an exact positive investment quantity.";
     }
     try { parsePurchaseUnitPrice(investmentValues[2]); } catch {
-      return "Enter a positive unit price with up to four decimal places.";
+      return "Enter a unit price of 0 or more with up to four decimal places.";
     }
     const fees = tryParseAmount(state.fees?.trim() || "0");
     if (fees === null || fees < 0) return "Enter a non-negative fee amount.";
