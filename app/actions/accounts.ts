@@ -469,8 +469,11 @@ export async function updateAccount(id: number, formData: FormData): Promise<Act
         : existing.currency;
 
       if (currency !== existing.currency) {
-        const hasPostedActivity = readAccountMovements(raw).some((movement) => movement.accountId === id);
-        if (hasPostedActivity) {
+        // Pending drafts keep the currency they were entered in and would post it later.
+        const [draft] = await db.select({ id: transactions.id }).from(transactions)
+          .where(or(eq(transactions.accountId, id), eq(transactions.transferAccountId, id))).limit(1);
+        const hasActivity = draft !== undefined || readAccountMovements(raw).some((movement) => movement.accountId === id);
+        if (hasActivity) {
           throw new Error(
             `Cannot change ${existing.name} from ${existing.currency} to ${currency} because the account has transaction history.`,
           );

@@ -225,6 +225,13 @@ describe("createAccount", () => {
       .toBe("EUR");
   });
 
+  it("refuses to change currency while a pending draft would still post the old one", async () => {
+    const account = unwrap(await createAccount(form({ name: "Euro drafts", type: "Checking", currency: "EUR" })));
+    seedTransaction(temp, { categoryId: 1, accountId: account.id, amountCents: 5_000, dateKey: "2026-07-01", pending: true });
+    expect(await updateAccount(account.id, form({ currency: "USD" }))).toMatchObject({ error: expect.stringMatching(/transaction history/i) });
+    expect((await getAccounts({ includeArchived: true })).find((row) => row.id === account.id)?.currency).toBe("EUR");
+  });
+
   it("refuses to file a mortgage as an asset", async () => {
     const result = await createAccount(form({ name: "House", type: "Mortgage", kind: "asset" }));
     expect(result).toMatchObject({ error: expect.stringMatching(/must have kind 'liability'/) });
