@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { LivePriceRefresh } from "@/components/assets/live-price-refresh";
 import {
   AlertTriangle,
   BarChart3,
@@ -94,6 +96,8 @@ export default function ReportsClient({
   bounds,
   investmentHistory,
 }: ReportsClientProps) {
+  const router = useRouter();
+  const refreshPrices = useCallback(() => router.refresh(), [router]);
   const [reportView, setReportView] = useState<"cash-flow" | "investments">("cash-flow");
   const [preset, setPreset] = useState<RangePreset>("last-12-months");
   const [customFrom, setCustomFrom] = useState<string>(
@@ -332,7 +336,10 @@ export default function ReportsClient({
           <span>{report.error}</span>
         </div>
       ) : reportView === "investments" ? (
-        <InvestmentPerformance rows={investmentHistory} range={report.range} />
+        <div className="space-y-4">
+          <LivePriceRefresh onRefresh={refreshPrices} />
+          <InvestmentPerformance rows={investmentHistory} range={report.range} />
+        </div>
       ) : (
         <>
           {}

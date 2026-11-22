@@ -456,6 +456,12 @@ describe("zeroes and emptiness are real states", () => {
 });
 
 describe("what an expanded row shows", () => {
+  it.each([["BTC", "Bitcoin"], ["ETH", "Ethereum"]])("uses %s for the provider name %s", (priceSymbol, notes) => {
+    const row = asset({ category: "Crypto", priceSymbol, notes, quantity: 2, unit: "coins" });
+    expect(assetHoldingName(row)).toBe(priceSymbol);
+    expect(assetHoldingDetail(row)).toBe("2 coins");
+  });
+
   it("names a holding by its note, then its symbol, then its category", () => {
     expect(assetHoldingName(asset({ category: "Properties", notes: "  Beirut flat  " }))).toBe(
       "Beirut flat",

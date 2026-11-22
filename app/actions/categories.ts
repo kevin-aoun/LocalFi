@@ -4,12 +4,20 @@ import { readDb, withDb } from "@/lib/db/client";
 import { categories, transactions } from "@/lib/db/schema";
 import { asc, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { INVESTMENT_KINDS, type InvestmentKind } from "@/lib/investments/categories";
 
 const CATEGORY_TYPES = ["Income", "Expense", "Investment"] as const;
 type CategoryType = (typeof CATEGORY_TYPES)[number];
 
 function isCategoryType(value: string): value is CategoryType {
   return CATEGORY_TYPES.includes(value as CategoryType);
+}
+
+function readInvestmentKind(formData: FormData, type: CategoryType): InvestmentKind | null {
+  const kind = String(formData.get("investmentKind") ?? "");
+  if (type !== "Investment" || kind === "") return null;
+  if (!INVESTMENT_KINDS.includes(kind as InvestmentKind)) throw new Error("Choose valid transaction fields");
+  return kind as InvestmentKind;
 }
 
 function revalidateCategorySurfaces() {
@@ -60,6 +68,7 @@ export async function createCategory(formData: FormData) {
         .values({
           name,
           type,
+          investmentKind: readInvestmentKind(formData, type),
           displayOrder: nextOrder,
           icon: formData.get("icon") as string,
           color: formData.get("color") as string,
@@ -107,6 +116,7 @@ export async function updateCategory(id: number, formData: FormData) {
         .set({
           name,
           type,
+          ...(formData.has("investmentKind") || type !== "Investment" ? { investmentKind: readInvestmentKind(formData, type) } : {}),
           ...(displayOrder === undefined ? {} : { displayOrder }),
 
 

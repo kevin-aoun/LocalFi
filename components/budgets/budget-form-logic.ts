@@ -19,6 +19,7 @@ export type BudgetFormState = {
   type: string;
   icon: string;
   color: string;
+  investmentKind?: string | null;
 };
 
 export function buildCategoryFormValues(state: BudgetFormState): Record<string, string> {
@@ -27,6 +28,7 @@ export function buildCategoryFormValues(state: BudgetFormState): Record<string, 
     type: state.type,
     icon: state.icon,
     color: state.color,
+    ...(state.investmentKind !== undefined ? { investmentKind: state.type === "Investment" ? state.investmentKind ?? "" : "" } : {}),
   };
 }
 

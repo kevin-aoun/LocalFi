@@ -656,7 +656,7 @@ describe("buildTransactionsCsv", () => {
         accountName: "Checking",
         pending: false,
         transferAccountName: null,
-        currency: "USD",
+        currency: "USD", direction: "outflow",
       },
     ]);
     expect(csv).toContain('"Coffee, ""black""\nsecond line"');

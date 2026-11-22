@@ -21,12 +21,10 @@ import {
   ArrowUp,
   ArrowDown,
   Clock,
-  Coins,
   Search,
   X,
 } from "lucide-react";
 import { TransactionDialog } from "@/components/transactions/transaction-dialog";
-import { AssetDialog } from "@/components/assets/asset-dialog";
 import { TransferDialog } from "@/components/transactions/transfer-dialog";
 import { ImportDialog } from "@/components/transactions/import-dialog";
 import { getTransactions, deleteTransaction } from "@/app/actions/transactions";
@@ -82,6 +80,9 @@ type LedgerTransaction = {
   instrumentId?: string | null;
   quantityDelta?: string | null;
   transferPrincipalAmountCents?: Cents | null;
+  feeForTransferId?: number | null;
+  feeAmountCents?: Cents | null;
+  feeCategoryId?: number | null;
   allocations?: Array<{ categoryId: number; amountCents: Cents }>;
 };
 
@@ -141,11 +142,6 @@ export default function TransactionsPage() {
 
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<LedgerTransaction | null>(null);
-  const [cryptoPurchaseOpen, setCryptoPurchaseOpen] = useState(false);
-  const [cryptoPurchaseDefaults, setCryptoPurchaseDefaults] = useState<{
-    accountId: number | null;
-    categoryId: number | null;
-  }>({ accountId: null, categoryId: null });
 
   const loadData = useCallback(async () => {
     const [txData, catData, settings, accountData, defaultId] = await Promise.all([
@@ -178,6 +174,13 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     void loadData();
+    const refresh = () => { void loadData(); };
+    window.addEventListener("localfi:financial-updated", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener("localfi:financial-updated", refresh);
+      window.removeEventListener("focus", refresh);
+    };
   }, [loadData]);
 
   const rows = transactions as LedgerTransaction[];
@@ -262,6 +265,13 @@ export default function TransactionsPage() {
   };
 
   const openEdit = (tx: LedgerTransaction) => {
+    if (tx.feeForTransferId != null) {
+      const transfer = rows.find((row) => row.id === tx.feeForTransferId);
+      if (!transfer) { setActionError("The fee's transfer could not be loaded. Refresh Transactions."); return; }
+      setSelectedTransfer(transfer);
+      setTransferDialogOpen(true);
+      return;
+    }
     if (isTransfer(tx)) {
       setSelectedTransfer(tx);
       setTransferDialogOpen(true);
@@ -273,11 +283,6 @@ export default function TransactionsPage() {
   const openAddTransfer = () => {
     setSelectedTransfer(null);
     setTransferDialogOpen(true);
-  };
-
-  const openCryptoPurchase = (defaults: { accountId: number | null; categoryId: number | null }) => {
-    setCryptoPurchaseDefaults(defaults);
-    setCryptoPurchaseOpen(true);
   };
 
   const handleSort = (column: LedgerSortColumn) => {
@@ -428,13 +433,6 @@ export default function TransactionsPage() {
           <Button variant="outline" onClick={openAddTransfer}>
             <ArrowLeftRight className="mr-2 h-4 w-4" />
             Transfer
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => openCryptoPurchase({ accountId: defaultAccountId, categoryId: null })}
-          >
-            <Coins className="mr-2 h-4 w-4" />
-            Crypto
           </Button>
           <Button onClick={openAddDialog}>
             <Plus className="mr-2 h-4 w-4" />
@@ -763,6 +761,7 @@ export default function TransactionsPage() {
                         <div className="flex items-center justify-end gap-1">
                           <ConfirmPendingTransaction
                             transactionId={transaction.id}
+                            label={transaction.feeForTransferId != null || (transaction.feeAmountCents ?? 0) > 0 ? "Confirm transfer and fee" : undefined}
                             onError={setActionError}
                             onConfirmed={async () => {
                               setActionError(null);
@@ -959,24 +958,6 @@ export default function TransactionsPage() {
         accounts={pickerAccounts}
         defaultAccountId={defaultAccountId}
         quickCommands={quickCommands}
-        onCreateCryptoPurchase={openCryptoPurchase}
-        onSuccess={loadData}
-      />
-
-      <AssetDialog
-        open={cryptoPurchaseOpen}
-        onOpenChange={setCryptoPurchaseOpen}
-        cryptoPurchase
-        initialPurchaseAccountId={cryptoPurchaseDefaults.accountId}
-        initialPurchaseCategoryId={cryptoPurchaseDefaults.categoryId}
-        accounts={accounts.map((account) => ({
-          id: account.id,
-          name: account.name,
-          currency: account.currency,
-          kind: account.kind,
-          archived: account.archived,
-        }))}
-        categories={categories}
         onSuccess={loadData}
       />
 
@@ -1007,7 +988,9 @@ export default function TransactionsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Transaction</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this transaction? This action cannot be undone.
+              {(rows.find((row) => row.id === transactionToDelete)?.feeAmountCents ?? 0) > 0
+                ? "This deletes the transfer and its linked fee expense."
+                : "Are you sure you want to delete this transaction? This action cannot be undone."}
             </AlertDialogDescription>
           </AlertDialogHeader>
 

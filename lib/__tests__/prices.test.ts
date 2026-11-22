@@ -8,7 +8,6 @@ import {
   GRAMS_PER_TROY_OUNCE,
   PRICED_HOLDINGS,
   PRICE_PROVIDERS,
-  PRICE_PROXIES,
   PRICE_SYMBOLS,
   canBePriced,
   cryptoPriceSymbols,
@@ -18,7 +17,6 @@ import {
   fetchPriceQuote,
   fetchPriceQuotes,
   holdingValueCents,
-  holdingValueFromQuotes,
   isPriceSymbol,
   parseCoinGeckoPrice,
   priceRequestInit,
@@ -79,9 +77,9 @@ const quoteFor = (symbol: "XAU" | "XAG" | "BTC", price: number): PriceQuote => (
   fetchedAt: 1_785_000_000_000,
 });
 
-describe("there is exactly one provider", () => {
-  it("lists CoinGecko and nothing else", () => {
-    expect([...PRICE_PROVIDERS]).toEqual(["coingecko"]);
+describe("keyless price providers", () => {
+  it("uses CoinGecko for coins and Yahoo for stocks", () => {
+    expect([...PRICE_PROVIDERS]).toEqual(["coingecko", "yahoo"]);
   });
 
   it("routes every priceable symbol through CoinGecko", () => {
@@ -123,12 +121,6 @@ describe("what one unit of each price actually is", () => {
       expect(proxy!.unitEvidence.length).toBeGreaterThan(40);
       expect(proxy!.tracking).toMatch(/2026-08-06/);
     }
-  });
-
-  it("shares the gold proxy id with the historical series — one mapping, not two", async () => {
-    const { HISTORICAL_PRICE_SOURCES } = await import("@/lib/history/prices");
-    expect(HISTORICAL_PRICE_SOURCES.XAU!.coinGeckoId).toBe(PRICE_PROXIES.XAU.coinGeckoId);
-    expect(PRICED_HOLDINGS.XAU.coinGeckoId).toBe(PRICE_PROXIES.XAU.coinGeckoId);
   });
 
   it("puts Bitcoin and Ethereum on CoinGecko directly, priced per coin, no proxy", () => {
@@ -186,7 +178,7 @@ describe("the registry and the database schema agree", () => {
     const { priceSymbols, quantityUnits, commodityTypes } = await import("@/lib/db/schema/assets");
     expect([...priceSymbols]).toEqual([...PRICE_SYMBOLS]);
 
-    expect([...quantityUnits]).toEqual(["oz", "grams", "coins"]);
+    expect([...quantityUnits]).toEqual(["oz", "grams", "coins", "shares"]);
 
     expect([...commodityTypes]).toEqual(["Gold", "Silver", "Platinum", "Palladium"]);
     for (const symbol of cryptoPriceSymbols) {
@@ -516,7 +508,7 @@ describe("a rate limit is not an outage", () => {
     expect(throttled).toMatch(/rate-limit/i);
     expect(throttled).toMatch(/wait about a minute/i);
     expect(throttled).toMatch(/NOT offline/);
-    expect(throttled).toMatch(/nothing was saved/i);
+    expect(throttled).toMatch(/stored value is kept/i);
 
     const offline = describePriceError({
       code: "network_error",
@@ -546,7 +538,7 @@ describe("a rate limit is not an outage", () => {
 });
 
 describe("describePriceError", () => {
-  it("names the holding and the provider, and says nothing was saved", () => {
+  it("names the holding and provider without implying purchase transactions failed", () => {
     const message = describePriceError({
       code: "http_error",
       symbol: "BTC",
@@ -556,7 +548,8 @@ describe("describePriceError", () => {
     });
     expect(message).toMatch(/Bitcoin/);
     expect(message).toMatch(/CoinGecko/);
-    expect(message).toMatch(/nothing was saved/i);
+    expect(message).toMatch(/stored value is kept/i);
+    expect(message).not.toMatch(/nothing was saved|turn off Live Price/i);
     expect(message).not.toMatch(/\$0/);
   });
 
@@ -708,41 +701,3 @@ describe("fetchHoldingValueCents", () => {
   });
 });
 
-describe("holdingValueFromQuotes — valuing N holdings off one batch", () => {
-  it("values a holding against a quote already in hand", async () => {
-    const { fetchImpl, calls } = stubFetch(ok(COINGECKO_OK));
-    const { quotes, errors } = await fetchPriceQuotes(["XAU", "BTC"], { fetchImpl });
-    expect(calls).toHaveLength(1);
-
-    expect(holdingValueFromQuotes("XAU", 1.1376, "oz", quotes, errors)).toMatchObject({
-      ok: true,
-      valueCents: 484_375,
-    });
-    expect(holdingValueFromQuotes("BTC", 0.0345, "coins", quotes, errors)).toMatchObject({
-      ok: true,
-      valueCents: 408_590,
-    });
-    expect(calls).toHaveLength(1);
-  });
-
-  it("passes the batch's own error through rather than inventing one", async () => {
-    const { fetchImpl } = stubFetch({
-      ok: false,
-      status: 429,
-      statusText: "Too Many Requests",
-      json: async () => ({}),
-    });
-    const { quotes, errors } = await fetchPriceQuotes(["BTC"], { fetchImpl });
-    expect(holdingValueFromQuotes("BTC", 1, "coins", quotes, errors)).toMatchObject({
-      ok: false,
-      error: { code: "rate_limited" },
-    });
-  });
-
-  it("still rejects a bad quantity before looking for a quote", () => {
-    expect(holdingValueFromQuotes("BTC", -1, "coins", new Map())).toMatchObject({
-      ok: false,
-      error: { code: "invalid_quantity" },
-    });
-  });
-});

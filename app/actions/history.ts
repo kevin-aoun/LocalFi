@@ -17,8 +17,6 @@ export type ReconstructionRequest = {
   fromKey?: DateKey;
   toKey?: DateKey;
   today?: DateKey;
-  days?: number;
-  carryUnpriced?: boolean;
 };
 
 export type ReconstructionPreview = {

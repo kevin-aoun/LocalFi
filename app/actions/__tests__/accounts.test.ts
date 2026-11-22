@@ -500,7 +500,7 @@ describe("getNetWorth", () => {
     seedTransaction(temp, { categoryId: 2, accountId: 1, amountCents: 449_618, dateKey: "2026-07-01" });
     seedAsset(temp, { category: "Cash", currentValueCents: 449_618, notes: "Auto-calculated" });
     seedAsset(temp, { category: "Commodities", currentValueCents: 532_371 });
-    seedAsset(temp, { category: "Crypto", currentValueCents: 7_000 });
+    seedAsset(temp, { category: "Investments", currentValueCents: 7_000 });
 
     const worth = await getNetWorth();
     expect(worth.standaloneAssetsCents).toBe(539_371);
@@ -567,7 +567,7 @@ describe("snapshotNetWorth", () => {
 
   it("records an idempotent per-holding breakdown with the snapshot", async () => {
     seedAsset(temp, { category: "Commodities", currentValueCents: 532_371, notes: "Gold" });
-    seedAsset(temp, { category: "Crypto", currentValueCents: 7_000, notes: "BTC" });
+    seedAsset(temp, { category: "Investments", currentValueCents: 7_000, notes: "Manual investment" });
     seedAsset(temp, { category: "Cash", currentValueCents: 200_000, notes: "Derived" });
 
     const day = todayKey();

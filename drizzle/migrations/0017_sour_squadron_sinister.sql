@@ -1,0 +1,1 @@
+ALTER TABLE `instrument_observations` ADD `unit_price` text;

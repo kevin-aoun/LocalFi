@@ -1,6 +1,9 @@
 
 import { toDateKey, type DateKey } from "@/lib/dates";
-import { tryParseAmount } from "@/lib/money";
+import { centsToDecimal, tryParseAmount } from "@/lib/money";
+import { parsePurchaseQuantity, parsePurchaseUnitPrice, tradeCashAmount } from "@/lib/investments/cost";
+import type { InvestmentSide } from "@/lib/investments/trades";
+import { investmentKindForSymbol, type InvestmentKind } from "@/lib/investments/categories";
 
 export function toTransactionDateValue(date: Date): string {
   return `${toDateKey(date)}T00:00:00`;
@@ -25,25 +28,18 @@ export type TransactionFormState = {
   quantity?: string;
   unitPrice?: string;
   instrumentUnit?: string;
+  fees?: string;
+  investmentSide?: InvestmentSide;
 };
 
 
-export function previewInvestmentQuantity(amount: string, unitPrice: string, precision = 12): string | null {
-  if (!Number.isInteger(precision) || precision < 0 || precision > 18) return null;
-  const paidMinor = tryParseAmount(amount);
-  const priceMinor = tryParseAmount(unitPrice);
-  if (paidMinor === null || priceMinor === null || paidMinor < 0 || priceMinor <= 0) return null;
-  const scale = BigInt(10) ** BigInt(precision);
-  const numerator = BigInt(paidMinor) * scale;
-  const denominator = BigInt(priceMinor);
-  let quotient = numerator / denominator;
-  if ((numerator % denominator) * BigInt(2) >= denominator) quotient += BigInt(1);
-  if (precision === 0) return quotient.toString();
-  const digits = quotient.toString().padStart(precision + 1, "0");
-  const value = `${digits.slice(0, -precision)}.${digits.slice(-precision)}`
-    .replace(/\.0+$/, "")
-    .replace(/(\.\d*?)0+$/, "$1");
-  return value === "" ? "0" : value;
+export function transactionCashAmount(state: Pick<TransactionFormState, "amount" | "instrumentSymbol" | "quantity" | "unitPrice" | "fees" | "investmentSide">): string {
+  if (!state.instrumentSymbol?.trim()) return state.amount;
+  try {
+    const fees = tryParseAmount(state.fees?.trim() || "0");
+    if (fees === null || fees < 0) return "";
+    return centsToDecimal(tradeCashAmount(state.quantity ?? "", state.unitPrice ?? "", fees, state.investmentSide ?? "buy")).toString();
+  } catch { return ""; }
 }
 
 
@@ -54,9 +50,6 @@ export function validateTransactionForm(state: TransactionFormState): string | n
     const accountId = Number(state.accountId);
     if (!Number.isInteger(accountId) || accountId <= 0) return "Choose a real account.";
   }
-  const amountCents = tryParseAmount(state.amount);
-  if (amountCents === null) return "Enter an amount.";
-  if (amountCents < 0) return "Transaction amount cannot be negative.";
   if (Number.isNaN(state.date.getTime())) return "Choose a valid date.";
   const investmentValues = [
     state.instrumentSymbol,
@@ -66,15 +59,21 @@ export function validateTransactionForm(state: TransactionFormState): string | n
   ].map((value) => value?.trim() ?? "");
   if (investmentValues.some(Boolean)) {
     if (!investmentValues[0]) return "Choose an investment instrument.";
-    if (!investmentValues[1] || !/^\+?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(investmentValues[1])) {
+    try { parsePurchaseQuantity(investmentValues[1]); } catch {
       return "Enter an exact positive investment quantity.";
     }
-    if (Number(investmentValues[1]) <= 0) return "Investment quantity must be positive.";
-    const unitPriceCents = tryParseAmount(investmentValues[2]);
-    if (unitPriceCents === null || unitPriceCents <= 0) {
-      return "Enter the frozen unit price used for this purchase.";
+    try { parsePurchaseUnitPrice(investmentValues[2]); } catch {
+      return "Enter a positive unit price with up to four decimal places.";
     }
+    const fees = tryParseAmount(state.fees?.trim() || "0");
+    if (fees === null || fees < 0) return "Enter a non-negative fee amount.";
+    try { tradeCashAmount(investmentValues[1], investmentValues[2], fees, state.investmentSide ?? "buy"); }
+    catch (error) { return (error as Error).message; }
   }
+  const amountCents = tryParseAmount(transactionCashAmount(state));
+  if (state.investmentSide !== undefined && state.investmentSide !== "buy" && state.investmentSide !== "sell") return "Choose Buy or Sell.";
+  if (amountCents === null) return "Enter an amount.";
+  if (amountCents < 0) return "Transaction amount cannot be negative.";
   return null;
 }
 
@@ -97,8 +96,16 @@ export function buildTransactionFormValues(
     values.quantity = state.quantity?.trim() ?? "";
     values.unitPrice = state.unitPrice?.trim() ?? "";
     values.instrumentUnit = state.instrumentUnit?.trim() ?? "";
+    values.fees = state.fees?.trim() || "0";
+    values.investmentSide = state.investmentSide ?? "buy";
+    values.amount = transactionCashAmount(state);
   }
   return values;
+}
+
+export function transactionInvestmentKind(category: { type: string; investmentKind?: InvestmentKind | null } | undefined, instrumentSymbol = ""): InvestmentKind | null {
+  if (category?.type !== "Investment") return null;
+  return category.investmentKind ?? investmentKindForSymbol(instrumentSymbol);
 }
 
 

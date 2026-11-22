@@ -1,5 +1,5 @@
 
-import { centsToDecimal, tryParseAmount, type Cents } from "@/lib/money";
+import { centsToDecimal, sumCents, tryParseAmount, type Cents } from "@/lib/money";
 import { toTransactionDateValue } from "./transaction-form-logic";
 
 export type TransferFormState = {
@@ -12,8 +12,8 @@ export type TransferFormState = {
   date: Date;
   pending: boolean;
 
-  principalAmount: string;
-  interestCategoryId: string;
+  fees: string;
+  feeCategoryId: string;
 };
 
 export type StoredTransfer = {
@@ -25,6 +25,8 @@ export type StoredTransfer = {
   date: Date | string | number;
   pending?: boolean | null;
   transferPrincipalAmountCents?: Cents | null;
+  feeAmountCents?: Cents | null;
+  feeCategoryId?: number | null;
   allocations?: Array<{ categoryId: number; amountCents: Cents }>;
 };
 
@@ -36,11 +38,9 @@ export function buildTransferFormValues(state: TransferFormState): Record<string
     comment: state.comment,
     date: toTransactionDateValue(state.date),
     pending: state.pending ? "true" : "false",
+    fees: state.fees.trim() || "0",
+    feeCategoryId: state.feeCategoryId.trim(),
   };
-  if (state.principalAmount.trim() !== "" || state.interestCategoryId.trim() !== "") {
-    values.principalAmount = state.principalAmount.trim();
-    values.interestCategoryId = state.interestCategoryId.trim();
-  }
   return values;
 }
 
@@ -90,20 +90,13 @@ export function validateTransferForm(
     return "A transfer amount cannot be negative: swap the two accounts instead.";
   }
 
-  const principalText = state.principalAmount.trim();
-  const interestCategoryText = state.interestCategoryId.trim();
-  if (principalText !== "" || interestCategoryText !== "") {
-    const principal = tryParseAmount(principalText);
-    if (principal === null || principal < 0) return "Enter a valid non-negative principal amount.";
-    if (principal > cents) return "Principal amount cannot exceed the total payment.";
-    const interest = cents - principal;
-    if (interest > 0) {
-      const categoryId = Number(interestCategoryText);
-      if (!Number.isInteger(categoryId) || categoryId <= 0) {
-        return "Choose an interest or fee category for the non-principal amount.";
-      }
-    }
+  const fees = tryParseAmount(state.fees.trim() || "0");
+  if (fees === null || fees < 0) return "Enter valid non-negative fees.";
+  if (fees > 0) {
+    const categoryId = Number(state.feeCategoryId);
+    if (!Number.isInteger(categoryId) || categoryId <= 0) return "Choose an expense category for the fee.";
   }
+  if (transferDebitPreview(state.amount, state.fees) === null) return "Transfer amount plus fees exceeds the supported range.";
 
   return null;
 }
@@ -119,33 +112,34 @@ export function emptyTransferForm(defaultAccountId: number | null | undefined): 
     comment: "",
     date: new Date(),
     pending: false,
-    principalAmount: "",
-    interestCategoryId: "",
+    fees: "0",
+    feeCategoryId: "",
   };
 }
 
 
 export function transferFormFromTransaction(transfer: StoredTransfer): TransferFormState {
+  const amountCents = transfer.transferPrincipalAmountCents ?? transfer.amountCents;
   return {
     fromAccountId: transfer.accountId == null ? "" : String(transfer.accountId),
     toAccountId: transfer.transferAccountId == null ? "" : String(transfer.transferAccountId),
 
 
-    amount: centsToDecimal(transfer.amountCents).toString(),
+    amount: centsToDecimal(amountCents).toString(),
     comment: transfer.comment ?? "",
     date: transfer.date instanceof Date ? transfer.date : new Date(transfer.date),
     pending: transfer.pending === true,
-    principalAmount:
-      transfer.transferPrincipalAmountCents != null && (
-        transfer.transferPrincipalAmountCents !== transfer.amountCents ||
-        (transfer.allocations?.length ?? 0) > 0
-      )
-        ? centsToDecimal(transfer.transferPrincipalAmountCents).toString()
-        : "",
-    interestCategoryId: transfer.allocations?.[0]?.categoryId == null
-      ? ""
-      : String(transfer.allocations[0].categoryId),
+    fees: centsToDecimal(transfer.feeAmountCents ?? (transfer.amountCents - amountCents)).toString(),
+    feeCategoryId: transfer.feeCategoryId != null ? String(transfer.feeCategoryId)
+      : transfer.allocations?.[0]?.categoryId == null ? "" : String(transfer.allocations[0].categoryId),
   };
+}
+
+export function transferDebitPreview(amount: string, fees: string): Cents | null {
+  const transferCents = tryParseAmount(amount);
+  const feeCents = tryParseAmount(fees.trim() || "0");
+  if (transferCents === null || feeCents === null || transferCents < 0 || feeCents < 0) return null;
+  try { return sumCents([transferCents, feeCents]); } catch { return null; }
 }
 
 

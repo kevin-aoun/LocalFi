@@ -51,23 +51,23 @@ export function buildTransactionMovements(facts: TransactionMovementFacts): Ledg
     if (!facts.instrumentTargetId || facts.quantityDelta == null) {
       throw new Error("instrument target and exact quantity must be supplied together");
     }
-    if (facts.direction !== "outflow") {
-      throw new Error("this release supports confirmed instrument purchases only");
-    }
     if (!facts.instrumentBookCounterTargetId) {
       throw new Error("instrument purchases require a registered book counter-target");
     }
     const quantityDelta = canonicalDecimal(facts.quantityDelta);
     if (quantityDelta === "0") throw new Error("instrument quantity delta cannot be zero");
+    if ((facts.direction === "inflow") !== quantityDelta.startsWith("-")) {
+      throw new Error("Purchases require positive units; sales require negative units");
+    }
     movements.push({
       ledgerAccountId: facts.instrumentTargetId,
-      amountMinor: facts.amountMinor,
+      amountMinor: -accountAmount,
       currency,
       quantityDelta,
     });
     movements.push({
       ledgerAccountId: facts.instrumentBookCounterTargetId,
-      amountMinor: -facts.amountMinor,
+      amountMinor: accountAmount,
       currency,
     });
   }

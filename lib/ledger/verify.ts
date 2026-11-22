@@ -437,9 +437,7 @@ export function verifyLedgerRaw(raw: Database): LedgerVerificationResult {
     }
     const actual = rows(
       raw,
-      `SELECT id, date, category_id, account_id, transfer_account_id, amount_cents, direction,
-              currency, comment, pending, recurring_id, recurring_occurrence, instrument_id,
-              quantity_delta, transfer_principal_amount_cents, created_at, updated_at, current_event_id
+      `SELECT *
        FROM transactions WHERE pending = 0 ORDER BY id`,
     );
     if (actual.length !== [...expected.values()].filter((item) => item.transaction !== null).length) {
@@ -464,6 +462,7 @@ export function verifyLedgerRaw(raw: Database): LedgerVerificationResult {
         quantityDelta: row.quantity_delta == null ? null : String(row.quantity_delta),
         transferPrincipalAmountCents: row.transfer_principal_amount_cents == null
           ? null : Number(row.transfer_principal_amount_cents),
+        ...(row.fee_for_transfer_id == null ? {} : { feeForTransferId: Number(row.fee_for_transfer_id) }),
         allocations: rows(
           raw,
           `SELECT category_id, amount_cents FROM transaction_allocations

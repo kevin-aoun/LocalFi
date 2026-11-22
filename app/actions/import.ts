@@ -25,6 +25,8 @@ export type ImportRowInput = {
 
   amount: string;
   comment: string;
+  currency?: string | null;
+  pending?: boolean;
 };
 
 export type ImportOptions = {
@@ -87,6 +89,8 @@ export async function importTransactions(
     amountCents: Cents;
     comment: string | null;
     direction?: Exclude<TransactionDirection, "transfer">;
+    currency: string | null;
+    pending: boolean;
   };
   const prepared: Prepared[] = [];
 
@@ -109,8 +113,16 @@ export async function importTransactions(
       return { error: `${label}: amount cannot be negative. Nothing was imported.` };
     }
 
+    if (row.currency != null && (typeof row.currency !== "string" || !/^[A-Z]{3}$/.test(row.currency.trim().toUpperCase()))) {
+      return { error: `${label}: invalid currency. Nothing was imported.` };
+    }
+    if (row.pending !== undefined && typeof row.pending !== "boolean") {
+      return { error: `${label}: invalid pending status. Nothing was imported.` };
+    }
     prepared.push({
       dateKey: row.date,
+      currency: row.currency?.trim().toUpperCase() ?? null,
+      pending: row.pending ?? false,
       categoryId: row.categoryId,
 
       amountCents: parsed,
@@ -141,6 +153,9 @@ export async function importTransactions(
       }
 
       for (const row of prepared) {
+        if (row.currency !== null && row.currency !== currency) {
+          throw new ImportValidationError(`Cannot import ${row.currency} into a ${currency} account without an exchange rate. Nothing was imported.`);
+        }
         const direction = categoryCashDirection(categoryById.get(row.categoryId)?.type);
         if (direction !== "inflow" && direction !== "outflow") {
           throw new ImportValidationError(
@@ -161,6 +176,7 @@ export async function importTransactions(
             accountId: tx.accountId ?? null,
             currency: tx.currency,
             direction: tx.direction,
+            pending: tx.pending,
             comment: tx.comment,
           }),
         ),
@@ -179,6 +195,7 @@ export async function importTransactions(
           accountId,
           currency,
           direction: row.direction!,
+          pending: row.pending,
           comment: row.comment,
         });
         if (seen.has(key)) {
@@ -207,11 +224,13 @@ export async function importTransactions(
             direction: row.direction!,
             currency,
             comment: row.comment,
-            pending: false,
+            pending: row.pending,
           })),
         ).returning();
 
-        for (const row of inserted) postImportedProjection(raw, row);
+        for (const row of inserted) {
+          if (!row.pending) postImportedProjection(raw, row);
+        }
 
 
 

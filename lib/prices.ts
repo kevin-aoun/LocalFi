@@ -2,14 +2,14 @@
 import { parseAmount, type Cents } from "@/lib/money";
 
 export const PRICE_SYMBOLS = ["XAU", "XAG", "XPT", "XPD", "BTC", "ETH"] as const;
-export type PriceSymbol = (typeof PRICE_SYMBOLS)[number];
+export type PriceSymbol = (typeof PRICE_SYMBOLS)[number] | `STOCK:${string}`;
 
-export const PRICE_PROVIDERS = ["coingecko"] as const;
+export const PRICE_PROVIDERS = ["coingecko", "yahoo"] as const;
 export type PriceProviderId = (typeof PRICE_PROVIDERS)[number];
 
-export type PriceUnit = "oz" | "coin";
+export type PriceUnit = "oz" | "coin" | "share";
 
-export const HOLDING_UNITS = ["oz", "grams", "coins"] as const;
+export const HOLDING_UNITS = ["oz", "grams", "coins", "shares"] as const;
 export type HoldingUnit = (typeof HOLDING_UNITS)[number];
 
 export const GRAMS_PER_TROY_OUNCE = 31.1034768;
@@ -19,6 +19,9 @@ export const DEFAULT_REVALIDATE_SECONDS = 60;
 export const DEFAULT_TIMEOUT_MS = 8_000;
 
 export const COINGECKO_API_BASE = "https://api.coingecko.com/api/v3";
+
+// CSPX's USD London listing needs an exchange suffix at Yahoo; ledger symbols stay unchanged.
+const STOCK_QUOTE_TICKERS: Readonly<Record<string, string>> = { CSPX: "CSPX.L" };
 
 export type PriceProxy = {
 
@@ -87,7 +90,7 @@ export type PricedHoldingSpec = {
 
   noSourceReason: string | null;
 
-  assetCategory: "Commodities" | "Crypto";
+  assetCategory: "Commodities" | "Crypto" | "Investments";
   priceUnit: PriceUnit;
 
   units: readonly HoldingUnit[];
@@ -183,18 +186,32 @@ export const unpriceableSymbols = PRICE_SYMBOLS.filter(
 );
 
 export function isPriceSymbol(value: unknown): value is PriceSymbol {
-  return typeof value === "string" && (PRICE_SYMBOLS as readonly string[]).includes(value);
+  return typeof value === "string" && (
+    (PRICE_SYMBOLS as readonly string[]).includes(value) || /^STOCK:[A-Z][A-Z0-9.-]{0,19}$/.test(value)
+  );
+}
+
+export function stockPriceSymbol(ticker: string): PriceSymbol | null {
+  const symbol = `STOCK:${ticker.trim().toUpperCase()}`;
+  return isPriceSymbol(symbol) ? symbol : null;
 }
 
 export function pricedHolding(symbol: unknown): PricedHoldingSpec | null {
   if (typeof symbol !== "string") return null;
   const upper = symbol.trim().toUpperCase();
+  if (upper.startsWith("STOCK:") && isPriceSymbol(upper)) {
+    return {
+      symbol: upper, label: upper.slice(6), provider: "yahoo", coinGeckoId: null,
+      proxy: null, noSourceReason: null, assetCategory: "Investments", priceUnit: "share",
+      units: ["shares"], defaultUnit: "shares", commodityType: null,
+    };
+  }
   return isPriceSymbol(upper) ? PRICED_HOLDINGS[upper] : null;
 }
 
 export function canBePriced(symbol: unknown): boolean {
   const spec = pricedHolding(symbol);
-  return spec !== null && spec.coinGeckoId !== null;
+  return spec !== null && spec.provider !== null;
 }
 
 export function priceSymbolForCommodityType(
@@ -207,12 +224,6 @@ export function priceSymbolForCommodityType(
     if (legacy !== null && legacy.toLowerCase() === wanted) return symbol;
   }
   return null;
-}
-
-export function commodityTypeForPriceSymbol(
-  symbol: unknown,
-): PricedHoldingSpec["commodityType"] {
-  return pricedHolding(symbol)?.commodityType ?? null;
 }
 
 export type PriceSourceKind = "direct" | "proxy" | "none";
@@ -234,7 +245,7 @@ export function describePriceSource(symbol: unknown): PriceSourceDisclosure {
       detail: `There is no live price feed for "${String(symbol)}".`,
     };
   }
-  if (spec.coinGeckoId === null) {
+  if (spec.provider === null) {
     return {
       kind: "none",
       badge: "No price source",
@@ -253,8 +264,10 @@ export function describePriceSource(symbol: unknown): PriceSourceDisclosure {
   }
   return {
     kind: "direct",
-    badge: "CoinGecko",
-    detail: `${spec.label} priced directly from CoinGecko.`,
+    badge: spec.provider === "yahoo" ? "Yahoo Finance" : "CoinGecko",
+    detail: spec.provider === "yahoo"
+      ? `${spec.label} priced in USD from Yahoo Finance. Quotes may be delayed; outside market hours the last market quote is used.`
+      : `${spec.label} priced directly from CoinGecko.`,
   };
 }
 
@@ -263,7 +276,7 @@ export function priceSourceLabel(symbol: unknown): string {
   const disclosure = describePriceSource(symbol);
   if (disclosure.kind === "proxy") return `CoinGecko · ${disclosure.badge}`;
   if (disclosure.kind === "none") return disclosure.badge;
-  return "CoinGecko";
+  return disclosure.badge;
 }
 
 
@@ -312,6 +325,7 @@ export type PriceQuote = {
   sourceLabel: string;
 
   fetchedAt: number;
+  quotedAt?: number;
 };
 
 export type PriceResult = { ok: true; quote: PriceQuote } | { ok: false; error: PriceError };
@@ -339,6 +353,7 @@ function fail(
 
 const PROVIDER_LABELS: Record<PriceProviderId, string> = {
   coingecko: "CoinGecko",
+  yahoo: "Yahoo Finance",
 };
 
 
@@ -347,7 +362,7 @@ export function describePriceError(error: PriceError): string {
   const what = spec ? `a live ${spec.label} price` : `a live price for "${error.symbol}"`;
   const who = error.provider ? PROVIDER_LABELS[error.provider] : "the price provider";
 
-  const tail = "nothing was saved. Try again, or turn off Live Price and enter the value manually.";
+  const tail = "the last stored value is kept. Try again shortly.";
 
   switch (error.code) {
     case "unknown_symbol":
@@ -372,10 +387,11 @@ export function describePriceError(error: PriceError): string {
         `${who} tier allows only a handful of requests a minute. Wait about a minute and try again.`
       );
     case "http_error":
+      if (error.provider === "yahoo" && error.status === 404) return `${error.message} The last stored value is kept.`;
       return `Could not fetch ${what}: ${who} answered ${error.status ?? "an error"}, so ${tail}`;
     case "malformed_response":
       return (
-        `Could not fetch ${what}: ${who} sent a response this app could not read, so ${tail}`
+        `Could not fetch ${what}: ${error.message} ${who} sent a response this app could not read, so ${tail}`
       );
   }
 }
@@ -480,7 +496,7 @@ export function priceRequestInit(
 }
 
 
-export async function fetchPriceQuotes(
+async function fetchCoinGeckoQuotes(
   symbols: readonly string[],
   options: FetchPriceOptions = {},
 ): Promise<{ quotes: Map<PriceSymbol, PriceQuote>; errors: Map<string, PriceError> }> {
@@ -603,6 +619,60 @@ export async function fetchPriceQuotes(
   return { quotes, errors };
 }
 
+export function parseStockPrice(payload: unknown, ticker: string): ParsedPrice {
+  const chart = isRecord(payload) && isRecord(payload.chart) ? payload.chart : null;
+  const result = chart && Array.isArray(chart.result) ? chart.result[0] : null;
+  const meta = isRecord(result) && isRecord(result.meta) ? result.meta : null;
+  if (!meta || chart?.error || meta.symbol !== ticker || meta.currency !== "USD" ||
+      !["EQUITY", "ETF"].includes(String(meta.instrumentType)) || !usablePrice(meta.regularMarketPrice)) {
+    return { ok: false, code: "malformed_response", message: "Choose a valid stock or ETF quoted in USD. No currency conversion is applied." };
+  }
+  return { ok: true, pricePerUnitUsd: meta.regularMarketPrice };
+}
+
+async function fetchStockQuote(spec: PricedHoldingSpec, options: FetchPriceOptions): Promise<PriceResult> {
+  const ticker = STOCK_QUOTE_TICKERS[spec.label] ?? spec.label;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
+  const doFetch = options.fetchImpl ?? fetch;
+  let response: PriceFetchResponse;
+  try {
+    const init = priceRequestInit(options.revalidateSeconds ?? DEFAULT_REVALIDATE_SECONDS, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    response = await doFetch(url, { ...init, headers: { ...init.headers, "User-Agent": "Mozilla/5.0 LocalFi" } });
+  } catch {
+    return fail("network_error", spec.symbol, "yahoo", "Could not reach Yahoo Finance.");
+  }
+  if (!response || typeof response.ok !== "boolean") return fail("malformed_response", spec.symbol, "yahoo", "No response from Yahoo Finance.");
+  if (!response.ok) return fail(response.status === 429 ? "rate_limited" : "http_error", spec.symbol, "yahoo",
+    response.status === 404 ? `Yahoo Finance could not find ${ticker}. Include the exchange suffix when needed, for example CSPX.L.` : "Stock quote unavailable.", response.status);
+  try {
+    const payload = await response.json();
+    const parsed = parseStockPrice(payload, ticker);
+    if (!parsed.ok) return fail(parsed.code, spec.symbol, "yahoo", parsed.message);
+    const meta = (payload as { chart: { result: { meta: { regularMarketTime?: number } }[] } }).chart.result[0].meta;
+    return { ok: true, quote: {
+      symbol: spec.symbol, label: spec.label, provider: "yahoo", pricePerUnitUsd: parsed.pricePerUnitUsd,
+      priceUnit: "share", proxy: null, sourceLabel: ticker === spec.label ? "Yahoo Finance" : `Yahoo Finance · ${ticker}`, fetchedAt: (options.now ?? Date.now)(),
+      ...(Number.isSafeInteger(meta.regularMarketTime) && meta.regularMarketTime! > 0 ? { quotedAt: meta.regularMarketTime! * 1000 } : {}),
+    } };
+  } catch {
+    return fail("malformed_response", spec.symbol, "yahoo", "Could not read the stock quote.");
+  }
+}
+
+export async function fetchPriceQuotes(symbols: readonly string[], options: FetchPriceOptions = {}) {
+  const stocks = [...new Set(symbols.map((symbol) => pricedHolding(symbol)?.symbol))]
+    .filter((symbol): symbol is PriceSymbol => symbol !== undefined && symbol.startsWith("STOCK:"));
+  const [batch, stockResults] = await Promise.all([
+    fetchCoinGeckoQuotes(symbols.filter((symbol) => !pricedHolding(symbol)?.symbol.startsWith("STOCK:")), options),
+    Promise.all(stocks.map((symbol) => fetchStockQuote(pricedHolding(symbol)!, options))),
+  ]);
+  for (const result of stockResults) {
+    if (result.ok) batch.quotes.set(result.quote.symbol, result.quote);
+    else batch.errors.set(result.error.symbol, result.error);
+  }
+  return batch;
+}
+
 
 export async function fetchPriceQuote(
   symbol: string,
@@ -662,6 +732,8 @@ export function quantityInPriceUnits(
       : unit.trim().toLowerCase();
 
   const UNIT_ALIASES: Record<string, HoldingUnit> = {
+    share: "shares",
+    shares: "shares",
     coin: "coins",
     coins: "coins",
     g: "grams",
@@ -745,46 +817,6 @@ export async function fetchHoldingValueCents(
   if (!valued.ok) return valued;
 
   return { ok: true, valueCents: valued.valueCents, quote: quoted.quote };
-}
-
-
-export function holdingValueFromQuotes(
-  symbol: string,
-  quantity: number | null | undefined,
-  unit: string | null | undefined,
-  quotes: ReadonlyMap<PriceSymbol, PriceQuote>,
-  errors?: ReadonlyMap<string, PriceError>,
-): HoldingValueResult {
-  const spec = pricedHolding(symbol);
-  if (!spec) {
-    return fail(
-      "unknown_symbol",
-      String(symbol),
-      null,
-      `no price provider is registered for "${String(symbol)}"`,
-    );
-  }
-
-  const converted = quantityInPriceUnits(quantity, unit, spec);
-  if (!converted.ok) {
-    return fail(converted.code, spec.symbol, spec.provider, converted.message);
-  }
-
-  const quote = quotes.get(spec.symbol);
-  if (!quote) {
-    const known = errors?.get(spec.symbol);
-    if (known) return { ok: false, error: known };
-    return fail(
-      "malformed_response",
-      spec.symbol,
-      spec.provider,
-      `no quote for ${spec.symbol} was returned by the batch request`,
-    );
-  }
-
-  const valued = holdingValueCents(quote, quantity, unit);
-  if (!valued.ok) return valued;
-  return { ok: true, valueCents: valued.valueCents, quote };
 }
 
 
