@@ -21,18 +21,13 @@ import {
   TrendingUp,
 } from "lucide-react";
 
-import {
-  recordNetWorthToday,
-  type AccountWithBalance,
-  type NetWorthView,
-} from "@/app/actions/accounts";
+import type { AccountWithBalance, NetWorthView } from "@/app/actions/accounts";
 import { describeBalance } from "@/components/accounts/account-form-logic";
 import { formatCurrencyTotals } from "@/components/assets/currency-totals";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { fromDateKey, isDateKey } from "@/lib/dates";
 import { absCents, formatMoney, tryParseAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import {
@@ -43,6 +38,7 @@ import {
   netWorthDomain,
   type NetWorthSnapshotRow,
 } from "./net-worth-series";
+import { BucketValues, bucketLabel, formatDateKey, useRecordNetWorthToday } from "./net-worth-shared";
 
 type NetWorthSectionProps = {
 
@@ -55,52 +51,9 @@ type NetWorthSectionProps = {
   onRecorded: () => void | Promise<void>;
 };
 
-function formatDateKey(key: string): string {
-  return isDateKey(key) ? fromDateKey(key).toLocaleDateString() : key;
-}
-
 const chartConfig = {
   netWorth: { label: "Net worth", color: "hsl(var(--chart-1))" },
 } satisfies ChartConfig;
-
-type BucketMoneyField =
-  | "totalAssetsCents"
-  | "totalLiabilitiesCents"
-  | "netWorthCents"
-  | "standaloneAssetsCents";
-
-function bucketLabel(netWorth: NetWorthView, field: BucketMoneyField): string {
-  return formatCurrencyTotals(
-    netWorth.currencyTotals.map((total) => ({
-      currency: total.currency,
-      totalCents: total[field],
-      count: 1,
-    })),
-  );
-}
-
-function BucketValues({
-  netWorth,
-  field,
-  className,
-}: {
-  netWorth: NetWorthView;
-  field: BucketMoneyField;
-  className: string;
-}) {
-  return (
-    <div className="space-y-0.5">
-      {netWorth.currencyTotals.map((total) => (
-        <div
-          key={total.currency}
-          className={cn(className, field === "netWorthCents" && total[field] < 0 && "text-red-600 dark:text-red-400")}
-        >
-          {formatMoney(total[field], total.currency)}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export function NetWorthSection({
   netWorth,
@@ -108,10 +61,8 @@ export function NetWorthSection({
   history,
   onRecorded,
 }: NetWorthSectionProps) {
-  const [snapshotting, setSnapshotting] = useState(false);
-
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
-  const [snapshotNote, setSnapshotNote] = useState<string | null>(null);
+  const { snapshotting, snapshotNote, handleSnapshot } = useRecordNetWorthToday(onRecorded, setSnapshotError);
 
   const mixed = netWorth.aggregateCurrency === null;
   const currencies = netWorth.currencyTotals.map((total) => total.currency);
@@ -133,30 +84,6 @@ export function NetWorthSection({
   const domain = netWorthDomain(series.points);
 
   const liabilities = liabilitiesForDisplay(accounts);
-
-  const handleSnapshot = async () => {
-    setSnapshotError(null);
-    setSnapshotNote(null);
-    setSnapshotting(true);
-    try {
-      const result = await recordNetWorthToday();
-
-      if (result && "error" in result) {
-        setSnapshotError(result.error || "Failed to record net worth.");
-        return;
-      }
-      setSnapshotNote(
-        `Recorded ${formatMoney(result.data.netWorthCents, result.data.currency)} for ` +
-          `${formatDateKey(result.data.date)}. ${result.data.priceSummary}`,
-      );
-      await onRecorded();
-    } catch (error) {
-      console.error("Failed to snapshot net worth:", error);
-      setSnapshotError(error instanceof Error ? error.message : "Failed to record net worth.");
-    } finally {
-      setSnapshotting(false);
-    }
-  };
 
   const NetWorthTooltip = ({ active, payload }: { active?: boolean; payload?: any[] }) => {
     if (!active || !payload?.length) return null;
