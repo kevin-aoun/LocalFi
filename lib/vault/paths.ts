@@ -54,11 +54,20 @@ export function ensureOwnerOnlyDirectory(directory: string): string {
   return realpathSync(resolved);
 }
 
+// Legacy installs created the backups directory and backup copies with default (umask) modes.
 export function hardenLegacyVaultPathForSetup(file: string): void {
   const requested = path.resolve(file);
   const directory = path.dirname(requested);
   if (!existsSync(directory)) mkdirSync(directory, { recursive: true, mode: DIRECTORY_MODE });
+  hardenLegacyDirectory(directory);
+  const backupDirectory = path.join(directory, "backups");
+  if (existsSync(backupDirectory)) hardenLegacyDirectory(backupDirectory);
+  for (const generation of managedVaultGenerationPaths(requested)) {
+    if (existsSync(generation)) hardenLegacyFile(generation);
+  }
+}
 
+function hardenLegacyDirectory(directory: string): void {
   const directoryLinkStat = lstatSync(directory);
   if (directoryLinkStat.isSymbolicLink() || !directoryLinkStat.isDirectory()) {
     throw new VaultPathError(`Vault directory is not a real directory: ${directory}`);
@@ -81,8 +90,10 @@ export function hardenLegacyVaultPathForSetup(file: string): void {
   } finally {
     closeSync(directoryDescriptor);
   }
+}
 
-  if (!existsSync(requested)) return;
+function hardenLegacyFile(requested: string): void {
+  const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
   const fileLinkStat = lstatSync(requested);
   if (fileLinkStat.isSymbolicLink() || !fileLinkStat.isFile() || fileLinkStat.nlink !== 1) {
     throw new VaultPathError(`Legacy vault generation is not a safe regular file: ${requested}`);
