@@ -15,7 +15,7 @@ import {
 import { buildInitialDatabaseImage } from "../../db/init";
 import { withDatabaseVaultAuthorization } from "../access";
 import { decryptVaultGeneration, destroyVaultKey, unlockVaultEnvelopeWithRecovery } from "../envelope";
-import { VaultLockedError } from "../errors";
+import { VaultLockedError, VaultPermissionError } from "../errors";
 import {
   copyEncryptedGenerationAtomically,
   managedVaultGenerationPaths,
@@ -70,6 +70,21 @@ describe.sequential("single-owner vault sessions", () => {
     writeFileSync(dbPath, await buildInitialDatabaseImage(), { mode: 0o600 });
     const { manager } = controlledManager();
     expect(await manager.status(dbPath)).toBe("uninitialized");
+    chmodSync(dbPath, 0o644);
+    expect(await manager.status(dbPath)).toBe("uninitialized");
+  });
+
+  it("surfaces loose permissions on an encrypted vault instead of offering setup over it", async () => {
+    const { manager } = controlledManager();
+    const setup = await manager.setup(PASSPHRASE, dbPath);
+    await manager.lock(setup.token);
+    chmodSync(dbPath, 0o644);
+    const before = readFileSync(dbPath);
+
+    await expect(manager.status(dbPath)).rejects.toBeInstanceOf(VaultPermissionError);
+    expect(readFileSync(dbPath)).toEqual(before);
+    chmodSync(dbPath, 0o600);
+    expect(await manager.status(dbPath)).toBe("locked");
   });
 
   it("issues opaque sessions, rejects forged tokens, locks explicitly, and restarts locked", async () => {

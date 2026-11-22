@@ -307,8 +307,11 @@ export class VaultSessionManager {
     try {
       generation = readSensitiveGeneration(file);
     } catch (error) {
-      if (error instanceof VaultPermissionError) return "uninitialized";
-      throw error;
+      if (!(error instanceof VaultPermissionError)) throw error;
+      // Setup hardens loose legacy plaintext, but must never be offered over an existing envelope.
+      const loose = readSensitiveGeneration(file, { requireOwnerOnly: false });
+      if (!isLegacySqliteImage(loose)) throw error;
+      return "uninitialized";
     }
     if (isLegacySqliteImage(generation)) return "uninitialized";
     if (isVaultEnvelope(generation)) {
