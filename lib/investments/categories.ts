@@ -4,6 +4,16 @@ import { pricedHolding } from "@/lib/prices";
 export const INVESTMENT_KINDS = ["stock", "crypto", "commodity"] as const;
 export type InvestmentKind = (typeof INVESTMENT_KINDS)[number];
 
+/**
+ * Stock, crypto and commodity categories hold trades with units and a price.
+ * A bare amount there would create a row the trade form cannot reopen.
+ */
+export function assertAmountOnlyCategory(category: { name: string; investmentKind?: string | null } | undefined): void {
+  if (category?.investmentKind) {
+    throw new Error(`${category.name} records units and a price. Enter it as a trade in Transactions.`);
+  }
+}
+
 export function investmentKindForSymbol(symbol: string): InvestmentKind | null {
   const category = pricedHolding(symbol)?.assetCategory;
   return category === "Investments" ? "stock" : category === "Crypto" ? "crypto" : category === "Commodities" ? "commodity" : null;

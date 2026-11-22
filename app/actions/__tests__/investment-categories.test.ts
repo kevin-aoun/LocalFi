@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCategory, updateCategory, getCategories } from "@/app/actions/categories";
-import { createTransaction } from "@/app/actions/transactions";
-import { createDomainDb, form, seedAccount, type DomainDb } from "./support/domain-fixture";
+import { createTransaction, updateTransaction } from "@/app/actions/transactions";
+import { createRecurringTransaction } from "@/app/actions/recurring";
+import { createDomainDb, execOn, form, seedAccount, seedCategory, seedTransaction, type DomainDb } from "./support/domain-fixture";
 
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 let temp: DomainDb;
@@ -28,5 +29,26 @@ describe("category-defined transaction fields", () => {
     const created = await createCategory(categoryForm());
     if ("error" in created) throw new Error(created.error);
     expect(await updateCategory(created.data.id, categoryForm({ type: "Expense" }))).toMatchObject({ success: true, data: { investmentKind: null } });
+  });
+});
+
+describe("amount-only entries stay out of trade categories", () => {
+  beforeEach(() => {
+    seedCategory(temp, { id: 21, name: "Groceries", type: "Expense" });
+    seedCategory(temp, { id: 22, name: "Demo stock", type: "Investment" });
+    execOn(temp, (db) => db.run("UPDATE categories SET investment_kind = 'stock' WHERE id = 22"));
+  });
+
+  it("refuses to move a plain transaction into a stock category but keeps legacy rows editable", async () => {
+    seedTransaction(temp, { id: 1, categoryId: 21, accountId: 9, amountCents: 1_000, dateKey: "2026-01-02", pending: true });
+    expect(await updateTransaction(1, form({ categoryId: "22", amount: "10" }))).toMatchObject({ error: expect.stringMatching(/records units and a price/) });
+    seedTransaction(temp, { id: 2, categoryId: 22, accountId: 9, amountCents: 500, dateKey: "2026-01-03", pending: true });
+    expect(await updateTransaction(2, form({ categoryId: "22", comment: "Monthly contribution" }))).toMatchObject({ success: true });
+  });
+
+  it("refuses recurring templates that would generate amount-only trades", async () => {
+    const template = form({ name: "Broker", frequency: "monthly", interval: "1", startDate: "2026-01-01", amount: "100", accountId: "9", categoryId: "22" });
+    expect(await createRecurringTransaction(template)).toMatchObject({ error: expect.stringMatching(/records units and a price/) });
+    expect(await createRecurringTransaction(form({ ...Object.fromEntries(template), categoryId: "21" }))).toMatchObject({ success: true });
   });
 });

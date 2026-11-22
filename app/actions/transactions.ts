@@ -38,7 +38,7 @@ import {
 } from "@/lib/investments";
 import { parsePurchaseQuantity, parsePurchaseUnitPrice, purchaseAmountCents, tradeCashAmount } from "@/lib/investments/cost";
 import { assertAvailableInvestmentUnits, type InvestmentSide } from "@/lib/investments/trades";
-import { investmentKindForSymbol } from "@/lib/investments/categories";
+import { assertAmountOnlyCategory, investmentKindForSymbol } from "@/lib/investments/categories";
 import { negateCanonicalDecimal } from "@/lib/ledger/decimal";
 
 async function resolveAccountId(db: BudgetDb, formData: FormData): Promise<number | null> {
@@ -473,7 +473,7 @@ export async function createTransaction(formData: FormData) {
       const accountId = await resolveAccountId(db, formData);
       const categoryId = requireId(formData.get("categoryId"), "categoryId");
       const [category] = await db.select().from(categories).where(eq(categories.id, categoryId));
-      if (category?.investmentKind && !fields) throw new Error("Enter the instrument, units and price for this asset category");
+      if (!fields) assertAmountOnlyCategory(category);
       const date = requireFormDate(formData);
       const paidAmountCents = fields
         ? purchaseAmountCents(fields.quantity, fields.unitPrice)
@@ -653,6 +653,11 @@ export async function updateTransaction(id: number, formData: FormData) {
       if (!fields && existing.instrumentId) {
         const category = await validateInvestmentCategory(db, categoryId, resolvedAccountId);
         if (manualTrade) assertPlainInvestmentCategory(category);
+      }
+      // Legacy amount-only rows may keep a category that later gained trade fields; moving one there may not.
+      if (!fields && !existing.instrumentId && categoryId !== existing.categoryId) {
+        const [category] = await db.select().from(categories).where(eq(categories.id, categoryId));
+        assertAmountOnlyCategory(category);
       }
       const now = new Date(Math.floor(Date.now() / 1000) * 1000);
       const next: TransactionState = {
