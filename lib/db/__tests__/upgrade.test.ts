@@ -433,21 +433,39 @@ describe("journaled pre-open upgrade", () => {
     expect(existsSync(path.join(path.dirname(dbPath), "backups"))).toBe(false);
   });
 
-  it("uses migration 0009's prerequisite refusal and leaves the original recoverable", async () => {
-    const dbPath = writePre0009Fixture({ mixedTransfer: true });
+  async function expectRepeatedPreWriteRefusal(dbPath: string, passphrase?: string) {
     const original = readFileSync(dbPath);
-    let failure: DatabaseUpgradeError | null = null;
-    try {
-      await runUpgrade(dbPath);
-    } catch (error) {
-      failure = error as DatabaseUpgradeError;
+    const before = statSync(dbPath);
+    // loadDatabase retries the upgrade per request, so a deterministic refusal must not accumulate copies.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const failure = await runUpgrade(dbPath, false, passphrase).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(DatabaseUpgradeError);
+      expect((failure as DatabaseUpgradeError).message).toMatch(/cross-currency/i);
+      expect((failure as DatabaseUpgradeError).message).toMatch(/original database was not replaced/i);
+      expect((failure as DatabaseUpgradeError).backupPath).toBeNull();
     }
-
-    expect(failure).toBeInstanceOf(DatabaseUpgradeError);
-    expect(failure?.message).toMatch(/cross-currency/i);
-    expect(failure?.backupPath && existsSync(failure.backupPath)).toBe(true);
     expect(readFileSync(dbPath).equals(original)).toBe(true);
-    expect(readFileSync(failure!.backupPath!).equals(original)).toBe(true);
+    expect(statSync(dbPath).ino).toBe(before.ino);
+    expect(statSync(dbPath).mtimeMs).toBe(before.mtimeMs);
+    expect(existsSync(path.join(path.dirname(dbPath), "backups"))).toBe(false);
+  }
+
+  it("refuses migration 0009's prerequisite without a backup copy or rewriting the original", async () => {
+    await expectRepeatedPreWriteRefusal(writePre0009Fixture({ mixedTransfer: true }));
+  });
+
+  it("refuses an encrypted pre-write failure without a backup copy or rewriting the vault", async () => {
+    const passphrase = "disposable encrypted refusal passphrase";
+    const dbPath = writePre0009Fixture({ mixedTransfer: true });
+    const created = await createVaultEnvelope(readFileSync(dbPath), passphrase);
+    writeFileSync(dbPath, created.envelope);
+    chmodSync(dbPath, 0o600);
+    destroyVaultKey(created.key);
+
+    await expectRepeatedPreWriteRefusal(dbPath, passphrase);
   });
 
   it("runs the supported CLI path and releases its lease", async () => {

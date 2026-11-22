@@ -743,6 +743,7 @@ export async function upgradeDatabase(options: {
     }
   }
   let backupPath: string | null = null;
+  let liveWriteAttempted = false;
   try {
     const result = await upgradeDatabaseImage(plaintext);
 
@@ -758,20 +759,22 @@ export async function upgradeDatabase(options: {
       const backupDirectory = path.join(path.dirname(dbPath), "backups");
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const basename = path.basename(dbPath, path.extname(dbPath));
-      backupPath = path.join(
+      const preUpgradePath = path.join(
         backupDirectory,
         `${basename}.${stamp}.${process.pid}.pre-upgrade-${result.pending[0] ?? "schema-journal"}.db`,
       );
-      await writeEncryptedGenerationAtomically(backupPath, originalBytes, {
+      await writeEncryptedGenerationAtomically(preUpgradePath, originalBytes, {
         replace: false,
         purpose: "pre-upgrade",
       });
+      backupPath = preUpgradePath;
     }
     if (result.changed && !dryRun) {
       options.lease.assertOwned();
       const upgradedBytes = encrypted
         ? Buffer.from(await encryptVaultGeneration(result.image, options.vaultKey ?? ownedKey!))
         : Buffer.from(result.image);
+      liveWriteAttempted = true;
       if (encrypted) {
         await writeEncryptedGenerationAtomically(dbPath, upgradedBytes, {
           replace: true,
@@ -813,7 +816,9 @@ export async function upgradeDatabase(options: {
       pending: result.pending,
     };
   } catch (error) {
-    if (!dryRun) {
+    // Before the live write the original file is untouched; backing it up here would add a
+    // full copy on every retry of a deterministic failure (loadDatabase retries per request).
+    if (liveWriteAttempted) {
       try {
         if (hadOriginal && !backupPath) {
           if (encrypted) {
