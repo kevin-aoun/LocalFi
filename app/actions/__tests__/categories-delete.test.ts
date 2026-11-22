@@ -240,3 +240,14 @@ describe("category display order", () => {
     expect(income.map((category) => category.displayOrder)).toEqual([0, 1]);
   });
 });
+
+describe("updateCategory keeps posted history stable", () => {
+  it("refuses to change the type of a category that transactions use, but renames it", async () => {
+    const created = await createCategory(categoryForm({ name: "Side gig" }));
+    if ("error" in created) throw new Error(created.error);
+    seedTransaction(temp, { categoryId: created.data.id, amountCents: 10_000, dateKey: "2026-03-01" });
+    expect(await updateCategory(created.data.id, categoryForm({ name: "Side gig", type: "Income" })))
+      .toMatchObject({ error: expect.stringMatching(/type cannot change/) });
+    expect(await updateCategory(created.data.id, categoryForm({ name: "Freelance" }))).toMatchObject({ success: true, data: { type: "Expense" } });
+  });
+});

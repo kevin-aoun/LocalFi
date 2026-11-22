@@ -3,13 +3,17 @@ import { periodContaining, type PeriodRange } from "@/lib/budgets";
 import { fromDateKey, isDateKey, toDateKey, type DateKey } from "@/lib/dates";
 import { centsToDecimal, formatMoney, type Cents } from "@/lib/money";
 import {
+  currencyScope,
+  filterByCurrency,
   previousPeriodRange,
   sameRangeLastYear,
   type CashFlowRow,
   type FlowTotals,
   type KeyRange,
+  type ReportAccount,
   type ReportCurrencyScope,
   type ReportPeriod,
+  type ReportTransaction,
 } from "@/lib/reports";
 
 export const RANGE_PRESETS = [
@@ -279,4 +283,22 @@ export function formatDelta(absoluteCents: Cents, currency = "USD"): string {
   const body = formatMoney(Math.abs(absoluteCents), currency);
   if (absoluteCents === 0) return body;
   return `${absoluteCents > 0 ? "+" : "-"}${body}`;
+}
+
+/**
+ * Picks the report currency from the visible range, then keeps that currency's
+ * rows on every date, so comparison baselines outside the range never add
+ * other currencies' cents into the same total.
+ */
+export function scopeReportCurrency<T extends ReportTransaction>(
+  transactions: readonly T[],
+  accounts: readonly ReportAccount[],
+  range: KeyRange,
+  currencyOverride: string | null,
+): { scope: ReportCurrencyScope; currency: string; scoped: T[] } {
+  const inRange = transactions.filter((tx) => tx.dateKey >= range.startKey && tx.dateKey <= range.endKey);
+  const scope = currencyScope(inRange, accounts);
+  const currency = currencyOverride ?? scope.primary;
+  const scoped = filterByCurrency(transactions, accounts, currency, { includeUnassigned: currency === scope.primary });
+  return { scope, currency, scoped };
 }

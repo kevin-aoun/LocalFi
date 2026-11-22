@@ -85,10 +85,14 @@ export function buildCashCandles(
 
   const points: Array<{ key: string; balanceCents: Cents }> = [];
   let balanceCents: Cents = 0;
-  for (const tx of sorted) {
+  sorted.forEach((tx, index) => {
     balanceCents = sumCents([balanceCents, cashContributionCents(tx, categories)]);
+    // Same-day movements carry no time order, so only the day's closing balance is a real point;
+    // walking them one by one drew fake wicks, such as a transfer's outgoing leg before its arrival.
+    const next = sorted[index + 1];
+    if (next && toDateKey(asDate(next.date)) === toDateKey(asDate(tx.date))) return;
     points.push({ key: groupKey(asDate(tx.date), period), balanceCents });
-  }
+  });
 
   const buckets: Array<{ key: string; openCents: Cents; balances: Cents[] }> = [];
   let prevClose: Cents = 0;

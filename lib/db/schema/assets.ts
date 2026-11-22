@@ -1,6 +1,7 @@
 import { sqliteTable, integer, text, real, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import type { Cents } from "@/lib/money";
+import type { PriceSymbol } from "@/lib/prices";
 import { instruments } from "./instruments";
 
 export const assetTypes = [
@@ -16,7 +17,7 @@ export const assetTypes = [
 
 export const commodityTypes = ["Gold", "Silver", "Platinum", "Palladium"] as const;
 
-export const quantityUnits = ["oz", "grams", "coins"] as const;
+export const quantityUnits = ["oz", "grams", "coins", "shares"] as const;
 
 export const priceSymbols = ["XAU", "XAG", "XPT", "XPD", "BTC", "ETH"] as const;
 
@@ -37,7 +38,7 @@ export const assets = sqliteTable("assets", {
   quantity: real("quantity"),
   unit: text("unit", { enum: quantityUnits }),
 
-  priceSymbol: text("price_symbol", { enum: priceSymbols }),
+  priceSymbol: text("price_symbol").$type<PriceSymbol>(),
 
   pricedAt: integer("priced_at", { mode: "timestamp" }),
   linkedTransactionIds: text("linked_transaction_ids"),

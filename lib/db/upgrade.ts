@@ -10,11 +10,12 @@ import {
   statSync,
   unlinkSync,
   writeFileSync,
-  writeSync,
 } from "node:fs";
 import path from "node:path";
 import initSqlJs, { type Database } from "sql.js";
 import type { WriterLease } from "./writer-lease";
+import { plaintextFixtureAllowed } from "./db-path";
+import { initializeAssetCategories } from "../investments/categories";
 import {
   decryptVaultGeneration,
   destroyVaultKey,
@@ -307,6 +308,15 @@ function migrationState(db: Database, idx: number): SchemaState {
       ]);
     case 16:
       return columns(db, "settings").has("idle_timeout_minutes") ? "applied" : "absent";
+    case 17:
+      return columns(db, "instrument_observations").has("unit_price") ? "applied" : "absent";
+    case 18:
+      return allOrNone([
+        transactionColumns.has("fee_for_transfer_id"),
+        indexExists(db, "transactions_transfer_fee_unique"),
+      ]);
+    case 19:
+      return allOrNone([columns(db, "categories").has("investment_kind"), transactionColumns.has("investment_draft")]);
     default:
       throw new Error(
         `Migration ${String(idx).padStart(4, "0")} has no upgrade verifier; ` +
@@ -525,6 +535,7 @@ async function applyMigration(
 
 
   if (entry.idx !== 10) assertExistingRowsPreserved(migrated, countsBefore, entry.tag);
+  if (entry.idx === 19) initializeAssetCategories(migrated);
   if (entry.idx === 12) {
     const { rebuildCashAssetProjectionRaw } = await import("../ledger/rebuild");
     rebuildCashAssetProjectionRaw(migrated);
@@ -579,7 +590,7 @@ function writeBytesAtomically(file: string, bytes: Buffer) {
   try {
     const fd = openSync(temporary, "wx", 0o600);
     try {
-      writeSync(fd, bytes, 0, bytes.length, 0);
+      writeFileSync(fd, bytes);
       fsyncSync(fd);
     } finally {
       closeSync(fd);
@@ -747,8 +758,7 @@ export async function upgradeDatabase(options: {
     : Buffer.alloc(0);
   const encrypted = originalBytes.length > 0 && isVaultEnvelope(originalBytes);
   if (encrypted) originalBytes = readSensitiveGeneration(dbPath);
-  const allowLegacyPlaintext = options.allowLegacyPlaintext === true ||
-    process.env.LOCALFI_VAULT_TEST_MODE === "plaintext";
+  const allowLegacyPlaintext = options.allowLegacyPlaintext === true || plaintextFixtureAllowed(dbPath);
   if (!encrypted && !allowLegacyPlaintext) {
     throw new DatabaseUpgradeError(
       dbPath,

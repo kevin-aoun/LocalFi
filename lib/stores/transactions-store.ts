@@ -27,7 +27,12 @@ type Transaction = {
   currentEventId?: string | null;
   instrumentId?: string | null;
   quantityDelta?: string | null;
+  investmentUnitPrice?: string | null;
+  investmentFeeAmountCents?: Cents | null;
   transferPrincipalAmountCents?: Cents | null;
+  feeForTransferId?: number | null;
+  feeAmountCents?: Cents | null;
+  feeCategoryId?: number | null;
   allocations?: Array<{ categoryId: number; amountCents: Cents }>;
 };
 

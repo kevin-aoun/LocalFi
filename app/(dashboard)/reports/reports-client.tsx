@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { LivePriceRefresh } from "@/components/assets/live-price-refresh";
 import {
   AlertTriangle,
   BarChart3,
@@ -46,6 +48,7 @@ import {
   describeUnassigned,
   formatRangeLabel,
   rangeForPreset,
+  scopeReportCurrency,
   suggestPeriod,
   toCashFlowChartRows,
   type ComparisonMode,
@@ -57,8 +60,6 @@ import {
   cashFlowByPeriod,
   categoryBreakdown,
   compareFlows,
-  currencyScope,
-  filterByCurrency,
   flowInRange,
   type BreakdownDirection,
   type ReportPeriod,
@@ -94,6 +95,8 @@ export default function ReportsClient({
   bounds,
   investmentHistory,
 }: ReportsClientProps) {
+  const router = useRouter();
+  const refreshPrices = useCallback(() => router.refresh(), [router]);
   const [reportView, setReportView] = useState<"cash-flow" | "investments">("cash-flow");
   const [preset, setPreset] = useState<RangePreset>("last-12-months");
   const [customFrom, setCustomFrom] = useState<string>(
@@ -129,17 +132,7 @@ export default function ReportsClient({
 
       const period = periodOverride ?? suggestPeriod(range);
 
-      const inRange = transactions.filter(
-        (tx) => tx.dateKey >= range.startKey && tx.dateKey <= range.endKey,
-      );
-      const scope = currencyScope(inRange, accounts);
-      const currency = currencyOverride ?? scope.primary;
-      const scoped = scope.mixed
-        ? filterByCurrency(transactions, accounts, currency, {
-
-            includeUnassigned: currency === scope.primary,
-          })
-        : transactions;
+      const { scope, currency, scoped } = scopeReportCurrency(transactions, accounts, range, currencyOverride);
 
       const totals = flowInRange(scoped, categories, range.startKey, range.endKey);
       const flows = cashFlowByPeriod({
@@ -332,7 +325,10 @@ export default function ReportsClient({
           <span>{report.error}</span>
         </div>
       ) : reportView === "investments" ? (
-        <InvestmentPerformance rows={investmentHistory} range={report.range} />
+        <div className="space-y-4">
+          <LivePriceRefresh onRefresh={refreshPrices} />
+          <InvestmentPerformance rows={investmentHistory} range={report.range} />
+        </div>
       ) : (
         <>
           {}

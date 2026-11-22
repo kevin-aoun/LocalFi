@@ -6,6 +6,8 @@ import { pricedHolding } from "@/lib/prices";
 import { findInstrument } from "./instruments";
 import { latestPositionObservation } from "./observations";
 import { allRows, firstRow, type SqlRow } from "./sql";
+import { quantityValueMinor } from "./cost";
+export { quantityValueMinor } from "./cost";
 
 export type ExactInstrumentPosition = {
   instrumentId: string;
@@ -25,7 +27,7 @@ export type PositionHoldingValues = {
   category: string;
   valueMinor: number;
   quantity: number;
-  unit: "oz" | "grams" | "coins" | null;
+  unit: "oz" | "grams" | "coins" | "shares" | null;
   commodityType: string | null;
   priceSymbol: string | null;
   pricedAt: number | null;
@@ -67,21 +69,18 @@ export function getExactPositions(raw: Database): ExactInstrumentPosition[] {
   ).map(positionFromRow);
 }
 
-export function quantityValueMinor(quantity: string, unitPriceMinor: number): number {
-  if (!Number.isSafeInteger(unitPriceMinor)) throw new Error("Unit price must be integer minor units");
-  const canonical = canonicalDecimal(quantity);
-  const negative = canonical.startsWith("-");
-  const unsigned = negative ? canonical.slice(1) : canonical;
-  const [whole, fraction = ""] = unsigned.split(".");
-  const scale = BigInt(10) ** BigInt(fraction.length);
-  const quantityMinor = BigInt(`${whole}${fraction}`);
-  const product = quantityMinor * BigInt(Math.abs(unitPriceMinor));
-  let rounded = product / scale;
-  if ((product % scale) * BigInt(2) >= scale) rounded += BigInt(1);
-  const signed = (negative !== (unitPriceMinor < 0)) ? -rounded : rounded;
-  const value = Number(signed);
-  if (!Number.isSafeInteger(value)) throw new Error("Position value exceeds safe integer range");
-  return value;
+export type ValuedObservation = {
+  observationKind: "price" | "valuation";
+  amountMinor: number;
+  unitPrice?: string | null;
+};
+
+// A sold-out holding is worth nothing, even if its last manual valuation was positive.
+export function observedHoldingValue(quantity: string, observation: ValuedObservation | null): number {
+  if (observation === null || canonicalDecimal(quantity) === "0") return 0;
+  return observation.observationKind === "valuation"
+    ? observation.amountMinor
+    : quantityValueMinor(quantity, observation.amountMinor, observation.unitPrice);
 }
 
 function assetCategory(category: string | null, kind: string): string {
@@ -93,20 +92,16 @@ function assetCategory(category: string | null, kind: string): string {
 
 export function positionHoldingValues(
   raw: Database,
-  position: ExactInstrumentPosition,
+  position: Pick<ExactInstrumentPosition, "instrumentId" | "currency" | "quantity">,
 ): PositionHoldingValues {
   const instrument = findInstrument(raw, position.instrumentId);
   if (!instrument) throw new Error(`No instrument ${position.instrumentId}`);
   const observation = latestPositionObservation(raw, position.instrumentId, position.currency);
-  const valueMinor = observation === null
-    ? 0
-    : observation.observationKind === "valuation"
-      ? observation.amountMinor
-      : quantityValueMinor(position.quantity, observation.amountMinor);
+  const valueMinor = observedHoldingValue(position.quantity, observation);
   const quantity = Number(position.quantity);
   if (!Number.isFinite(quantity)) throw new Error("Position quantity cannot be represented by assets");
   const spec = instrument.symbol ? pricedHolding(instrument.symbol) : null;
-  const unit = instrument.unit === "oz" || instrument.unit === "grams" || instrument.unit === "coins"
+  const unit = instrument.unit === "oz" || instrument.unit === "grams" || instrument.unit === "coins" || instrument.unit === "shares"
     ? instrument.unit
     : null;
   return {

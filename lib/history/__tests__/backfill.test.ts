@@ -8,7 +8,7 @@ import {
   seedTransaction,
   type DomainDb,
 } from "@/app/actions/__tests__/support/domain-fixture";
-import { applyNetWorthReconstruction, neededSymbols, planNetWorthReconstruction, runNetWorthReconstruction } from "../run";
+import { applyNetWorthReconstruction, planNetWorthReconstruction, runNetWorthReconstruction } from "../run";
 import { renderPlan, renderWriteReport } from "../format";
 import { previewNetWorthReconstruction } from "@/app/actions/history";
 import { postLedgerEventRaw, registerLedgerAccount } from "@/lib/ledger";
@@ -103,19 +103,6 @@ describe("migration 0005 in a freshly replayed database", () => {
   });
 });
 
-describe("neededSymbols", () => {
-  it("asks only for symbols a holding can actually be valued with", () => {
-    expect(
-      neededSymbols([
-        { id: 1, category: "Cash", currentValueCents: 1, priceSymbol: "XAU", quantity: 1, createdAt: 0 },
-        { id: 2, category: "Commodities", currentValueCents: 1, priceSymbol: "XAU", quantity: 1.1, createdAt: 0 },
-        { id: 3, category: "Crypto", currentValueCents: 1, priceSymbol: "BTC", quantity: null, createdAt: 0 },
-        { id: 4, category: "Properties", currentValueCents: 1, createdAt: 0 },
-      ]),
-    ).toEqual(["XAU"]);
-  });
-});
-
 describe("the dry run", () => {
   it("computes the whole series and writes absolutely nothing", async () => {
     seedGoldHolding();
@@ -131,15 +118,15 @@ describe("the dry run", () => {
       .toMatchObject({ accountsCents: 620_000, holdingsCents: 216_144, netWorthCents: 836_144 });
   });
 
-  it("renders a report that names the proxy, the acquisition source and the residual", async () => {
+  it("renders a report describing recorded observations and ledger replay", async () => {
     seedGoldHolding();
     const planned = await planNetWorthReconstruction(RANGE);
     expect(planned.ok).toBe(true);
     if (!planned.ok) return;
 
     const report = renderPlan(planned.plan);
-    expect(report).toMatch(/PRICE SERIES/);
-    expect(report).toMatch(/none needed/);
+    expect(report).toMatch(/recorded ledger observations only/);
+    expect(report).toMatch(/no external price requests/);
     expect(report).toMatch(/PURCHASE-DAY CONTINUITY/);
     expect(planned.plan.days[0].sourceNote).toMatch(/Exact ledger position replay/);
     expect(report).toMatch(/2026-01-08/);
@@ -234,22 +221,24 @@ describe("journal-native replay", () => {
     });
   });
 
-  it("does not call an injected price API", async () => {
+  it("does not request external prices", async () => {
     seedGoldHolding();
     const fetchImpl = vi.fn(async () => { throw new Error("must not fetch"); });
-    const run = await runNetWorthReconstruction({ ...RANGE, fetchImpl, apply: true });
+    vi.stubGlobal("fetch", fetchImpl);
+    const run = await runNetWorthReconstruction({ ...RANGE, apply: true });
     expect(run.ok).toBe(true);
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(snapshots()).toHaveLength(8);
   });
 
-  it("is unchanged when a later run is given a failing fetch implementation", async () => {
+  it("replays unchanged without external prices", async () => {
     seedGoldHolding();
     await runNetWorthReconstruction({ ...RANGE, apply: true });
     const before = snapshots();
 
     const fetchImpl = vi.fn(async () => { throw new Error("must not fetch"); });
-    const replayed = await runNetWorthReconstruction({ ...RANGE, fetchImpl, apply: true });
+    vi.stubGlobal("fetch", fetchImpl);
+    const replayed = await runNetWorthReconstruction({ ...RANGE, apply: true });
     expect(replayed.ok).toBe(true);
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(snapshots()).toEqual(before);

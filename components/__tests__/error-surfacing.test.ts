@@ -80,7 +80,7 @@ describe("the Add Asset dialog cannot default to a category the server rejects",
   });
 
   it("defaults to a category the server accepts", () => {
-    expect(source).toMatch(/const DEFAULT_ASSET_TYPE = "Savings"/);
+    expect(source).toMatch(/const DEFAULT_ASSET_TYPE = "Properties"/);
     expect(source).toMatch(/category: DEFAULT_ASSET_TYPE/);
     // The old default was the one value createAsset ALWAYS rejects.
     expect(source).not.toMatch(/category:\s*"Cash"/);

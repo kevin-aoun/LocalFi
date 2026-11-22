@@ -22,7 +22,7 @@ import {
   unlockVaultEnvelopeWithRecovery,
 } from "../../vault/envelope";
 import { writeEncryptedGenerationAtomically } from "../../vault/paths";
-import { DatabaseRestoreError, restoreDatabase } from "../restore";
+import { DatabaseRestoreError, restoreDatabase, validateRestoreImage } from "../restore";
 import { acquireWriterLease, writerLeasePath } from "../writer-lease";
 
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..", "..");
@@ -279,6 +279,21 @@ describe("dry-run-first restore CLI", () => {
       ).rejects.toThrow(/another LocalFi process/i);
     } finally {
       await lease.release();
+    }
+  });
+});
+
+describe("plaintext restore boundary", () => {
+  it("refuses plaintext for a target outside an isolated test fixture, even with the bypass variable set", async () => {
+    const previous = process.env.LOCALFI_VAULT_TEST_MODE;
+    process.env.LOCALFI_VAULT_TEST_MODE = "plaintext";
+    try {
+      const outsideFixtures = path.join(process.cwd(), "restore-target-outside-tmp");
+      await expect(validateRestoreImage(Buffer.from("plaintext"), "Restore source", { dbPath: outsideFixtures }))
+        .rejects.toBeInstanceOf(DatabaseRestoreError);
+    } finally {
+      if (previous === undefined) delete process.env.LOCALFI_VAULT_TEST_MODE;
+      else process.env.LOCALFI_VAULT_TEST_MODE = previous;
     }
   });
 });

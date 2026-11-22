@@ -231,6 +231,8 @@ export function ImportDialog({
 
           amount: centsToDecimal(row.amountCents).toString(),
           comment: row.comment,
+          currency: row.currency,
+          pending: row.pending,
         })),
 
         { accountId: accountId === "" ? null : Number(accountId) },

@@ -1,40 +1,34 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createAsset, updateAsset } from "@/app/actions/assets";
-import { createTransaction } from "@/app/actions/transactions";
-import {
-  createLivePricedAsset,
-  getLivePriceQuote,
-  updateLivePricedAsset,
-} from "@/app/actions/crypto";
+import { getLivePriceQuote, updateLivePricedAsset } from "@/app/actions/crypto";
 import { AlertCircle, Loader2, TrendingUp } from "lucide-react";
-import { todayKey } from "@/lib/dates";
-import { centsToDecimal, formatMoney, negateCents, sumCents, tryParseAmount, type Cents } from "@/lib/money";
+import { purchaseAmountCents } from "@/lib/investments/cost";
+import { centsToDecimal, formatMoney, tryParseAmount, type Cents } from "@/lib/money";
 import {
   describePriceError,
   holdingValueCents,
   type PriceQuote,
 } from "@/lib/prices";
 import {
-  cryptoPurchaseForm,
+  ASSET_TYPES,
+  MANUAL_ASSET_TYPES,
+  commodityQuantityFields,
   emptyAssetForm,
   formFromAsset,
-  gramsToOz,
   livePricingFor,
-  ozToGrams,
   type AssetFormData,
 } from "./asset-form-logic";
 import {
   AssetCategoryField,
   AssetValueFields,
   CommodityFields,
-  CryptoFields,
+  InvestmentFields,
 } from "./asset-form-fields";
 
 type Asset = {
@@ -46,6 +40,7 @@ type Asset = {
   notes?: string | null;
   commodityType?: string | null;
   quantity?: number | null;
+  quantityExact?: string | null;
   unit?: string | null;
 
   priceSymbol?: string | null;
@@ -58,12 +53,8 @@ type Asset = {
 type AssetDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Edits this holding; without one the dialog adds a manually valued holding. */
   asset?: Asset | null;
-  accounts?: Array<{ id: number; name: string; currency: string; kind?: string; archived?: boolean }>;
-  categories?: Array<{ id: number; name: string; type: string }>;
-  cryptoPurchase?: boolean;
-  initialPurchaseAccountId?: number | null;
-  initialPurchaseCategoryId?: number | null;
   onSuccess: () => void;
 };
 
@@ -78,11 +69,6 @@ export function AssetDialog({
   open,
   onOpenChange,
   asset,
-  accounts = [],
-  categories = [],
-  cryptoPurchase = false,
-  initialPurchaseAccountId = null,
-  initialPurchaseCategoryId = null,
   onSuccess,
 }: AssetDialogProps) {
   const [loading, setLoading] = useState(false);
@@ -93,49 +79,29 @@ export function AssetDialog({
 
   const [priceError, setPriceError] = useState<string | null>(null);
   const [formData, setFormData] = useState<AssetFormData>(emptyAssetForm);
-  const [purchaseAccountId, setPurchaseAccountId] = useState("");
-  const [purchaseCategoryId, setPurchaseCategoryId] = useState("");
 
-  const { isCommodity, isCrypto, liveSymbol, usesLivePricing, liveUnit, liveQuantityText } = livePricingFor(formData);
+  const { isCommodity, isInvestment, liveSymbol, usesLivePricing, liveUnit, liveQuantityText } = livePricingFor(formData);
+  const activeQuote = quote?.symbol === liveSymbol ? quote : null;
   const liveQuantityGiven = liveQuantityText.trim() !== "";
 
 
   const computedValue =
-    quote !== null && usesLivePricing && liveQuantityGiven
-      ? holdingValueCents(quote, Number(liveQuantityText.trim()), liveUnit)
+    activeQuote !== null && usesLivePricing && liveQuantityGiven
+      ? holdingValueCents(activeQuote, Number(liveQuantityText.trim()), liveUnit)
       : null;
 
   const storedPricedAt = pricedAtLabel(asset?.pricedAt);
-  const purchaseAccounts = useMemo(
-    () => accounts.filter((account) => account.archived !== true && account.kind !== "liability"),
-    [accounts],
-  );
-  const purchaseCategories = useMemo(
-    () => categories.filter((category) => category.type === "Investment"),
-    [categories],
-  );
-  const defaultPurchaseAccountId = purchaseAccounts[0] ? String(purchaseAccounts[0].id) : "";
-  const defaultPurchaseCategoryId = purchaseCategories[0] ? String(purchaseCategories[0].id) : "";
-  const paidAmountCents = isCrypto ? tryParseAmount(formData.paidAmount) : null;
-  const quoteUnitPriceCents = quote === null ? null : tryParseAmount(String(quote.pricePerUnitUsd));
-  const profitLossCents =
-    computedValue?.ok && paidAmountCents !== null
-      ? sumCents([computedValue.valueCents, negateCents(paidAmountCents)])
-      : null;
-
-
-
-
   useEffect(() => {
-    if (!open || !usesLivePricing || liveSymbol === null) {
+    if (!open || isInvestment || !usesLivePricing || liveSymbol === null) {
       setQuote(null);
       setPriceError(null);
       return;
     }
 
     let cancelled = false;
+    setQuote(null);
     setPriceError(null);
-    getLivePriceQuote(liveSymbol).then((result) => {
+    const timer = window.setTimeout(() => { void getLivePriceQuote(liveSymbol).then((result) => {
       if (cancelled) return;
       if (result.ok) {
         setQuote(result.quote);
@@ -145,52 +111,33 @@ export function AssetDialog({
         setQuote(null);
         setPriceError(describePriceError(result.error));
       }
-    });
+    }).catch(() => {
+      if (!cancelled) setPriceError("Could not load this quote. Try again shortly.");
+    }); }, 350);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [open, usesLivePricing, liveSymbol]);
+  }, [open, isInvestment, usesLivePricing, liveSymbol]);
 
   useEffect(() => {
     setError(null);
-    if (asset) {
-
-
-      setFormData(formFromAsset(asset, centsToDecimal));
-    } else {
-      setFormData(cryptoPurchase ? cryptoPurchaseForm() : emptyAssetForm());
-      setPurchaseAccountId(initialPurchaseAccountId == null ? defaultPurchaseAccountId : String(initialPurchaseAccountId));
-      setPurchaseCategoryId(initialPurchaseCategoryId == null ? defaultPurchaseCategoryId : String(initialPurchaseCategoryId));
-    }
-  }, [
-    asset,
-    cryptoPurchase,
-    defaultPurchaseAccountId,
-    defaultPurchaseCategoryId,
-    initialPurchaseAccountId,
-    initialPurchaseCategoryId,
-    open,
-  ]);
+    setFormData(asset ? formFromAsset(asset, centsToDecimal) : emptyAssetForm());
+  }, [asset, open]);
 
 
 
   const handleOzChange = (value: string) => {
-    const oz = Number(value.trim());
     setFormData((prev) => ({
       ...prev,
-      quantityOz: value,
-      quantityGrams:
-        value.trim() === "" || !Number.isFinite(oz) ? "" : ozToGrams(oz).toFixed(2),
+      ...commodityQuantityFields(value, "oz"),
     }));
   };
 
   const handleGramsChange = (value: string) => {
-    const grams = Number(value.trim());
     setFormData((prev) => ({
       ...prev,
-      quantityGrams: value,
-      quantityOz:
-        value.trim() === "" || !Number.isFinite(grams) ? "" : gramsToOz(grams).toFixed(4),
+      ...commodityQuantityFields(value, "grams"),
     }));
   };
 
@@ -202,44 +149,18 @@ export function AssetDialog({
     try {
       let result:
         | Awaited<ReturnType<typeof createAsset>>
-        | Awaited<ReturnType<typeof createLivePricedAsset>>
-        | Awaited<ReturnType<typeof createTransaction>>;
+        | Awaited<ReturnType<typeof updateLivePricedAsset>>;
 
-      if (usesLivePricing && liveSymbol !== null) {
-        if (isCrypto && !asset) {
-          if (quote === null || quoteUnitPriceCents === null) {
-            setError("Wait for the live price before recording this purchase.");
-            return;
-          }
-          if (purchaseAccountId === "" || purchaseCategoryId === "") {
-            setError("Choose the account and investment category for this purchase.");
-            return;
-          }
-          const purchase = new FormData();
-          purchase.set("accountId", purchaseAccountId);
-          purchase.set("categoryId", purchaseCategoryId);
-          purchase.set("amount", formData.paidAmount);
-          purchase.set("date", todayKey());
-          purchase.set("comment", formData.notes.trim() || `Buy ${liveSymbol}`);
-          purchase.set("pending", "false");
-          purchase.set("instrumentSymbol", liveSymbol);
-          purchase.set("quantity", liveQuantityText.trim());
-          purchase.set("instrumentUnit", liveUnit);
-          purchase.set("unitPrice", String(centsToDecimal(quoteUnitPriceCents)));
-          result = await createTransaction(purchase);
-        } else {
-
-
-
+      if (usesLivePricing) {
+        // Priced holdings are bought and sold in Transactions; this only refreshes an existing one.
+        if (liveSymbol === null || !asset) throw new Error("Enter a valid stock ticker.");
         const livePriceForm = new FormData();
         livePriceForm.append("priceSymbol", liveSymbol);
-
-
         if (liveQuantityGiven) {
           livePriceForm.append("quantity", liveQuantityText.trim());
         }
-        if (isCrypto && formData.paidAmount.trim() !== "") {
-          livePriceForm.append("paidAmount", formData.paidAmount.trim());
+        if (isInvestment && asset.costBasisCents == null && formData.unitPrice.trim() !== "") {
+          livePriceForm.append("paidAmount", String(centsToDecimal(purchaseAmountCents(liveQuantityText, formData.unitPrice))));
         }
         livePriceForm.append("unit", liveUnit);
 
@@ -247,10 +168,7 @@ export function AssetDialog({
         if (formData.notes) {
           livePriceForm.append("notes", formData.notes);
         }
-        result = asset
-          ? await updateLivePricedAsset(asset.id, livePriceForm)
-          : await createLivePricedAsset(livePriceForm);
-        }
+        result = await updateLivePricedAsset(asset.id, livePriceForm);
       } else {
         const formDataObj = new FormData();
         formDataObj.append("category", formData.category);
@@ -298,15 +216,16 @@ export function AssetDialog({
 
   const livePricePanel = (
     <>
-      {usesLivePricing && quote !== null && (
+      {usesLivePricing && activeQuote !== null && (
         <div className="flex flex-wrap items-center gap-2 rounded-md bg-green-50 dark:bg-green-950 px-3 py-2">
           <TrendingUp className="h-3 w-3 text-green-600" />
           <span className="text-sm font-semibold text-green-700 dark:text-green-400" data-private-value>
             {}
-            {formatMoney(tryParseAmount(quote.pricePerUnitUsd) ?? 0, "USD")} per {quote.priceUnit}
+            {formatMoney(tryParseAmount(activeQuote.pricePerUnitUsd) ?? 0, "USD")} per {activeQuote.priceUnit}
           </span>
           <span className="text-xs text-muted-foreground">
-            {quote.label} · {quote.provider === "coingecko" ? "CoinGecko" : "SwissQuote"}
+            {activeQuote.label} · {activeQuote.sourceLabel}
+            {activeQuote.quotedAt && ` · market quote ${new Date(activeQuote.quotedAt).toLocaleString()}`}
           </span>
         </div>
       )}
@@ -331,7 +250,7 @@ export function AssetDialog({
         </div>
       )}
 
-      {usesLivePricing && quote !== null && computedValue !== null && (
+      {usesLivePricing && activeQuote !== null && computedValue !== null && (
         <div className="rounded-md bg-primary/10 px-3 py-2 border border-primary/20">
           <div className="text-xs text-muted-foreground">Total Value</div>
           {computedValue.ok ? (
@@ -347,14 +266,7 @@ export function AssetDialog({
         </div>
       )}
 
-      {isCrypto && usesLivePricing && computedValue?.ok && paidAmountCents !== null && profitLossCents !== null && (
-        <div className="grid grid-cols-2 gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm" data-private-value>
-          <div><div className="text-xs text-muted-foreground">Paid</div><div className="font-medium">{formatMoney(paidAmountCents, "USD")}</div></div>
-          <div><div className="text-xs text-muted-foreground">Live profit / loss</div><div className={profitLossCents >= 0 ? "font-medium text-emerald-600 dark:text-emerald-400" : "font-medium text-destructive"}>{formatMoney(profitLossCents, "USD")}</div></div>
-        </div>
-      )}
-
-      {usesLivePricing && quote !== null && formData.currency !== "USD" && (
+      {usesLivePricing && activeQuote !== null && formData.currency !== "USD" && (
         <p className="text-xs text-muted-foreground">
           Both price feeds quote in USD; the value above is shown as{" "}
           {formData.currency} without conversion.
@@ -383,54 +295,14 @@ export function AssetDialog({
             </div>
           )}
 
-          <AssetCategoryField formData={formData} setFormData={setFormData} />
+          {asset?.costBasisCents != null && <p className="text-sm text-muted-foreground">Quantity and cash invested come from purchase transactions. Edit those in Transactions; this action refreshes the market value.</p>}
+          <fieldset disabled={loading || asset?.costBasisCents != null} className="min-w-0 space-y-4">
+          <AssetCategoryField formData={formData} setFormData={setFormData} options={asset ? ASSET_TYPES : MANUAL_ASSET_TYPES} />
           <AssetValueFields formData={formData} setFormData={setFormData} usesLivePricing={usesLivePricing} />
 
-          {isCrypto && (
+          {isInvestment && (
             <>
-              <CryptoFields formData={formData} setFormData={setFormData} />
-
-              {!asset && usesLivePricing && (
-                <div className="space-y-3 rounded-md border p-3">
-                  <div>
-                    <p className="text-sm font-medium">Record purchase</p>
-                    <p className="text-xs text-muted-foreground">
-                      This creates one confirmed transaction and decreases the selected account.
-                    </p>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="crypto-purchase-account">Paid from</Label>
-                      <Select value={purchaseAccountId} onValueChange={setPurchaseAccountId}>
-                        <SelectTrigger id="crypto-purchase-account"><SelectValue placeholder="Choose account" /></SelectTrigger>
-                        <SelectContent>
-                          {purchaseAccounts.map((account) => (
-                            <SelectItem key={account.id} value={String(account.id)}>{account.name} ({account.currency})</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="crypto-purchase-category">Tag / category</Label>
-                      <Select value={purchaseCategoryId} onValueChange={setPurchaseCategoryId}>
-                        <SelectTrigger id="crypto-purchase-category"><SelectValue placeholder="Choose investment category" /></SelectTrigger>
-                        <SelectContent>
-                          {purchaseCategories.map((category) => (
-                            <SelectItem key={category.id} value={String(category.id)}>{category.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  {(purchaseAccounts.length === 0 || purchaseCategories.length === 0) && (
-                    <p role="alert" className="text-xs text-destructive">
-                      Add an asset account and an Investment category before recording a coin purchase.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {livePricePanel}
+              <InvestmentFields formData={formData} setFormData={setFormData} editing={Boolean(asset)} />
             </>
           )}
 
@@ -453,6 +325,7 @@ export function AssetDialog({
               placeholder="Additional details"
             />
           </div>
+          </fieldset>
 
           <div className="flex justify-end gap-2 pt-4">
             <Button
@@ -465,7 +338,7 @@ export function AssetDialog({
             </Button>
             <Button type="submit" disabled={loading}>
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {asset ? "Update" : "Create"}
+              {asset?.costBasisCents != null ? "Refresh value" : asset ? "Update" : "Create"}
             </Button>
           </div>
         </form>

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { monthKey, toDateKey } from "@/lib/dates";
 import {
   buildTransactionFormValues,
-  previewInvestmentQuantity,
   toTransactionDateValue,
   toTransactionFormData,
   transactionDateKey,
@@ -148,8 +147,7 @@ describe("buildTransactionFormValues", () => {
     expect(() => toTransactionFormData(invalid)).toThrow(/negative/i);
   });
 
-  it("previews provider-priced quantity but transports an exact user override", () => {
-    expect(previewInvestmentQuantity("1000.00", "50000.00")).toBe("0.02");
+  it("transports an exact user-entered quantity and price unchanged", () => {
     const values = buildTransactionFormValues({
       categoryId: "3",
       accountId: "7",
@@ -186,5 +184,34 @@ describe("buildTransactionFormValues", () => {
     expect(validateTransactionForm({ ...base, quantity: "" })).toMatch(/quantity/i);
     expect(validateTransactionForm({ ...base, quantity: "-0.02" })).toMatch(/positive/i);
     expect(validateTransactionForm({ ...base, unitPrice: "0" })).toMatch(/unit price/i);
+  });
+});
+
+
+describe("investment purchase cash", () => {
+  it("derives the submitted cash from units, exact unit price, and fees", () => {
+    expect(buildTransactionFormValues({
+      categoryId: "3", accountId: "9", amount: "101", comment: "", date: new Date(2026, 5, 1), pending: false,
+      instrumentSymbol: "BTC", instrumentUnit: "coins", quantity: "2", unitPrice: "60.1234", fees: "1",
+    })).toMatchObject({ amount: "121.25", fees: "1", unitPrice: "60.1234" });
+  });
+});
+
+
+it.each([".25", "0.000001"])("accepts fractional quantity %s when creating or editing a purchase", (quantity) => {
+  const state = {
+    categoryId: "3", accountId: "9", amount: "", comment: "", date: new Date(2026, 5, 1), pending: false,
+    instrumentSymbol: "BTC", instrumentUnit: "coins", quantity, unitPrice: "50000", fees: "0",
+  };
+  expect(validateTransactionForm(state)).toBeNull();
+  expect(toTransactionFormData(state).get("quantity")).toBe(quantity);
+});
+
+
+describe("sale cash calculation", () => {
+  it("submits positive units, sale action, and proceeds after fees", () => {
+    const values = buildTransactionFormValues({ categoryId: "1", amount: "", comment: "Sell", date: new Date(2026, 0, 3), pending: false,
+      instrumentSymbol: "STOCK:AAPL", instrumentUnit: "shares", quantity: ".25", unitPrice: "120.1234", fees: "0.25", investmentSide: "sell" });
+    expect(values).toMatchObject({ investmentSide: "sell", quantity: ".25", amount: "29.78", fees: "0.25" });
   });
 });

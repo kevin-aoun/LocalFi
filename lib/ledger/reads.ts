@@ -1,7 +1,10 @@
 import type { Database } from "sql.js";
 
 import { isDateKey, type DateKey } from "@/lib/dates";
-import { quantityValueMinor } from "@/lib/investments/positions";
+import { observedHoldingValue } from "@/lib/investments/positions";
+import type { Cents } from "@/lib/money";
+import { pricedHolding } from "@/lib/prices";
+import { holdingKey, readHoldingReturns } from "@/lib/investments/returns";
 import { addCanonicalDecimals, canonicalDecimal } from "./decimal";
 
 type SqlValue = string | number | Uint8Array | null;
@@ -372,6 +375,9 @@ export function readPositionStates(
 }
 
 export type PositionValuation = ExactPositionState & {
+  /** Average cost of the units still held; null when an opening has no cash cost. */
+  costBasisCents: Cents | null;
+  realizedGainCents: Cents | null;
   assetId: number | null;
   archived: boolean;
   label: string;
@@ -381,6 +387,31 @@ export type PositionValuation = ExactPositionState & {
   valueMinor: number;
 };
 
+export function readPortfolioMovements(
+  raw: Database,
+  current: readonly CurrentLedgerMovement[] = readCurrentMovements(raw),
+): CurrentLedgerMovement[] {
+  const openings = rows(raw, `
+    SELECT DISTINCT e.event_id, a.instrument_id, i.category, i.symbol, m.currency
+      FROM ledger_events e
+      JOIN ledger_movements m ON m.event_id = e.event_id
+      JOIN ledger_accounts a ON a.id = m.ledger_account_id
+      JOIN instruments i ON i.id = a.instrument_id
+     WHERE e.amends_event_id IS NULL
+       AND a.target_type = 'instrument'
+       AND EXISTS (
+         SELECT 1 FROM ledger_movements opening
+         JOIN ledger_accounts counter ON counter.id = opening.ledger_account_id
+         WHERE opening.event_id = e.event_id
+           AND counter.target_type = 'system' AND counter.target_ref = 'opening-position'
+       )
+  `);
+  // Crypto inventory comes only from transactions; other openings remain additive.
+  const excludedRoots = new Set(openings.filter((row) => row.category === "Crypto")
+    .map((row) => String(row.event_id)));
+  return current.filter((movement) => !excludedRoots.has(movement.chainRootEventId));
+}
+
 
 export function readPositionValuations(
   raw: Database,
@@ -388,17 +419,19 @@ export function readPositionValuations(
   currentMovements?: readonly CurrentLedgerMovement[],
 ): PositionValuation[] {
   if (!isDateKey(asOfKey)) throw new Error(`Invalid asOfKey: ${asOfKey}`);
+  const current = movementsInRange(readPortfolioMovements(raw, currentMovements), undefined, asOfKey);
+  const returns = readHoldingReturns(current);
   const out: PositionValuation[] = [];
-  for (const state of readPositionStates(raw, asOfKey, currentMovements)) {
+  for (const state of readPositionStates(raw, asOfKey, current)) {
     const instrument = rows(
       raw,
-      "SELECT kind, label, category FROM instruments WHERE id = ? LIMIT 1",
+      "SELECT kind, label, category, symbol FROM instruments WHERE id = ? LIMIT 1",
       [state.instrumentId],
     )[0];
     if (!instrument) throw new Error(`Missing instrument ${state.instrumentId}`);
     const observation = rows(
       raw,
-      `SELECT observation_kind, observed_day, amount_minor
+      `SELECT *
          FROM instrument_observations
         WHERE instrument_id = ? AND currency = ?
           AND observed_day <= ?
@@ -413,23 +446,25 @@ export function readPositionValuations(
         WHERE instrument_id = ? AND currency = ? ORDER BY id LIMIT 1`,
       [state.instrumentId, state.currency],
     )[0];
-    const observedAmount = observation
-      ? safeInteger(observation.amount_minor, "observation amount")
-      : 0;
     const observationKind = observation?.observation_kind === "valuation" ? "valuation" : "price";
+    const holdingReturns = returns.get(holdingKey(state.instrumentId, state.currency));
     out.push({
       ...state,
+      costBasisCents: holdingReturns?.costBasisCents ?? null,
+      realizedGainCents: holdingReturns?.realizedGainCents ?? null,
       assetId: projection ? targetId(projection.id, "asset projection") : null,
       archived: projection ? Number(projection.archived) === 1 : false,
-      label: String(instrument.label),
+      label: instrument.category === "Crypto"
+        ? pricedHolding(instrument.symbol)?.symbol ?? String(instrument.label)
+        : String(instrument.label),
       category: instrument.category == null ? "Other" : String(instrument.category),
       observationKind,
       observedDay: observation ? String(observation.observed_day) as DateKey : null,
-      valueMinor: !observation
-        ? 0
-        : observationKind === "valuation"
-        ? observedAmount
-        : quantityValueMinor(state.quantity, observedAmount),
+      valueMinor: observedHoldingValue(state.quantity, observation ? {
+        observationKind,
+        amountMinor: safeInteger(observation.amount_minor, "observation amount"),
+        unitPrice: observation.unit_price == null ? null : String(observation.unit_price),
+      } : null),
     });
   }
   return out;
@@ -439,14 +474,15 @@ export type PositionHistoryPoint = PositionValuation & { dateKey: DateKey };
 
 
 export function readPositionHistory(raw: Database): PositionHistoryPoint[] {
+  const current = readCurrentMovements(raw);
   const days = [...new Set([
-    ...readCurrentMovements(raw)
+    ...current
       .filter((movement) => movement.targetType === "instrument")
       .map((movement) => movement.dateKey),
     ...rows(raw, "SELECT observed_day FROM instrument_observations")
       .map((row) => String(row.observed_day) as DateKey),
   ])].sort();
   return days.flatMap((dateKey) =>
-    readPositionValuations(raw, dateKey).map((valuation) => ({ ...valuation, dateKey })),
+    readPositionValuations(raw, dateKey, current).map((valuation) => ({ ...valuation, dateKey })),
   );
 }

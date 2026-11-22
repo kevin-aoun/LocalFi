@@ -11,7 +11,7 @@ import {
   renameSync,
   statSync,
   unlinkSync,
-  writeSync,
+  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import initSqlJs, { type SqlJsStatic } from "sql.js";
@@ -28,6 +28,7 @@ import {
   writeEncryptedGenerationAtomically,
 } from "../vault/paths";
 import { canonicalWriterTarget, type WriterLease } from "./writer-lease";
+import { plaintextFixtureAllowed, resolveDbPath } from "./db-path";
 
 const SQLITE_MAGIC = Buffer.from("SQLite format 3\0", "binary");
 const MIN_DB_BYTES = 512;
@@ -125,7 +126,7 @@ async function validateSqliteImage(bytes: Uint8Array, label: string): Promise<vo
 export async function validateRestoreImage(
   bytes: Uint8Array,
   label: string,
-  options: { passphrase?: string; allowLegacyPlaintext?: boolean } = {},
+  options: { passphrase?: string; allowLegacyPlaintext?: boolean; dbPath?: string } = {},
 ): Promise<void> {
   if (isVaultEnvelope(bytes)) {
     if (options.passphrase === undefined) {
@@ -141,7 +142,7 @@ export async function validateRestoreImage(
     return;
   }
   const allowLegacy = options.allowLegacyPlaintext === true ||
-    process.env.LOCALFI_VAULT_TEST_MODE === "plaintext";
+    plaintextFixtureAllowed(options.dbPath ?? resolveDbPath());
   if (!allowLegacy) {
     throw new DatabaseRestoreError(
       `${label} is plaintext; use the explicit vault setup migration instead.`,
@@ -166,7 +167,7 @@ function fsyncDirectory(directory: string): void {
 function writeDurably(file: string, bytes: Uint8Array, exclusive = false): void {
   const fd = openSync(file, exclusive ? "wx" : "w", 0o600);
   try {
-    writeSync(fd, bytes, 0, bytes.byteLength, 0);
+    writeFileSync(fd, bytes);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
@@ -322,7 +323,7 @@ export async function restoreDatabase(
     options.lease.assertOwned();
     renameSync(temporary, dbPath);
     fsyncDirectory(directory);
-    await validateRestoreImage(readFileSync(dbPath), `Restored database ${dbPath}`);
+    await validateRestoreImage(readFileSync(dbPath), `Restored database ${dbPath}`, { dbPath });
   } catch (error) {
     if (existsSync(temporary)) unlinkSync(temporary);
     if (encrypted && encryptedPublicationAttempted) {

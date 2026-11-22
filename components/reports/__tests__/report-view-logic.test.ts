@@ -13,6 +13,7 @@ import {
   formatRangeLabel,
   periodLabel,
   rangeForPreset,
+  scopeReportCurrency,
   suggestPeriod,
   toCashFlowChartRows,
 } from "@/components/reports/report-view-logic";
@@ -255,5 +256,25 @@ describe("deltaTone / formatDelta", () => {
     expect(formatDelta(-4_550)).toBe("-$45.50");
     expect(formatDelta(0)).toBe("$0.00");
     expect(formatDelta(12_000, "LBP")).toBe("+LBP 120.00");
+  });
+});
+
+describe("scopeReportCurrency", () => {
+  const accounts = [{ id: 1, currency: "USD" }, { id: 2, currency: "EUR" }];
+  const rows = [
+    { dateKey: "2025-11-10" as const, amountCents: 9_000, categoryId: 5, accountId: 2 },
+    { dateKey: "2025-11-12" as const, amountCents: 1_000, categoryId: 5, accountId: 1 },
+    { dateKey: "2026-11-10" as const, amountCents: 2_000, categoryId: 5, accountId: 1 },
+  ];
+
+  it("keeps a last-year baseline in the visible range's single currency", () => {
+    const { scope, currency, scoped } = scopeReportCurrency(rows, accounts, { startKey: "2026-11-01", endKey: "2026-11-30" }, null);
+    expect(scope.mixed).toBe(false);
+    expect(currency).toBe("USD");
+    expect(scoped.map((row) => row.amountCents)).toEqual([1_000, 2_000]);
+  });
+
+  it("honors an explicit currency choice", () => {
+    expect(scopeReportCurrency(rows, accounts, { startKey: "2025-11-01", endKey: "2025-11-30" }, "EUR").scoped.map((row) => row.amountCents)).toEqual([9_000]);
   });
 });

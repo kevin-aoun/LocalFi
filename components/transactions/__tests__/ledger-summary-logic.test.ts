@@ -176,3 +176,12 @@ describe("categoryBreakdown", () => {
     expect(breakdown.data[0].color).toBe("#ef4444");
   });
 });
+
+
+describe("investment sale summaries", () => {
+  it("subtracts returned cash from investments without treating proceeds as salary", () => {
+    const rows = [tx({ categoryId: 3, amountCents: 10000, direction: "outflow" }), tx({ categoryId: 3, amountCents: 12000, direction: "inflow" })];
+    expect(summarizeLedger(rows, CATEGORIES)).toMatchObject({ incomeCents: 0, investmentCents: -2000, netCents: 2000 });
+    expect(categoryBreakdown(rows, CATEGORIES, "Investment")).toMatchObject({ totalCents: -2000 });
+  });
+});

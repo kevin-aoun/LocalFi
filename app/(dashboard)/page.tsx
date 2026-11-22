@@ -15,13 +15,18 @@ import {
 } from "@/app/actions/accounts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, ArchiveRestore, EyeOff, TrendingUp, TrendingDown, Plus, Wallet } from "lucide-react";
+import { AlertTriangle, ArchiveRestore, EyeOff, Plus, TrendingUp, TrendingDown, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip } from "recharts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
 import { AssetDialog } from "@/components/assets/asset-dialog";
+import { SellHoldingDialog } from "@/components/assets/sell-holding-dialog";
+import type { SaleTarget } from "@/components/assets/sell-holding-logic";
+import { LivePriceRefresh } from "@/components/assets/live-price-refresh";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -68,6 +73,7 @@ export default function DashboardPage() {
     openEditDialog,
     openDeleteDialog,
   } = useDashboardStore();
+  const [saleTarget, setSaleTarget] = useState<SaleTarget | null>(null);
 
   const [transactions, setTransactions] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -86,6 +92,7 @@ export default function DashboardPage() {
   const [hiddenHoldings, setHiddenHoldings] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
+  const [showZeroCashBalances, setShowZeroCashBalances] = useState(false);
 
   const hideHoldings = (keys: string[]) =>
     setHiddenHoldings((current) => withHidden(current, keys, true));
@@ -125,11 +132,6 @@ export default function DashboardPage() {
     void loadData();
   }, [loadData]);
 
-  const loadAssets = async () => {
-    const data = await getAssets({ includeArchived: true });
-    setAssets(data);
-  };
-
   const handleDelete = async () => {
     if (!assetToDelete) return;
 
@@ -168,6 +170,7 @@ export default function DashboardPage() {
 
     accounts: accountRows,
     hidden: hiddenHoldings,
+    showZeroCashBalances,
   });
   const mixedCurrency = assetView.mixed;
 
@@ -314,7 +317,7 @@ export default function DashboardPage() {
         </div>
         <Button onClick={openAddDialog}>
           <Plus className="mr-2 h-4 w-4" />
-          New
+          New asset
         </Button>
       </div>
 
@@ -322,7 +325,7 @@ export default function DashboardPage() {
       {netWorth && (
         <NetWorthSection
           netWorth={netWorth}
-          accounts={accountRows}
+          accounts={accountRows.filter((account) => showZeroCashBalances || account.balanceCents !== 0)}
           history={history}
           onRecorded={loadData}
         />
@@ -446,6 +449,7 @@ export default function DashboardPage() {
       </div>
 
       <div>
+        <div className="mb-3"><LivePriceRefresh onRefresh={loadData} /></div>
         <div className="mb-4">
           <h2 className="flex flex-wrap items-center gap-2 text-lg font-semibold">
             <span>Assets{!assetView.isEmpty && ` · ${assetView.visibleTotalsLabel}`}</span>
@@ -475,6 +479,12 @@ export default function DashboardPage() {
               </Tooltip>
             )}
           </h2>
+          {assetView.zeroBalanceAccountCount > 0 && (
+            <div className="mt-2 flex items-center gap-2">
+              <Checkbox id="show-zero-cash-balances" checked={showZeroCashBalances} onCheckedChange={(checked) => setShowZeroCashBalances(checked === true)} />
+              <Label htmlFor="show-zero-cash-balances" className="text-sm font-normal text-muted-foreground">Show zero cash balances</Label>
+            </div>
+          )}
           {}
           {hasDerivedCashAsset && assetView.cashAccountCount > 0 && (
             <p className="mt-1 text-xs text-muted-foreground">
@@ -517,12 +527,12 @@ export default function DashboardPage() {
               <Wallet className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No assets yet</h3>
               <p className="text-sm text-muted-foreground mb-4 text-center max-w-sm">
-                Start by adding your first asset to track your net worth and financial progress
+                Add a property, vehicle or other asset you own, or record a stock, crypto or metal purchase in Transactions.
               </p>
-              <Button onClick={() => setDialogOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Your First Asset
-              </Button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button onClick={openAddDialog}><Plus className="mr-2 h-4 w-4" />Add an asset</Button>
+                <Button variant="outline" asChild><Link href="/transactions">Open Transactions</Link></Button>
+              </div>
             </CardContent>
           </Card>
         ) : (
@@ -578,6 +588,7 @@ export default function DashboardPage() {
               onEdit={openEditDialog}
               onArchive={(assetId) => void handleAssetArchived(assetId, true)}
               onDelete={openDeleteDialog}
+              onSell={setSaleTarget}
               onHide={hideHoldings}
               onShowAll={showAllHoldings}
             />
@@ -617,16 +628,18 @@ export default function DashboardPage() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         asset={selectedAsset}
-        accounts={accountRows.map((account) => ({
-          id: account.id,
-          name: account.name,
-          currency: account.currency,
-          kind: account.kind,
-          archived: account.archived,
-        }))}
-        categories={categories}
-        onSuccess={loadAssets}
+        onSuccess={loadData}
       />
+
+      {saleTarget && (
+        <SellHoldingDialog
+          target={saleTarget}
+          accounts={accountRows}
+          categories={categories}
+          onOpenChange={(open) => { if (!open) setSaleTarget(null); }}
+          onSuccess={loadData}
+        />
+      )}
 
       <AlertDialog
         open={deleteDialogOpen}

@@ -2,7 +2,8 @@
 
 import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
-import { Archive, ChevronDown, ChevronRight, Eye, EyeOff, Pencil, Trash2 } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, Eye, EyeOff, HandCoins, Pencil, Trash2 } from "lucide-react";
+import type { SaleTarget } from "@/components/assets/sell-holding-logic";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -81,17 +82,24 @@ function HoldingActions<T extends SidebarAssetRow>({
   onEdit,
   onArchive,
   onDelete,
+  onSell,
   onHide,
 }: {
   holding: AssetTableHolding<T>;
   onEdit: (asset: T) => void;
   onArchive: (assetId: number) => void;
   onDelete: (assetId: number) => void;
+  onSell: (target: SaleTarget) => void;
   onHide: (keys: string[]) => void;
 }) {
   return (
     <div className="flex items-center justify-end gap-1">
       <HideButton label={holding.name} onHide={() => onHide([holding.key])} />
+      {holding.sale && (
+        <Button variant="ghost" size="sm" aria-label={`Sell ${holding.name}`} onClick={() => onSell(holding.sale!)}>
+          <HandCoins className="h-4 w-4" />
+        </Button>
+      )}
       {holding.source === "asset" ? (
         <>
           <Button
@@ -144,6 +152,7 @@ function CategoryRows<T extends SidebarAssetRow>({
   onEdit,
   onArchive,
   onDelete,
+  onSell,
   onHide,
 }: {
   category: AssetCategoryRow<T>;
@@ -153,6 +162,7 @@ function CategoryRows<T extends SidebarAssetRow>({
   onEdit: (asset: T) => void;
   onArchive: (assetId: number) => void;
   onDelete: (assetId: number) => void;
+  onSell: (target: SaleTarget) => void;
   onHide: (keys: string[]) => void;
 }) {
   const inline = category.inlineHolding;
@@ -258,6 +268,7 @@ function CategoryRows<T extends SidebarAssetRow>({
               onEdit={onEdit}
               onArchive={onArchive}
               onDelete={onDelete}
+              onSell={onSell}
               onHide={onHide}
             />
           )}
@@ -287,6 +298,7 @@ function CategoryRows<T extends SidebarAssetRow>({
                 onEdit={onEdit}
                 onArchive={onArchive}
                 onDelete={onDelete}
+                onSell={onSell}
                 onHide={onHide}
               />
             </td>
@@ -357,6 +369,7 @@ export function AssetTable<T extends SidebarAssetRow>({
   onEdit,
   onArchive,
   onDelete,
+  onSell,
   onHide,
   onShowAll,
 }: {
@@ -364,6 +377,7 @@ export function AssetTable<T extends SidebarAssetRow>({
   onEdit: (asset: T) => void;
   onArchive: (assetId: number) => void;
   onDelete: (assetId: number) => void;
+  onSell: (target: SaleTarget) => void;
 
   onHide: (keys: string[]) => void;
   onShowAll: () => void;
@@ -418,6 +432,8 @@ export function AssetTable<T extends SidebarAssetRow>({
                   </Button>
                 </td>
               </tr>
+            ) : view.categories.length === 0 ? (
+              <tr><td colSpan={4} className="px-6 py-10 text-center text-sm text-muted-foreground">All cash accounts have a zero balance. Select “Show zero cash balances” to display them.</td></tr>
             ) : (
               view.categories.map((category) => {
                 const expanded = overrides.get(category.key) ?? seed.has(category.key);
@@ -431,6 +447,7 @@ export function AssetTable<T extends SidebarAssetRow>({
                     onEdit={onEdit}
                     onArchive={onArchive}
                     onDelete={onDelete}
+                    onSell={onSell}
                     onHide={onHide}
                   />
                 );

@@ -1,29 +1,30 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { format } from "date-fns";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DatePicker } from "@/components/ui/date-picker";
+import { fromDateKey, toDateKey } from "@/lib/dates";
 import {
   createTransaction,
-  previewInvestmentPurchase,
   updateTransaction,
 } from "@/app/actions/transactions";
 import { Checkbox } from "@/components/ui/checkbox";
-import { AlertCircle, CalendarIcon, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { AlertCircle, Loader2 } from "lucide-react";
 import { centsToDecimal, formatMoney, type Cents } from "@/lib/money";
-import { PRICE_SYMBOLS, pricedHolding } from "@/lib/prices";
+import { pricedHolding } from "@/lib/prices";
+import { unitPriceFromAmountCents } from "@/lib/investments/cost";
 import {
-  previewInvestmentQuantity,
+  transactionInvestmentKind,
   toTransactionFormData,
+  transactionCashAmount,
   validateTransactionForm,
 } from "./transaction-form-logic";
+import { emptyInvestment, InvestmentFields, type InvestmentForm } from "./investment-fields";
+import type { InvestmentKind } from "@/lib/investments/categories";
 
 type Category = {
   id: number;
@@ -31,6 +32,7 @@ type Category = {
   type: string;
   color: string;
   icon: string;
+  investmentKind?: InvestmentKind | null;
 };
 
 type Transaction = {
@@ -46,6 +48,8 @@ type Transaction = {
   accountId?: number | null;
   instrumentId?: string | null;
   quantityDelta?: string | null;
+  investmentUnitPrice?: string | null;
+  investmentFeeAmountCents?: Cents | null;
 };
 
 type AccountOption = {
@@ -54,6 +58,8 @@ type AccountOption = {
   type: string;
 
   archived?: boolean;
+  currency?: string;
+  kind?: string;
 };
 
 type QuickCommand = {
@@ -78,7 +84,6 @@ type TransactionDialogProps = {
 
   defaultAccountId?: number | null;
   quickCommands: QuickCommand[];
-  onCreateCryptoPurchase?: (defaults: { accountId: number | null; categoryId: number | null }) => void;
   onSuccess: () => void;
 };
 
@@ -90,12 +95,9 @@ export function TransactionDialog({
   accounts = [],
   defaultAccountId = null,
   quickCommands,
-  onCreateCryptoPurchase,
   onSuccess,
 }: TransactionDialogProps) {
   const [loading, setLoading] = useState(false);
-  const [providerLoading, setProviderLoading] = useState(false);
-  const [previewSource, setPreviewSource] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -108,16 +110,10 @@ export function TransactionDialog({
   const [showQuickCommands, setShowQuickCommands] = useState(false);
 
   const [accountId, setAccountId] = useState("");
-  const [investment, setInvestment] = useState({
-    instrumentSymbol: "",
-    quantity: "",
-    unitPrice: "",
-    instrumentUnit: "",
-  });
+  const [investment, setInvestment] = useState<InvestmentForm>(emptyInvestment);
 
   useEffect(() => {
     setError(null);
-    setPreviewSource(null);
     if (transaction) {
       setFormData({
 
@@ -129,17 +125,19 @@ export function TransactionDialog({
       setIsPending(transaction.pending || false);
 
       setAccountId(transaction.accountId == null ? "" : String(transaction.accountId));
-      const instrumentSymbol = transaction.instrumentId?.split(":").at(-1) ?? "";
-      const quantity = transaction.quantityDelta ?? "";
+      const instrumentSymbol = transaction.instrumentId?.replace(/^instrument:[^:]+:/, "") ?? "";
+      const quantity = transaction.quantityDelta?.replace(/^-/, "") ?? "";
       const quantityNumber = Number(quantity);
-      const inferredUnitPrice = quantityNumber > 0
-        ? centsToInputValue(Math.round(transaction.amountCents / quantityNumber) as Cents)
+      const inferredUnitPrice = quantityNumber > 0 && transaction.amountCents > 0
+        ? unitPriceFromAmountCents(transaction.amountCents, quantity)
         : "";
       setInvestment({
         instrumentSymbol,
+        investmentSide: transaction.quantityDelta?.startsWith("-") ? "sell" : "buy",
         quantity,
-        unitPrice: inferredUnitPrice,
+        unitPrice: transaction.investmentUnitPrice ?? inferredUnitPrice,
         instrumentUnit: pricedHolding(instrumentSymbol)?.defaultUnit ?? "",
+        fees: centsToInputValue(transaction.investmentFeeAmountCents ?? 0 as Cents),
       });
     } else {
       setFormData({
@@ -150,9 +148,17 @@ export function TransactionDialog({
       setDate(new Date());
       setIsPending(false);
       setAccountId(defaultAccountId == null ? "" : String(defaultAccountId));
-      setInvestment({ instrumentSymbol: "", quantity: "", unitPrice: "", instrumentUnit: "" });
+      setInvestment(emptyInvestment());
     }
   }, [transaction, defaultAccountId, open]);
+
+  const selectCategory = (categoryId: string) => {
+    const selected = categories.find((category) => String(category.id) === categoryId);
+    const kind = transactionInvestmentKind(selected);
+    const currentKind = transactionInvestmentKind(categories.find((category) => String(category.id) === formData.categoryId), investment.instrumentSymbol);
+    if (kind !== currentKind) setInvestment(emptyInvestment(kind));
+    setFormData((previous) => ({ ...previous, categoryId }));
+  };
 
   const handleCommentChange = (value: string) => {
     setFormData((prev) => ({ ...prev, comment: value }));
@@ -164,6 +170,7 @@ export function TransactionDialog({
       );
 
       if (matchingCommand && value === `/${matchingCommand.command}`) {
+        selectCategory(String(matchingCommand.categoryId));
 
         setFormData({
           categoryId: matchingCommand.categoryId.toString(),
@@ -189,9 +196,9 @@ export function TransactionDialog({
       date,
       pending: isPending,
       accountId,
-      ...investment,
+      ...(showsInvestment ? investment : {}),
     };
-    const problem = validateTransactionForm(state);
+    const problem = showsInvestment && !investment.instrumentSymbol ? "Choose an investment instrument." : validateTransactionForm(state);
     if (problem) {
       setError(problem);
       return;
@@ -232,47 +239,13 @@ export function TransactionDialog({
       )
     : [];
   const selectedCategory = categories.find((category) => String(category.id) === formData.categoryId);
-  const showsInvestment = Boolean(transaction?.instrumentId);
-  const quantityPreview = previewInvestmentQuantity(formData.amount, investment.unitPrice);
-
-  const openCryptoPurchase = () => {
-    onOpenChange(false);
-    onCreateCryptoPurchase?.({
-      accountId: accountId === "" ? defaultAccountId : Number(accountId),
-      categoryId: selectedCategory?.type === "Investment" ? selectedCategory.id : null,
-    });
-  };
-
-  const loadProviderPreview = async () => {
-    setError(null);
-    setProviderLoading(true);
-    try {
-      const result = await previewInvestmentPurchase(
-        investment.instrumentSymbol,
-        formData.amount,
-      );
-      if ("error" in result) {
-        setError(result.error ?? "Failed to load provider preview.");
-        return;
-      }
-      setInvestment((previous) => ({
-        ...previous,
-        instrumentSymbol: result.data.symbol,
-        instrumentUnit: result.data.instrumentUnit,
-        unitPrice: centsToInputValue(result.data.unitPriceMinor as Cents),
-        quantity: result.data.quantity,
-      }));
-      setPreviewSource(result.data.sourceLabel);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load provider preview.");
-    } finally {
-      setProviderLoading(false);
-    }
-  };
+  const investmentKind = transactionInvestmentKind(selectedCategory, investment.instrumentSymbol);
+  const showsInvestment = investmentKind !== null;
+  const tradeAccounts = showsInvestment ? accounts.filter((account) => !account.archived && account.kind === "asset" && account.currency === "USD") : accounts;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>
             {transaction ? "Edit Transaction" : "Add Transaction"}
@@ -291,160 +264,10 @@ export function TransactionDialog({
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="comment">Description</Label>
-            <div className="relative">
-              <Input
-                id="comment"
-                value={formData.comment}
-                onChange={(e) => handleCommentChange(e.target.value)}
-                placeholder="Type / for quick commands"
-                required
-              />
-              {showQuickCommands && filteredQuickCommands.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
-                  {filteredQuickCommands.map((qc) => {
-                    const category = categories.find((c) => c.id === qc.categoryId);
-                    return (
-                      <button
-                        key={qc.command}
-                        type="button"
-                        className="w-full px-3 py-2 text-left hover:bg-accent flex items-center gap-2 text-sm"
-                        onClick={() => {
-                          setFormData({
-                            categoryId: qc.categoryId.toString(),
-                            amount: centsToInputValue(qc.amountCents),
-                            comment: qc.comment,
-                          });
-                          setShowQuickCommands(false);
-                        }}
-                      >
-                        <span className="font-mono text-primary">/{qc.command}</span>
-                        <span className="text-muted-foreground">→</span>
-                        <span>{category?.name}</span>
-                        <span className="ml-auto font-medium">{formatMoney(qc.amountCents)}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {!transaction && onCreateCryptoPurchase && (
-            <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
-              <p className="text-sm font-medium">Buying crypto?</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Use the shared crypto purchase form so the holding and its ledger transaction stay together.
-              </p>
-              <Button type="button" variant="outline" size="sm" className="mt-3" onClick={openCryptoPurchase}>
-                Add crypto purchase
-              </Button>
-            </div>
-          )}
-
-          {showsInvestment && (
-            <div className="space-y-3 rounded-md border p-3">
-              <div>
-                <p className="text-sm font-medium">Investment purchase</p>
-                <p className="text-xs text-muted-foreground">
-                  Confirm the exact acquired quantity. Later prices never rewrite it.
-                </p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="instrument-symbol">Instrument</Label>
-                  <Select
-                    value={investment.instrumentSymbol}
-                    onValueChange={(symbol) => setInvestment((previous) => ({
-                      ...previous,
-                      instrumentSymbol: symbol,
-                      instrumentUnit: pricedHolding(symbol)?.defaultUnit ?? "",
-                    }))}
-                  >
-                    <SelectTrigger id="instrument-symbol">
-                      <SelectValue placeholder="Choose instrument" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PRICE_SYMBOLS.map((symbol) => (
-                        <SelectItem key={symbol} value={symbol}>
-                          {pricedHolding(symbol)?.label ?? symbol} ({symbol})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="investment-unit-price">Unit price</Label>
-                  <Input
-                    id="investment-unit-price"
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    value={investment.unitPrice}
-                    onChange={(event) => setInvestment((previous) => ({
-                      ...previous,
-                      unitPrice: event.target.value,
-                    }))}
-                    placeholder="0.00"
-                  />
-                </div>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={
-                  providerLoading || investment.instrumentSymbol === "" || formData.amount === ""
-                }
-                onClick={() => void loadProviderPreview()}
-              >
-                {providerLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Get provider preview
-              </Button>
-              {previewSource && (
-                <p className="text-xs text-muted-foreground">Preview source: {previewSource}</p>
-              )}
-              <div className="space-y-2">
-                <Label htmlFor="investment-quantity">Exact quantity</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="investment-quantity"
-                    inputMode="decimal"
-                    value={investment.quantity}
-                    onChange={(event) => setInvestment((previous) => ({
-                      ...previous,
-                      quantity: event.target.value,
-                    }))}
-                    placeholder="0.00000000"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={quantityPreview === null}
-                    onClick={() => {
-                      if (quantityPreview !== null) {
-                        setInvestment((previous) => ({ ...previous, quantity: quantityPreview }));
-                      }
-                    }}
-                  >
-                    Use entered price
-                  </Button>
-                </div>
-                {quantityPreview !== null && (
-                  <p className="text-xs text-muted-foreground">
-                    Provider-price preview: {quantityPreview} {investment.instrumentUnit || "units"}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-2">
             <Label htmlFor="category">Category</Label>
             <Select
               value={formData.categoryId}
-              onValueChange={(value) =>
-                setFormData((prev) => ({ ...prev, categoryId: value }))
-              }
+              onValueChange={selectCategory}
               required
             >
               <SelectTrigger id="category">
@@ -469,15 +292,58 @@ export function TransactionDialog({
             </Select>
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="comment">Description</Label>
+            <div className="relative">
+              <Input
+                id="comment"
+                value={formData.comment}
+                onChange={(e) => handleCommentChange(e.target.value)}
+                placeholder="Type / for quick commands"
+                required
+              />
+              {showQuickCommands && filteredQuickCommands.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
+                  {filteredQuickCommands.map((qc) => {
+                    const category = categories.find((c) => c.id === qc.categoryId);
+                    return (
+                      <button
+                        key={qc.command}
+                        type="button"
+                        className="w-full px-3 py-2 text-left hover:bg-accent flex items-center gap-2 text-sm"
+                        onClick={() => {
+                          selectCategory(String(qc.categoryId));
+                          setFormData({
+                            categoryId: qc.categoryId.toString(),
+                            amount: centsToInputValue(qc.amountCents),
+                            comment: qc.comment,
+                          });
+                          setShowQuickCommands(false);
+                        }}
+                      >
+                        <span className="font-mono text-primary">/{qc.command}</span>
+                        <span className="text-muted-foreground">→</span>
+                        <span>{category?.name}</span>
+                        <span className="ml-auto font-medium">{formatMoney(qc.amountCents)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {investmentKind && <InvestmentFields kind={investmentKind} value={investment} onChange={setInvestment} />}
+
           {accounts.length > 0 && (
             <div className="space-y-2">
-              <Label htmlFor="account">Account</Label>
+              <Label htmlFor="account">{showsInvestment ? investment.investmentSide === "sell" ? "Receive into" : "Paid from" : "Account"}</Label>
               <Select value={accountId} onValueChange={setAccountId}>
                 <SelectTrigger id="account">
                   <SelectValue placeholder="Select account" />
                 </SelectTrigger>
                 <SelectContent>
-                  {accounts.map((account) => (
+                  {tradeAccounts.map((account) => (
                     <SelectItem key={account.id} value={account.id.toString()}>
                       <div className="flex items-center gap-2">
                         <span>{account.name}</span>
@@ -491,15 +357,17 @@ export function TransactionDialog({
               </Select>
             </div>
           )}
+          {showsInvestment && tradeAccounts.length === 0 && <p className="text-sm text-destructive">Add an active USD asset account in Accounts before recording a trade.</p>}
 
           <div className="space-y-2">
-            <Label htmlFor="amount">Amount</Label>
+            <Label htmlFor="amount">{showsInvestment ? investment.investmentSide === "sell" ? "Net proceeds (USD)" : "Total paid (USD)" : "Amount"}</Label>
             <Input
               id="amount"
               type="number"
               step="0.01"
               min="0"
-              value={formData.amount}
+              value={transactionCashAmount({ amount: formData.amount, ...(showsInvestment ? investment : {}) })}
+              readOnly={showsInvestment}
               onChange={(e) =>
                 setFormData((prev) => ({ ...prev, amount: e.target.value }))
               }
@@ -510,32 +378,7 @@ export function TransactionDialog({
 
           <div className="space-y-2">
             <Label>Date</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={cn(
-                    "w-full justify-start text-left font-normal",
-                    !date && "text-muted-foreground"
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {date ? format(date, "PPP") : <span>Pick a date</span>}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={date}
-                  onSelect={(selectedDate) => {
-                    if (selectedDate) {
-                      setDate(selectedDate);
-                    }
-                  }}
-                  initialFocus
-                />
-              </PopoverContent>
-            </Popover>
+            <DatePicker value={toDateKey(date)} onChange={(day) => { if (day) setDate(fromDateKey(day)); }} className="w-full" />
           </div>
 
           <div className="flex items-center space-x-2">
@@ -559,7 +402,7 @@ export function TransactionDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={loading}>
+            <Button type="submit" disabled={loading || (showsInvestment && tradeAccounts.length === 0)}>
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {transaction ? "Update" : "Create"}
             </Button>

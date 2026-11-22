@@ -24,6 +24,7 @@ import {
 } from "@/lib/recurrence";
 import { parseAmount, type Cents } from "@/lib/money";
 import { categoryCashDirection, normalizeLedgerCurrency } from "@/lib/cash-balance";
+import { assertAmountOnlyCategory } from "@/lib/investments/categories";
 import type { TransactionDirection } from "@/lib/db/schema";
 import {
   buildProjectedTransactionMovements,
@@ -141,6 +142,12 @@ function detachRecurringProjection(raw: Database, row: Transaction, templateName
     "UPDATE transactions SET recurring_id = NULL, current_event_id = ? WHERE id = ?",
     [event.eventId, row.id],
   );
+}
+
+async function assertTemplateCategory(db: BudgetDb, categoryId: number | null): Promise<void> {
+  if (categoryId === null) return;
+  const [category] = await db.select().from(categories).where(eq(categories.id, categoryId));
+  assertAmountOnlyCategory(category);
 }
 
 async function assertTemplateTransferCurrency(
@@ -266,6 +273,7 @@ export async function createRecurringTransaction(
 
     const template = await withDb(async (db) => {
       await assertTemplateTransferCurrency(db, accountId, transferAccountId);
+      await assertTemplateCategory(db, categoryId);
       const [row] = await db
         .insert(recurringTransactions)
         .values({
@@ -337,6 +345,7 @@ export async function updateRecurringTransaction(
         throw new Error("A transfer has no category");
       }
       await assertTemplateTransferCurrency(db, accountId, transferAccountId);
+      if (categoryId !== existing.categoryId) await assertTemplateCategory(db, categoryId);
 
       const amountRaw = str(formData, "amount");
       const rule: RecurrenceRule = { frequency, interval, startDate, endDate };

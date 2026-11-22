@@ -104,3 +104,18 @@ describe("budget savings-goal actions", () => {
     expect(temp.scalar("SELECT COUNT(*) FROM transactions")).toBe(0);
   });
 });
+
+describe("budget boundaries", () => {
+  it("starts a budget set mid-period on that period's first day, so the period is not skipped", async () => {
+    const monthly = unwrap(await createBudget(form({ categoryId: TRAVEL, period: "monthly", limit: "100", effectiveFrom: "2026-11-15" })));
+    expect(monthly.effectiveFrom).toBe("2026-11-01");
+    const moved = unwrap(await updateBudget(monthly.id, form({ effectiveFrom: "2026-12-20" })));
+    expect(moved.effectiveFrom).toBe("2026-12-01");
+  });
+
+  it("rejects negative limits on create and update", async () => {
+    expect(await createBudget(form({ categoryId: TRAVEL, period: "monthly", limit: "-50", effectiveFrom: "2026-01-01" }))).toMatchObject({ error: expect.stringMatching(/cannot be negative/) });
+    const budget = unwrap(await createBudget(form({ categoryId: TRAVEL, period: "monthly", limit: "50", effectiveFrom: "2026-01-01" })));
+    expect(await updateBudget(budget.id, form({ limit: "-1" }))).toMatchObject({ error: expect.stringMatching(/cannot be negative/) });
+  });
+});

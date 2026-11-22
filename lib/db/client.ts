@@ -4,6 +4,7 @@ import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 import * as schema from "./schema";
 import { upgradeDatabase } from "./upgrade";
 import { acquireWriterLease, type WriterLease } from "./writer-lease";
+import { plaintextFixtureMode, resolveDbPath } from "./db-path";
 import {
   closeSync,
   copyFileSync,
@@ -12,14 +13,12 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  realpathSync,
   renameSync,
   statSync,
   unlinkSync,
-  writeSync,
+  writeFileSync,
 } from "fs";
 import path from "path";
-import os from "node:os";
 import { createHash } from "node:crypto";
 import { canonicalStringify } from "../ledger/canonical";
 import { canonicalDecimal } from "../ledger/decimal";
@@ -38,14 +37,14 @@ import {
   writeEncryptedGenerationAtomically,
 } from "../vault/paths";
 
+export { assertPlaintextFixturePath, resolveDbPath } from "./db-path";
+
 export type BudgetDb = SQLJsDatabase<typeof schema>;
 export type BudgetDbCallback<T> = (db: BudgetDb, raw: Database) => T | Promise<T>;
 
 const SQLITE_MAGIC = Buffer.from("SQLite format 3\0", "binary");
 
 const MIN_DB_BYTES = 512;
-
-const DEFAULT_DB_PATH = path.resolve(process.cwd(), "data", "budget.db");
 
 export class DatabaseCorruptError extends Error {
   constructor(file: string, detail: string) {
@@ -67,12 +66,6 @@ function debug(...args: unknown[]) {
   if (debugEnabled()) console.log("[DB]", ...args);
 }
 
-
-export function resolveDbPath(): string {
-  const override = process.env.BUDGET_DB_PATH;
-  if (override && override.trim() !== "") return path.resolve(process.cwd(), override);
-  return DEFAULT_DB_PATH;
-}
 
 export class DatabaseVaultAuthorization {
   private constructor() {}
@@ -107,56 +100,11 @@ const vaultRuntime = (vaultRuntimeGlobals.__localfiVaultRuntime ??= {
 const vaultAuthorizationStates = (vaultRuntime.authorizationStates ??=
   new WeakMap<DatabaseVaultAuthorization, VaultAuthorizationState>());
 
-function canonicalPotentialPath(file: string): string {
-  const resolved = path.resolve(file);
-  if (existsSync(resolved)) return realpathSync(resolved);
-  const missing: string[] = [];
-  let cursor = resolved;
-  while (!existsSync(cursor)) {
-    missing.unshift(path.basename(cursor));
-    const parent = path.dirname(cursor);
-    if (parent === cursor) break;
-    cursor = parent;
-  }
-  return path.join(realpathSync(cursor), ...missing);
-}
-
-export function assertPlaintextFixturePath(file: string): void {
-  const resolved = path.resolve(file);
-  const configured = process.env.BUDGET_DB_PATH?.trim();
-  if (
-    !configured ||
-    resolved === DEFAULT_DB_PATH ||
-    canonicalPotentialPath(resolved) === canonicalPotentialPath(DEFAULT_DB_PATH)
-  ) {
-    throw new VaultLockedError("Plaintext fixture mode requires an explicit non-default path.");
-  }
-  if (existsSync(resolved) && realpathSync(resolved) !== resolved) {
-    throw new VaultLockedError("Plaintext fixture mode refuses symbolic-link targets.");
-  }
-  if (
-    process.env.NODE_ENV === "test" &&
-    !canonicalPotentialPath(resolved).startsWith(`${canonicalPotentialPath(os.tmpdir())}${path.sep}`)
-  ) {
-    throw new VaultLockedError("Plaintext test fixtures must use an isolated temporary path.");
-  }
-}
-
-function plaintextFixtureMode(file: string): boolean {
-  if (process.env.LOCALFI_VAULT_TEST_MODE !== "plaintext") return false;
-  assertPlaintextFixturePath(file);
-  if (process.env.NODE_ENV !== "test") {
-    throw new VaultLockedError("Plaintext fixture mode is restricted to automated tests.");
-  }
-  return true;
-}
-
 export function plaintextFixtureAccessAllowed(file = resolveDbPath()): boolean {
   return plaintextFixtureMode(file);
 }
 
-async function authorizedKey(file: string): Promise<UnlockedVaultKey> {
-  const authorization = await vaultRuntime.provider();
+function authorizedKey(file: string, authorization: DatabaseVaultAuthorization | null): UnlockedVaultKey {
   const state = authorization ? vaultAuthorizationStates.get(authorization) : undefined;
   if (!state || state.key.destroyed || path.resolve(state.file) !== path.resolve(file)) {
     throw new VaultLockedError();
@@ -457,11 +405,17 @@ function applySessionPragmas(raw: Database) {
 }
 
 
-async function ensureLoaded(): Promise<LoadedDb> {
+// Resolve the session before entering the DB queue: locking a session closes the DB.
+async function withAuthorizedDb<T>(task: (entry: LoadedDb) => Promise<T>): Promise<T> {
+  const authorization = plaintextFixtureMode(resolveDbPath()) ? null : await vaultRuntime.provider();
+  return runExclusive(async () => task(await ensureLoaded(authorization)));
+}
+
+async function ensureLoaded(authorization: DatabaseVaultAuthorization | null): Promise<LoadedDb> {
   for (;;) {
     const file = resolveDbPath();
     const plaintextFixture = plaintextFixtureMode(file);
-    const accessKey = plaintextFixture ? null : await authorizedKey(file);
+    const accessKey = plaintextFixture ? null : authorizedKey(file, authorization);
 
     if (dbRuntime.loaded) {
       if (dbRuntime.loaded.file !== file) {
@@ -573,7 +527,7 @@ async function flush(entry: LoadedDb) {
   try {
     const fd = openSync(tmp, "wx", 0o600);
     try {
-      writeSync(fd, image, 0, image.length, 0);
+      writeFileSync(fd, image);
       fsyncSync(fd);
     } finally {
       closeSync(fd);
@@ -629,8 +583,7 @@ async function flush(entry: LoadedDb) {
 
 
 export function withDb<T>(fn: BudgetDbCallback<T>): Promise<T> {
-  return runExclusive(async () => {
-    const entry = await ensureLoaded();
+  return withAuthorizedDb(async (entry) => {
     let transactionOpen = false;
     try {
 
@@ -661,8 +614,7 @@ export function withDb<T>(fn: BudgetDbCallback<T>): Promise<T> {
 
 
 export function readDb<T>(fn: BudgetDbCallback<T>): Promise<T> {
-  return runExclusive(async () => {
-    const entry = await ensureLoaded();
+  return withAuthorizedDb(async (entry) => {
     entry.lease.assertOwned();
     const result = await fn(entry.orm, entry.raw);
     entry.lease.assertOwned();
@@ -672,14 +624,12 @@ export function readDb<T>(fn: BudgetDbCallback<T>): Promise<T> {
 
 
 export async function getDb(): Promise<BudgetDb> {
-  const entry = await ensureLoaded();
-  return entry.orm;
+  return withAuthorizedDb(async (entry) => entry.orm);
 }
 
 
 export async function saveDb(): Promise<void> {
-  await runExclusive(async () => {
-    const entry = await ensureLoaded();
+  await withAuthorizedDb(async (entry) => {
     try {
       await flush(entry);
     } catch (error) {
@@ -695,8 +645,7 @@ export type EncryptedDatabaseGeneration = {
 };
 
 export function snapshotEncryptedDatabaseGeneration(): Promise<EncryptedDatabaseGeneration> {
-  return runExclusive(async () => {
-    const entry = await ensureLoaded();
+  return withAuthorizedDb(async (entry) => {
     if (entry.plaintextFixture) {
       throw new VaultLockedError("Plaintext fixtures cannot be exported as vault generations.");
     }
@@ -714,13 +663,15 @@ export function snapshotEncryptedDatabaseGeneration(): Promise<EncryptedDatabase
 }
 
 
-export async function closeDb(): Promise<void> {
+export async function closeDb(authorization?: DatabaseVaultAuthorization): Promise<void> {
   await runExclusive(async () => {
     if (dbRuntime.loading) await dbRuntime.loading.promise.catch(() => undefined);
     const entry = dbRuntime.loaded;
     dbRuntime.loaded = null;
-    if (entry) {
-      await disposeLoaded(entry);
+    try {
+      if (entry) await disposeLoaded(entry);
+    } finally {
+      if (authorization) destroyDatabaseVaultAuthorization(authorization);
     }
   });
 }

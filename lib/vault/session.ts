@@ -108,8 +108,7 @@ export class VaultSessionManager {
     this.authorization = null;
     this.sessions.clear();
     this.lastActivity = 0;
-    await closeDb();
-    if (authorization) destroyDatabaseVaultAuthorization(authorization);
+    await closeDb(authorization ?? undefined);
   }
 
   private async expireIfDue(): Promise<void> {
@@ -181,7 +180,6 @@ export class VaultSessionManager {
       const file = path.resolve(dbPath);
       const lease = await acquireWriterLease(file);
       let reset: Awaited<ReturnType<typeof recoverAndRewrapVaultEnvelope>> | null = null;
-      let recoveredPlaintext: Uint8Array | null = null;
       try {
         if (!existsSync(file)) throw new VaultLockedError();
         const originalLive = await readEncryptedGeneration(file);
@@ -190,7 +188,6 @@ export class VaultSessionManager {
           recoverySecret,
           nextPassphrase,
         );
-        recoveredPlaintext = await decryptVaultGeneration(reset.envelope, reset.key);
         let livePublicationAttempted = false;
         try {
           lease.assertOwned();
@@ -228,16 +225,13 @@ export class VaultSessionManager {
           let backupPlaintext: Uint8Array | null = null;
           let backupKey: UnlockedVaultKey | null = null;
           try {
-            try {
-              const unlocked = await unlockVaultEnvelopeWithRecovery(
-                await readEncryptedGeneration(backupPath),
-                recoverySecret,
-              );
-              backupPlaintext = unlocked.plaintext;
-              backupKey = unlocked.key;
-            } catch {
-              backupPlaintext = recoveredPlaintext;
-            }
+            // A backup this secret cannot open keeps its own point-in-time contents; never overwrite it with today's data.
+            const unlocked = await unlockVaultEnvelopeWithRecovery(
+              await readEncryptedGeneration(backupPath),
+              recoverySecret,
+            );
+            backupPlaintext = unlocked.plaintext;
+            backupKey = unlocked.key;
             const replacement = await encryptVaultGeneration(backupPlaintext, reset.key);
             lease.assertOwned();
             await this.persistence.writeGeneration(backupPath, replacement, {
@@ -247,7 +241,7 @@ export class VaultSessionManager {
           } catch (error) {
             console.warn(`[vault] recovered the live vault but could not repair ${backupPath}:`, error);
           } finally {
-            if (backupPlaintext && backupPlaintext !== recoveredPlaintext) backupPlaintext.fill(0);
+            backupPlaintext?.fill(0);
             if (backupKey) destroyVaultKey(backupKey);
           }
         }
@@ -255,7 +249,6 @@ export class VaultSessionManager {
         if (reset) destroyVaultKey(reset.key);
         throw error;
       } finally {
-        recoveredPlaintext?.fill(0);
         await lease.release();
       }
 
@@ -273,7 +266,7 @@ export class VaultSessionManager {
 
   async authorizationForToken(
     token: string | null | undefined,
-    touch = true,
+    touch = false,
   ): Promise<DatabaseVaultAuthorization | null> {
     return this.exclusive(async () => {
       if (!this.authorization) return null;
@@ -290,7 +283,7 @@ export class VaultSessionManager {
     });
   }
 
-  async authorizationForActiveVault(touch = true): Promise<DatabaseVaultAuthorization | null> {
+  async authorizationForActiveVault(touch = false): Promise<DatabaseVaultAuthorization | null> {
     return this.exclusive(async () => {
       if (!this.authorization) return null;
       if (this.clock.now() >= this.deadline()) {

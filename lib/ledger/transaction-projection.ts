@@ -18,6 +18,7 @@ export type TransactionProjectionSource = {
   instrumentId: string | null;
   quantityDelta: string | null;
   transferPrincipalAmountCents: number | null;
+  feeForTransferId?: number | null;
   createdAt: Date | number;
   updatedAt: Date | number;
 };
@@ -49,6 +50,7 @@ export function buildTransactionProjection(
     instrumentId: row.instrumentId,
     quantityDelta: row.quantityDelta,
     transferPrincipalAmountCents: row.transferPrincipalAmountCents,
+    ...(row.feeForTransferId == null ? {} : { feeForTransferId: row.feeForTransferId }),
     allocations: allocations.map(({ categoryId, amountCents }) => ({ categoryId, amountCents })),
     createdAt: projectionEpochSeconds(row.createdAt),
     updatedAt: projectionEpochSeconds(row.updatedAt),
