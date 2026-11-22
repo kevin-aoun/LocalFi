@@ -601,6 +601,7 @@ export const CSV_HEADERS = [
   "Pending",
   "Transfer To",
   "Currency",
+  "Direction",
 ] as const;
 
 
@@ -624,6 +625,8 @@ export type CsvTransactionRow = {
 
   transferAccountName: string | null | undefined;
   currency: string;
+  /** Whether money entered or left the account; sales and refunds run against their category's usual direction. */
+  direction: "inflow" | "outflow" | "transfer";
 };
 
 export function buildTransactionsCsv(rows: readonly CsvTransactionRow[]): string {
@@ -641,6 +644,7 @@ export function buildTransactionsCsv(rows: readonly CsvTransactionRow[]): string
         toCsvField(row.pending ? "yes" : "no"),
         toCsvField(row.transferAccountName),
         toCsvField(normalizeCurrencyCode(row.currency)),
+        toCsvField(row.direction),
       ].join(","),
     );
   }

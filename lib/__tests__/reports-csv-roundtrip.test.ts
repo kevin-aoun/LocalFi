@@ -35,7 +35,7 @@ const EXPORTED: CsvTransactionRow[] = [
     accountName: "Checking",
     pending: false,
     transferAccountName: null,
-    currency: "USD",
+    currency: "USD", direction: "inflow",
   },
   {
     dateKey: "2026-02-01",
@@ -46,7 +46,7 @@ const EXPORTED: CsvTransactionRow[] = [
     accountName: "Checking",
     pending: false,
     transferAccountName: null,
-    currency: "USD",
+    currency: "USD", direction: "outflow",
   },
   {
     dateKey: "2026-02-28",
@@ -57,7 +57,7 @@ const EXPORTED: CsvTransactionRow[] = [
     accountName: "Checking",
     pending: false,
     transferAccountName: null,
-    currency: "USD",
+    currency: "USD", direction: "outflow",
   },
   {
     dateKey: "2026-12-25",
@@ -68,7 +68,7 @@ const EXPORTED: CsvTransactionRow[] = [
     accountName: "Checking",
     pending: false,
     transferAccountName: null,
-    currency: "USD",
+    currency: "USD", direction: "outflow",
   },
   {
     dateKey: "2024-02-29",
@@ -79,7 +79,7 @@ const EXPORTED: CsvTransactionRow[] = [
     accountName: "Checking",
     pending: false,
     transferAccountName: null,
-    currency: "USD",
+    currency: "USD", direction: "outflow",
   },
 ];
 
@@ -173,6 +173,7 @@ describe("CSV export -> import round-trip", () => {
         pending: false,
         transferAccountName: null,
         currency: "USD",
+        direction: EXPORTED[i].direction,
       })),
     );
     expect(again).toBe(csv);

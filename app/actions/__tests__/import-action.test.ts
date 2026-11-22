@@ -57,7 +57,7 @@ describe("importTransactions inserts the whole batch in one database write", () 
     const text = buildTransactionsCsv([{
       dateKey: "2026-06-01", categoryName: "Groceries", categoryType: "Expense",
       amountCents: 5000, description: "Pending fixture", accountName: null, pending: true,
-      transferAccountName: null, currency: "USD",
+      transferAccountName: null, currency: "USD", direction: "outflow",
     }]);
     const [parsed] = parseImportRows(readCsvRows(text), [{ id: 1, name: "Groceries", type: "Expense" }], { dayFirst: false });
     expect(parsed.problems).toEqual([]);
