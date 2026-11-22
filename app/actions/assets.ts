@@ -58,7 +58,8 @@ export async function getInvestmentHistory(): Promise<InvestmentHistoryRow[]> {
   const rows = await readDb((_db, raw) => readPositionHistory(raw));
 
   return rows
-    .filter((row) => row.assetId !== null && INVESTMENT_CATEGORIES.has(row.category))
+    // Archived holdings are hidden from Home's totals, so the report hides them too.
+    .filter((row) => row.assetId !== null && !row.archived && INVESTMENT_CATEGORIES.has(row.category))
     .map((row) => ({
       assetId: row.assetId!,
       dateKey: row.dateKey,
