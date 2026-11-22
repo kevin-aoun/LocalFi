@@ -14,7 +14,7 @@ import {
 } from "../../db/client";
 import { buildInitialDatabaseImage } from "../../db/init";
 import { withDatabaseVaultAuthorization } from "../access";
-import { destroyVaultKey, unlockVaultEnvelopeWithRecovery } from "../envelope";
+import { decryptVaultGeneration, destroyVaultKey, unlockVaultEnvelopeWithRecovery } from "../envelope";
 import { VaultLockedError } from "../errors";
 import {
   copyEncryptedGenerationAtomically,
@@ -218,7 +218,22 @@ describe.sequential("single-owner vault sessions", () => {
     await manager.lock(recovered.token);
   });
 
-  it("keeps live recovery usable when backup repair is interrupted and repairs it next time", async () => {
+  it("rotates the data key, so an old export and its secret cannot decrypt anything written after recovery", async () => {
+    const { manager } = controlledManager();
+    const setup = await manager.setup(PASSPHRASE, dbPath);
+    await manager.lock(setup.token);
+    const oldExport = readFileSync(dbPath);
+
+    const recovered = await manager.recover(setup.recoverySecret, "moonlit olive harbor 83 cedar", dbPath);
+    await manager.lock(recovered.token);
+
+    const old = await unlockVaultEnvelopeWithRecovery(oldExport, setup.recoverySecret);
+    old.plaintext.fill(0);
+    await expect(decryptVaultGeneration(readFileSync(dbPath), old.key)).rejects.toThrow();
+    destroyVaultKey(old.key);
+  });
+
+  it("keeps live recovery usable when backup repair is interrupted and never overwrites the unrepaired backup", async () => {
     let writes = 0;
     const clock = {
       now: () => 1_000,
@@ -242,6 +257,8 @@ describe.sequential("single-owner vault sessions", () => {
     );
     expect(await manager.authorizationForToken(firstRecovery.token)).not.toBeNull();
     await manager.lock(firstRecovery.token);
+    const backupPath = `${dbPath}.bak`;
+    const staleBackup = readFileSync(backupPath);
 
     const secondRecovery = await manager.recover(
       firstRecovery.recoverySecret,
@@ -249,15 +266,15 @@ describe.sequential("single-owner vault sessions", () => {
       dbPath,
     );
 
-    const paths = managedVaultGenerationPaths(dbPath);
-    for (const file of paths) {
-      const unlocked = await unlockVaultEnvelopeWithRecovery(
-        readFileSync(file),
-        secondRecovery.recoverySecret,
-      );
-      unlocked.plaintext.fill(0);
-      destroyVaultKey(unlocked.key);
-    }
+    // The new secret opens the live generation; the stale backup keeps its own contents and older secret.
+    const live = await unlockVaultEnvelopeWithRecovery(readFileSync(dbPath), secondRecovery.recoverySecret);
+    live.plaintext.fill(0);
+    destroyVaultKey(live.key);
+    expect(managedVaultGenerationPaths(dbPath)).toContain(backupPath);
+    expect(readFileSync(backupPath).equals(staleBackup)).toBe(true);
+    const older = await unlockVaultEnvelopeWithRecovery(staleBackup, setup.recoverySecret);
+    older.plaintext.fill(0);
+    destroyVaultKey(older.key);
     await manager.lock(secondRecovery.token);
   }, 15_000);
 
