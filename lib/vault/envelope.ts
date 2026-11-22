@@ -402,8 +402,6 @@ async function wrapDataKey(dataKey: Uint8Array, passphrase: string): Promise<{
       }),
       recoverySecret: encodeRecoverySecret(recoveryKey),
     };
-  } catch (error) {
-    throw error;
   } finally {
     sodium.memzero(kek);
     sodium.memzero(recoveryKey);
@@ -602,29 +600,6 @@ export async function inspectVaultEnvelope(envelope: Uint8Array): Promise<VaultE
   };
 }
 
-export async function rewrapVaultEnvelope(
-  envelope: Uint8Array,
-  currentPassphrase: string,
-  nextPassphrase: string,
-): Promise<{ envelope: Uint8Array; key: UnlockedVaultKey; recoverySecret: string }> {
-  const unlocked = await unlockVaultEnvelope(envelope, currentPassphrase);
-  try {
-    const material = await wrapDataKey(keyState(unlocked.key).dataKey, nextPassphrase);
-    try {
-      return {
-        envelope: await encryptVaultGeneration(unlocked.plaintext, material.key),
-        ...material,
-      };
-    } catch (error) {
-      destroyVaultKey(material.key);
-      throw error;
-    }
-  } finally {
-    unlocked.plaintext.fill(0);
-    destroyVaultKey(unlocked.key);
-  }
-}
-
 export async function recoverAndRewrapVaultEnvelope(
   envelope: Uint8Array,
   recoverySecret: string,
@@ -632,7 +607,8 @@ export async function recoverAndRewrapVaultEnvelope(
 ): Promise<{ envelope: Uint8Array; key: UnlockedVaultKey; recoverySecret: string }> {
   const unlocked = await unlockVaultEnvelopeWithRecovery(envelope, recoverySecret);
   try {
-    const material = await wrapDataKey(keyState(unlocked.key).dataKey, nextPassphrase);
+    // A fresh data key: an old secret plus an old export must not decrypt anything written after recovery.
+    const material = await createKeyMaterial(nextPassphrase);
     try {
       return {
         envelope: await encryptVaultGeneration(unlocked.plaintext, material.key),

@@ -11,7 +11,7 @@ import {
   renameSync,
   statSync,
   unlinkSync,
-  writeSync,
+  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import initSqlJs, { type SqlJsStatic } from "sql.js";
@@ -166,7 +166,7 @@ function fsyncDirectory(directory: string): void {
 function writeDurably(file: string, bytes: Uint8Array, exclusive = false): void {
   const fd = openSync(file, exclusive ? "wx" : "w", 0o600);
   try {
-    writeSync(fd, bytes, 0, bytes.byteLength, 0);
+    writeFileSync(fd, bytes);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
