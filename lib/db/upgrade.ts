@@ -10,7 +10,6 @@ import {
   statSync,
   unlinkSync,
   writeFileSync,
-  writeSync,
 } from "node:fs";
 import path from "node:path";
 import initSqlJs, { type Database } from "sql.js";
@@ -579,7 +578,7 @@ function writeBytesAtomically(file: string, bytes: Buffer) {
   try {
     const fd = openSync(temporary, "wx", 0o600);
     try {
-      writeSync(fd, bytes, 0, bytes.length, 0);
+      writeFileSync(fd, bytes);
       fsyncSync(fd);
     } finally {
       closeSync(fd);
