@@ -243,6 +243,30 @@ describe.sequential("encrypted sql.js client boundary", () => {
     expect(isVaultEnvelope(readFileSync(dbPath))).toBe(true);
   });
 
+  it("hardens loose legacy backup copies and their directory before setup reads them", async () => {
+    writeFileSync(dbPath, await buildInitialDatabaseImage(), { mode: 0o600 });
+    const backupDirectory = path.join(directory, "backups");
+    mkdirSync(backupDirectory);
+    chmodSync(backupDirectory, 0o755);
+    const historicalCopy = path.join(backupDirectory, "budget.legacy-copy.db");
+    const automaticCopy = `${dbPath}.bak`;
+    for (const copy of [historicalCopy, automaticCopy]) {
+      writeFileSync(copy, readFileSync(dbPath));
+      chmodSync(copy, 0o644);
+    }
+
+    const setup = await setupVaultDatabase({ dbPath, passphrase: PASSPHRASE });
+    destroyVaultKey(setup.key);
+
+    expect(statSync(backupDirectory).mode & 0o777).toBe(0o700);
+    const generations = managedVaultGenerationPaths(dbPath);
+    expect(generations).toEqual(expect.arrayContaining([dbPath, historicalCopy, automaticCopy]));
+    for (const generation of generations) {
+      expect(statSync(generation).mode & 0o777).toBe(0o600);
+      expect(isVaultEnvelope(readFileSync(generation))).toBe(true);
+    }
+  });
+
   it("rejects wrong passphrases and ciphertext tampering before sql.js opens", async () => {
     const setup = await setupVaultDatabase({ dbPath, passphrase: PASSPHRASE });
     destroyVaultKey(setup.key);
