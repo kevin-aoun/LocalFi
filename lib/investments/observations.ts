@@ -48,6 +48,21 @@ function observationFromRow(row: SqlRow): InvestmentObservation {
 }
 
 
+const DAY_MS = 86_400_000;
+
+/**
+ * The last priced day before the first run of more than `maxGapDays` days without a price,
+ * counting up to today; null when prices are dense enough. A weekend stays under the limit.
+ */
+export function firstPriceGap(pricedDays: readonly string[], today: string, maxGapDays = 4): string | null {
+  const days = [...new Set(pricedDays)].filter((day) => day < today).sort();
+  for (const [index, day] of days.entries()) {
+    const next = days[index + 1] ?? today;
+    if (Math.round((Date.parse(`${next}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / DAY_MS) > maxGapDays) return day;
+  }
+  return null;
+}
+
 export function recordInstrumentObservation(
   raw: Database,
   input: ObservationInput,
