@@ -17,7 +17,7 @@ import {
   type SidebarHolding,
 } from "@/components/shared/sidebar-assets";
 import { pricedSaleTarget, saleTargetFor, type SaleTarget } from "@/components/assets/sell-holding-logic";
-import { formatMoney, negateCents, sumCents, type Cents } from "@/lib/money";
+import { formatMoney, sumCents, type Cents } from "@/lib/money";
 import { addCanonicalDecimals } from "@/lib/ledger/decimal";
 
 export const CASH_CATEGORY = DERIVED_CASH_CATEGORY;
@@ -179,7 +179,7 @@ type ListedRow<T extends SidebarAssetRow> = {
   holding: AssetTableHolding<T>;
 };
 
-function listedRows<T extends SidebarAssetRow>(input: AssetTableInput<T>): ListedRow<T>[] {
+export function listedRows<T extends SidebarAssetRow>(input: AssetTableInput<T>): ListedRow<T>[] {
   const rows: ListedRow<T>[] = [];
 
   for (const account of input.accounts) {
@@ -394,55 +394,4 @@ export function defaultExpandedKeys<T extends SidebarAssetRow>(
   return new Set(
     view.categories.filter((category) => category.defaultExpanded).map((category) => category.key),
   );
-}
-
-
-
-
-
-
-export function auditNetWorthFromTable<T extends SidebarAssetRow>(
-  input: AssetTableInput<T>,
-  extras: { unassignedCents: Cents },
-): {
-
-  listedCents: Cents;
-
-  cashCents: Cents;
-
-  standaloneAssetsCents: Cents;
-  totalAssetsCents: Cents;
-  totalLiabilitiesCents: Cents;
-  netWorthCents: Cents;
-} {
-  const rows = listedRows(input);
-  const cashCents = sumCents(
-    rows.filter((row) => row.holding.source === "account").map((row) => row.currentValueCents),
-  );
-  const standaloneAssetsCents = sumCents(
-    rows.filter((row) => row.holding.source === "asset" || row.holding.source === "crypto-summary")
-      .map((row) => row.currentValueCents),
-  );
-  const listedCents = sumCents([cashCents, standaloneAssetsCents]);
-
-  const assetParts: Cents[] = [listedCents, extras.unassignedCents];
-  const liabilityParts: Cents[] = [];
-  for (const account of input.accounts) {
-    if ((account.balanceKind ?? account.kind) !== "liability") continue;
-
-    if (account.balanceCents < 0) liabilityParts.push(negateCents(account.balanceCents));
-    else assetParts.push(account.balanceCents);
-  }
-
-  const totalAssetsCents = sumCents(assetParts);
-  const totalLiabilitiesCents = sumCents(liabilityParts);
-
-  return {
-    listedCents,
-    cashCents,
-    standaloneAssetsCents,
-    totalAssetsCents,
-    totalLiabilitiesCents,
-    netWorthCents: sumCents([totalAssetsCents, negateCents(totalLiabilitiesCents)]),
-  };
 }

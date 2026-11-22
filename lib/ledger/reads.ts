@@ -237,17 +237,31 @@ function readTargetMovements(
   targetType: "real_account" | "category",
   fromKey?: DateKey,
   toKey?: DateKey,
+  currentMovements?: readonly CurrentLedgerMovement[],
 ): CurrentLedgerMovement[] {
-  return readCurrentMovements(raw, { fromKey, toKey })
-    .filter((movement) => movement.targetType === targetType);
+  validateRange(fromKey, toKey);
+  const current = currentMovements
+    ? movementsInRange(currentMovements, fromKey, toKey)
+    : readCurrentMovements(raw, { fromKey, toKey });
+  return current.filter((movement) => movement.targetType === targetType);
 }
 
 
 export function readAccountMovements(
   raw: Database,
-  options: { fromKey?: DateKey; toKey?: DateKey } = {},
+  options: {
+    fromKey?: DateKey;
+    toKey?: DateKey;
+    currentMovements?: readonly CurrentLedgerMovement[];
+  } = {},
 ): SignedAccountMovement[] {
-  return readTargetMovements(raw, "real_account", options.fromKey, options.toKey).map((row) => ({
+  return readTargetMovements(
+    raw,
+    "real_account",
+    options.fromKey,
+    options.toKey,
+    options.currentMovements,
+  ).map((row) => ({
     chainRootEventId: row.chainRootEventId,
     eventId: row.eventId,
     sequence: row.sequence,

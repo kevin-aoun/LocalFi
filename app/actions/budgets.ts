@@ -24,6 +24,10 @@ export async function getBudgetHistory(...args: Parameters<typeof read.getBudget
   return read.getBudgetHistory(...args);
 }
 
+export async function getBudgetOverview(...args: Parameters<typeof read.getBudgetOverview>) {
+  return read.getBudgetOverview(...args);
+}
+
 export async function getBudgetReallocations(...args: Parameters<typeof reallocations.getBudgetReallocations>) {
   return reallocations.getBudgetReallocations(...args);
 }

@@ -10,8 +10,10 @@ import {
   seedTransaction,
   type DomainDb,
 } from "../support/domain-fixture";
+import { countLedgerReplays } from "../support/ledger-replays";
 import {
   createBudget,
+  getBudgetOverview,
   getCategorySpend,
   getBudgetHistory,
   getBudgetsForCategory,
@@ -316,5 +318,39 @@ describe("getBudgetHistory", () => {
   it("rejects malformed bounds", async () => {
     await expect(getBudgetHistory({ fromKey: "nope", toKey: "2026-01-01" })).rejects.toThrow(/fromKey/);
     await expect(getBudgetHistory({ fromKey: "2026-01-01", toKey: "nope" })).rejects.toThrow(/toKey/);
+  });
+});
+
+describe("getBudgetOverview", () => {
+  const history = { fromKey: "2026-02-01", toKey: "2026-07-31", period: "monthly" as const };
+
+  beforeEach(() => {
+    seedBudget(temp, { id: 1, categoryId: FOOD, period: "monthly", limitCents: 50_000, effectiveFrom: "2026-01-01", rollover: true });
+    seedBudget(temp, { id: 2, categoryId: TRANSPORT, period: "weekly", limitCents: 5_000, effectiveFrom: "2026-01-05" });
+    spend("2026-03-04", 20_000);
+    spend("2026-07-05", 12_000);
+    spend("2026-07-06", 3_000, TRANSPORT);
+    spend("2026-07-07", 9_000, INTEREST);
+    spend("2026-07-08", 40_000, FOOD, { pending: true });
+    seedTransaction(temp, { accountId: 1, transferAccountId: 2, amountCents: 100_000, dateKey: "2026-07-09" });
+  });
+
+  it("returns what the per-section actions return, from one ledger replay", async () => {
+    const { result, replays } = await countLedgerReplays(() =>
+      getBudgetOverview({ dateKey: "2026-07-28", history }));
+    expect(replays).toBe(1);
+    expect(result).toEqual({
+      currentPeriod: await getSpendVsBudget({ dateKey: "2026-07-28" }),
+      history: await getBudgetHistory(history),
+      monthlySpendByCategory: await getCategorySpend({ dateKey: "2026-07-28" }),
+    });
+    expect(result.monthlySpendByCategory).toEqual({ [FOOD]: 12_000, [SALARY]: 0, [TRANSPORT]: 3_000, [INTEREST]: 9_000 });
+    expect(result.currentPeriod.find((row) => row.categoryId === FOOD)?.carriedInCents).toBeGreaterThan(0);
+  });
+
+  it("rejects malformed keys before reading the ledger", async () => {
+    await expect(getBudgetOverview({ dateKey: "2026-02-30", history })).rejects.toThrow(/dateKey/);
+    await expect(getBudgetOverview({ dateKey: "2026-07-28", history: { ...history, toKey: "nope" } }))
+      .rejects.toThrow(/toKey/);
   });
 });

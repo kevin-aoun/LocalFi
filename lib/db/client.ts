@@ -33,6 +33,7 @@ import {
 import { VaultLockedError, VaultUninitializedError } from "../vault/errors";
 import {
   copyEncryptedGenerationAtomically,
+  fsyncDirectory,
   readEncryptedGeneration,
   writeEncryptedGenerationAtomically,
 } from "../vault/paths";
@@ -560,18 +561,7 @@ async function flush(entry: LoadedDb) {
     throw error;
   }
 
-
-  try {
-    const dirFd = openSync(dir, "r");
-    try {
-      fsyncSync(dirFd);
-    } finally {
-      closeSync(dirFd);
-    }
-  } catch {
-
-  }
-
+  fsyncDirectory(dir);
   entry.stamp = stampOf(file);
   debug(`saved ${image.length} bytes to ${file}`);
   image.fill(0);
@@ -596,17 +586,18 @@ export function withDb<T>(fn: BudgetDbCallback<T>): Promise<T> {
       await flush(entry);
       return result;
     } catch (error) {
+      let rolledBack = false;
       if (transactionOpen) {
         try {
           entry.raw.run("ROLLBACK");
+          rolledBack = true;
         } catch {
-
-
+          // The in-memory image may now differ from disk; dispose it below.
         }
       }
-
-
-      if (dbRuntime.loaded === entry) await disposeLoaded(entry);
+      // Keep the cached image only when ROLLBACK proved it still matches disk. A failed BEGIN,
+      // ROLLBACK, or a flush after COMMIT leaves memory unverified or ahead of the file.
+      if (!rolledBack && dbRuntime.loaded === entry) await disposeLoaded(entry);
       throw error;
     }
   });

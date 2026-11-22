@@ -4,7 +4,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import initSqlJs, { type Database } from "sql.js";
 
-import { MONEY_COLUMNS } from "../migrate-to-cents";
+// Money columns converted from floats to integer cents by 0002.
+const MONEY_COLUMNS = [
+  { table: "transactions", oldColumn: "amount", newColumn: "amount_cents", notNull: true },
+  { table: "assets", oldColumn: "current_value", newColumn: "current_value_cents", notNull: true },
+  { table: "asset_history", oldColumn: "value", newColumn: "value_cents", notNull: true },
+  { table: "categories", oldColumn: "monthly_limit", newColumn: "monthly_limit_cents", notNull: false },
+  { table: "quick_commands", oldColumn: "amount", newColumn: "amount_cents", notNull: true },
+];
 
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..", "..");
 const MIGRATIONS_DIR = path.join(PROJECT_ROOT, "drizzle", "migrations");

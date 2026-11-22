@@ -7,8 +7,8 @@ import {
   type CashLedgerCategory,
   type CashLedgerTransaction,
 } from "@/lib/cash-balance";
-import { monthKey, startOfMonth, toDateKey, type DateKey } from "@/lib/dates";
-import { negateCents, sumCents, type Cents } from "@/lib/money";
+import { fromDateKey, monthKey, startOfMonth, toDateKey, type DateKey } from "@/lib/dates";
+import { absCents, negateCents, sumCents, type Cents } from "@/lib/money";
 
 export type ChartPeriod = "daily" | "weekly" | "monthly";
 
@@ -16,6 +16,34 @@ export type SeriesTransaction = CashLedgerTransaction & {
 
   date: Date | string | number;
 };
+
+/**
+ * Nets signed account movements to one row per day and currency. The cash headline, growth, and
+ * candles only read daily closing balances, so this sends the browser far fewer rows with the
+ * same figures; a currency whose movements net to zero keeps its zero row.
+ */
+export function dailyCashRows(
+  movements: readonly { dateKey: DateKey; amountCents: Cents; currency: string }[],
+): SeriesTransaction[] {
+  const days = new Map<string, { dateKey: DateKey; currency: string; netCents: Cents }>();
+  for (const movement of movements) {
+    const key = `${movement.dateKey}\u0000${movement.currency}`;
+    const day = days.get(key);
+    if (day) day.netCents = sumCents([day.netCents, movement.amountCents]);
+    else days.set(key, { dateKey: movement.dateKey, currency: movement.currency, netCents: sumCents([movement.amountCents]) });
+  }
+  return [...days.values()]
+    .sort((a, b) => a.dateKey.localeCompare(b.dateKey) || a.currency.localeCompare(b.currency))
+    .map((day) => ({
+      date: fromDateKey(day.dateKey),
+      categoryId: null,
+      amountCents: absCents(day.netCents),
+      direction: day.netCents < 0 ? "outflow" : "inflow",
+      currency: day.currency,
+      pending: false,
+      transferAccountId: null,
+    }));
+}
 
 export function cashContributionCents(
   tx: CashLedgerTransaction,
