@@ -11,9 +11,9 @@ import {
 import {
   prepareInvestmentPurchase,
   postAssetOpeningPosition,
-  projectInvestmentPurchase,
   projectPositionHolding,
   recordInstrumentObservation,
+  syncPositionHoldingProjection,
 } from "@/lib/investments";
 import { withDb } from "@/lib/db/client";
 import { planNetWorthReconstruction } from "@/lib/history/run";
@@ -173,7 +173,7 @@ describe("CONTRACT-013 exact automatic positions", () => {
           quantityDelta: purchase.quantityDelta,
         }),
       });
-      projectInvestmentPurchase(raw, purchase);
+      syncPositionHoldingProjection(raw, purchase.instrumentId, purchase.currency);
       raw.run("DELETE FROM instrument_observations WHERE instrument_id = ?", [purchase.instrumentId]);
       recordInstrumentObservation(raw, {
         instrumentId: purchase.instrumentId,
@@ -184,7 +184,7 @@ describe("CONTRACT-013 exact automatic positions", () => {
         currency: "USD",
         source: "test",
       });
-      projectInvestmentPurchase(raw, purchase);
+      syncPositionHoldingProjection(raw, purchase.instrumentId, purchase.currency);
     });
 
     expect(temp.query("SELECT current_value_cents FROM assets"))
@@ -242,7 +242,7 @@ describe("CONTRACT-013 exact automatic positions", () => {
           quantityDelta: purchase.quantityDelta,
         }),
       });
-      projectInvestmentPurchase(raw, purchase);
+      syncPositionHoldingProjection(raw, purchase.instrumentId, purchase.currency);
       recordInstrumentObservation(raw, {
         instrumentId: purchase.instrumentId,
         observationKind: "price",
@@ -304,7 +304,7 @@ describe("CONTRACT-013 exact automatic positions", () => {
         movements: firstMovements,
         recordedAt: 1_786_291_200,
       });
-      projectInvestmentPurchase(raw, firstPurchase);
+      syncPositionHoldingProjection(raw, firstPurchase.instrumentId, firstPurchase.currency);
 
       const correctedMovements = buildTransactionMovements({
         direction: "outflow",
@@ -325,7 +325,7 @@ describe("CONTRACT-013 exact automatic positions", () => {
           recordedAt: 1_786_291_201,
         }),
       );
-      expect(projectInvestmentPurchase(raw, firstPurchase)).toMatchObject({
+      expect(syncPositionHoldingProjection(raw, firstPurchase.instrumentId, firstPurchase.currency)).toMatchObject({
         quantity: "0.12",
         bookAmountMinor: 1_200_000,
         valueMinor: 1_200_000,
@@ -340,7 +340,7 @@ describe("CONTRACT-013 exact automatic positions", () => {
           recordedAt: 1_786_291_202,
         }),
       );
-      projectInvestmentPurchase(raw, firstPurchase);
+      syncPositionHoldingProjection(raw, firstPurchase.instrumentId, firstPurchase.currency);
     });
 
     expect(temp.query(

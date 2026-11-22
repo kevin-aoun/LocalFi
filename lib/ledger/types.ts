@@ -1,6 +1,3 @@
-import type { BudgetDb } from "@/lib/db/client";
-import type { Database } from "sql.js";
-
 export type CanonicalPrimitive = null | boolean | number | string;
 export type CanonicalValue =
   | CanonicalPrimitive
@@ -52,12 +49,6 @@ export type StoredLedgerEvent = {
   hash: string;
   recordedAt: number;
 };
-
-export type LedgerProjectionCallback<T = void> = (
-  db: BudgetDb,
-  raw: Database,
-  event: StoredLedgerEvent,
-) => T | Promise<T>;
 
 export type PostedLedgerEvent = StoredLedgerEvent & { movements: PositionedMovement[] };
 
