@@ -29,8 +29,6 @@ export type CategoryOption = { id: number; name: string; type: string };
 
 export type PeriodFilter = BudgetPeriod | "all";
 
-export const periodFilters: readonly PeriodFilter[] = ["all", ...budgetPeriods];
-
 export type BudgetStatus = "over" | "near" | "on-track" | "ignored";
 
 export const INCOME_BUDGET_REFUSAL =

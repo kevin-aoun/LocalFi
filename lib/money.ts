@@ -33,11 +33,6 @@ export function assertCents(value: unknown, label = "amount"): asserts value is 
 }
 
 
-export function isCents(value: unknown): value is Cents {
-  return typeof value === "number" && Number.isSafeInteger(value);
-}
-
-
 function numberToPlainString(value: number): string {
   const s = String(value);
   if (!/e/i.test(s)) return s;
