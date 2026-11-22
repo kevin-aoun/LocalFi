@@ -116,6 +116,12 @@ export async function getTransactions(categoryId?: number) {
       .select()
       .from(transactionAllocations)
       .orderBy(asc(transactionAllocations.transactionId), asc(transactionAllocations.position));
+    const allocationsByTransaction = new Map<number, Array<{ categoryId: number; amountCents: Cents }>>();
+    for (const { transactionId, categoryId: allocationCategoryId, amountCents } of allocations) {
+      const bucket = allocationsByTransaction.get(transactionId) ?? [];
+      bucket.push({ categoryId: allocationCategoryId, amountCents });
+      allocationsByTransaction.set(transactionId, bucket);
+    }
     const rows = all.map((transaction) => ({
       ...transaction,
       ...(transaction.direction === "transfer" ? {
@@ -131,12 +137,7 @@ export async function getTransactions(categoryId?: number) {
           investmentFeeAmountCents: recordedInvestmentCost(transaction, metadata)?.feeAmountCents ?? null,
         };
       })() : {}),
-      allocations: allocations
-        .filter((allocation) => allocation.transactionId === transaction.id)
-        .map(({ categoryId: allocationCategoryId, amountCents }) => ({
-          categoryId: allocationCategoryId,
-          amountCents,
-        })),
+      allocations: allocationsByTransaction.get(transaction.id) ?? [],
     }));
     return categoryId ? rows.filter((transaction) => transaction.categoryId === categoryId) : rows;
   });
