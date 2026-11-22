@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { buildInvestmentHistory } from "../investment-history";
+import { TOTAL_KEY, buildInvestmentHistory, isolateLine, summarizeTotals } from "../investment-history";
+
+describe("isolateLine", () => {
+  const keys = [TOTAL_KEY, "holding_1", "holding_2"];
+
+  it("hides every other line, including ones that were already hidden or shown", () => {
+    expect([...isolateLine(keys, new Set(["holding_1"]), "holding_1")]).toEqual([TOTAL_KEY, "holding_2"]);
+    expect([...isolateLine(keys, new Set(), "holding_2")]).toEqual([TOTAL_KEY, "holding_1"]);
+  });
+
+  it("shows every line again when the isolated line is isolated twice", () => {
+    expect(isolateLine(keys, new Set([TOTAL_KEY, "holding_1"]), "holding_2").size).toBe(0);
+  });
+});
 
 describe("buildInvestmentHistory", () => {
   const rows = [
@@ -37,7 +50,26 @@ describe("buildInvestmentHistory", () => {
     expect(model.series.map((series) => series.key)).toEqual(["holding_2", "holding_3"]);
   });
 
-  it("reports invalid dates and mixed currencies", () => {
+  it("draws NVIDIA in its brand green and keeps palette slots for the rest", () => {
+    const model = buildInvestmentHistory([
+      rows[0],
+      { assetId: 4, dateKey: "2026-01-02", valueCents: 50_000, category: "Investments", currency: "USD", label: "NVDA" },
+      rows[1],
+    ]);
+    expect(model.series.map((series) => [series.label, series.color])).toEqual([
+      ["BTC", "hsl(var(--chart-1))"],
+      ["NVDA", "#76B900"],
+      ["Gold", "hsl(var(--chart-3))"],
+    ]);
+  });
+
+  it("adds a total portfolio line that sums every plotted holding per day", () => {
+    const model = buildInvestmentHistory(rows);
+    expect(model.total).toMatchObject({ key: TOTAL_KEY, label: "Total portfolio", currency: "USD" });
+    expect(model.points.map((point) => point[TOTAL_KEY])).toEqual([1000, 3200]);
+  });
+
+  it("reports invalid dates and mixed currencies, and adds no total across currencies", () => {
     const model = buildInvestmentHistory([
       ...rows,
       { ...rows[0], assetId: 3, dateKey: "not-a-day", currency: "EUR" },
@@ -46,6 +78,8 @@ describe("buildInvestmentHistory", () => {
     expect(model.droppedCount).toBe(1);
     expect(model.mixedCurrency).toBe(true);
     expect(model.currencies).toEqual(["EUR", "USD"]);
+    expect(model.total).toBeNull();
+    expect(model.points.some((point) => TOTAL_KEY in point)).toBe(false);
   });
 
   it("plots each ledger baseline and carries purchases from before the range without using market values as costs", () => {
@@ -101,5 +135,37 @@ describe("buildInvestmentHistory", () => {
     ], { startKey: "2026-02-01", endKey: "2026-02-28" });
     expect(model.points.every((point) => !("holding_2" in point))).toBe(true);
     expect(model.summaries.find((item) => item.assetId === 2)).toMatchObject({ closed: true, valueCents: 0, realizedGainCents: 300, totalReturnCents: 300 });
+  });
+});
+
+describe("summarizeTotals", () => {
+  const base = { assetId: 1, category: "Investments", currency: "USD", dateKey: "2026-01-02" };
+
+  it("adds open values, costs and gains, and realized gains from sold holdings", () => {
+    const model = buildInvestmentHistory([
+      { ...base, label: "NVDA", valueCents: 150_000, costBasisCents: 100_000, realizedGainCents: 0 },
+      { ...base, assetId: 2, label: "NBIS", valueCents: 0, costBasisCents: 0, realizedGainCents: -20_000, closed: true },
+    ]);
+    expect(summarizeTotals(model.summaries)).toEqual({
+      currency: "USD",
+      valueCents: 150_000,
+      costBasisCents: 100_000,
+      unrealizedGainCents: 50_000,
+      realizedGainCents: -20_000,
+      totalReturnCents: 30_000,
+    });
+  });
+
+  it("keeps a total unknown when one open cost is unknown, and gives none across currencies", () => {
+    const known = { ...base, label: "NVDA", valueCents: 150_000, costBasisCents: 100_000, realizedGainCents: 0 };
+    const unknown = { ...base, assetId: 2, label: "XAU", valueCents: 50_000, costBasisCents: null, realizedGainCents: 0 };
+    expect(summarizeTotals(buildInvestmentHistory([known, unknown]).summaries)).toMatchObject({
+      valueCents: 200_000,
+      costBasisCents: null,
+      unrealizedGainCents: null,
+      realizedGainCents: 0,
+      totalReturnCents: null,
+    });
+    expect(summarizeTotals(buildInvestmentHistory([known, { ...unknown, currency: "EUR" }]).summaries)).toBeNull();
   });
 });
