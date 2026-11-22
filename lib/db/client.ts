@@ -4,6 +4,7 @@ import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 import * as schema from "./schema";
 import { upgradeDatabase } from "./upgrade";
 import { acquireWriterLease, type WriterLease } from "./writer-lease";
+import { plaintextFixtureMode, resolveDbPath } from "./db-path";
 import {
   closeSync,
   copyFileSync,
@@ -12,14 +13,12 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  realpathSync,
   renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
 import path from "path";
-import os from "node:os";
 import { createHash } from "node:crypto";
 import { canonicalStringify } from "../ledger/canonical";
 import { canonicalDecimal } from "../ledger/decimal";
@@ -38,14 +37,14 @@ import {
   writeEncryptedGenerationAtomically,
 } from "../vault/paths";
 
+export { assertPlaintextFixturePath, resolveDbPath } from "./db-path";
+
 export type BudgetDb = SQLJsDatabase<typeof schema>;
 export type BudgetDbCallback<T> = (db: BudgetDb, raw: Database) => T | Promise<T>;
 
 const SQLITE_MAGIC = Buffer.from("SQLite format 3\0", "binary");
 
 const MIN_DB_BYTES = 512;
-
-const DEFAULT_DB_PATH = path.resolve(process.cwd(), "data", "budget.db");
 
 export class DatabaseCorruptError extends Error {
   constructor(file: string, detail: string) {
@@ -67,12 +66,6 @@ function debug(...args: unknown[]) {
   if (debugEnabled()) console.log("[DB]", ...args);
 }
 
-
-export function resolveDbPath(): string {
-  const override = process.env.BUDGET_DB_PATH;
-  if (override && override.trim() !== "") return path.resolve(process.cwd(), override);
-  return DEFAULT_DB_PATH;
-}
 
 export class DatabaseVaultAuthorization {
   private constructor() {}
@@ -106,50 +99,6 @@ const vaultRuntime = (vaultRuntimeGlobals.__localfiVaultRuntime ??= {
 });
 const vaultAuthorizationStates = (vaultRuntime.authorizationStates ??=
   new WeakMap<DatabaseVaultAuthorization, VaultAuthorizationState>());
-
-function canonicalPotentialPath(file: string): string {
-  const resolved = path.resolve(file);
-  if (existsSync(resolved)) return realpathSync(resolved);
-  const missing: string[] = [];
-  let cursor = resolved;
-  while (!existsSync(cursor)) {
-    missing.unshift(path.basename(cursor));
-    const parent = path.dirname(cursor);
-    if (parent === cursor) break;
-    cursor = parent;
-  }
-  return path.join(realpathSync(cursor), ...missing);
-}
-
-export function assertPlaintextFixturePath(file: string): void {
-  const resolved = path.resolve(file);
-  const configured = process.env.BUDGET_DB_PATH?.trim();
-  if (
-    !configured ||
-    resolved === DEFAULT_DB_PATH ||
-    canonicalPotentialPath(resolved) === canonicalPotentialPath(DEFAULT_DB_PATH)
-  ) {
-    throw new VaultLockedError("Plaintext fixture mode requires an explicit non-default path.");
-  }
-  if (existsSync(resolved) && realpathSync(resolved) !== resolved) {
-    throw new VaultLockedError("Plaintext fixture mode refuses symbolic-link targets.");
-  }
-  if (
-    process.env.NODE_ENV === "test" &&
-    !canonicalPotentialPath(resolved).startsWith(`${canonicalPotentialPath(os.tmpdir())}${path.sep}`)
-  ) {
-    throw new VaultLockedError("Plaintext test fixtures must use an isolated temporary path.");
-  }
-}
-
-function plaintextFixtureMode(file: string): boolean {
-  if (process.env.LOCALFI_VAULT_TEST_MODE !== "plaintext") return false;
-  assertPlaintextFixturePath(file);
-  if (process.env.NODE_ENV !== "test") {
-    throw new VaultLockedError("Plaintext fixture mode is restricted to automated tests.");
-  }
-  return true;
-}
 
 export function plaintextFixtureAccessAllowed(file = resolveDbPath()): boolean {
   return plaintextFixtureMode(file);
