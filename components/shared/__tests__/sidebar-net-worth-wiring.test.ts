@@ -14,7 +14,8 @@ import { getAssets } from "@/app/actions/assets";
 import { syncCashAssetManually } from "@/app/actions/transactions";
 import { todayKey } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
-import { auditSidebarTotals, buildSidebarView, type SidebarViewInput } from "../sidebar-assets";
+import { buildSidebarView, type SidebarViewInput } from "../sidebar-assets";
+import { auditSidebarTotals } from "./support/sidebar-audit";
 
 let temp: DomainDb;
 

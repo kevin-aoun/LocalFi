@@ -19,11 +19,11 @@ import {
   type CashLedgerCategory,
   type CashLedgerTransaction,
 } from "@/lib/cash-balance";
-import { formatMoney } from "@/lib/money";
+import { formatMoney, negateCents, sumCents, type Cents } from "@/lib/money";
 import {
   ASSET_TABLE_AUTO_EXPAND_LIMIT,
   assetCategoryColor,
-  auditNetWorthFromTable,
+  listedRows,
   buildAssetTable,
   CASH_CATEGORY,
   categoryHoldingKeys,
@@ -1274,3 +1274,50 @@ describe("sell actions on Home rows", () => {
     expect(saleOf("Checking")).toBeNull();
   });
 });
+
+/** Independent re-computation of net worth from the listed table rows. */
+function auditNetWorthFromTable<T extends SidebarAssetRow>(
+  input: AssetTableInput<T>,
+  extras: { unassignedCents: Cents },
+): {
+
+  listedCents: Cents;
+
+  cashCents: Cents;
+
+  standaloneAssetsCents: Cents;
+  totalAssetsCents: Cents;
+  totalLiabilitiesCents: Cents;
+  netWorthCents: Cents;
+} {
+  const rows = listedRows(input);
+  const cashCents = sumCents(
+    rows.filter((row) => row.holding.source === "account").map((row) => row.currentValueCents),
+  );
+  const standaloneAssetsCents = sumCents(
+    rows.filter((row) => row.holding.source === "asset" || row.holding.source === "crypto-summary")
+      .map((row) => row.currentValueCents),
+  );
+  const listedCents = sumCents([cashCents, standaloneAssetsCents]);
+
+  const assetParts: Cents[] = [listedCents, extras.unassignedCents];
+  const liabilityParts: Cents[] = [];
+  for (const account of input.accounts) {
+    if ((account.balanceKind ?? account.kind) !== "liability") continue;
+
+    if (account.balanceCents < 0) liabilityParts.push(negateCents(account.balanceCents));
+    else assetParts.push(account.balanceCents);
+  }
+
+  const totalAssetsCents = sumCents(assetParts);
+  const totalLiabilitiesCents = sumCents(liabilityParts);
+
+  return {
+    listedCents,
+    cashCents,
+    standaloneAssetsCents,
+    totalAssetsCents,
+    totalLiabilitiesCents,
+    netWorthCents: sumCents([totalAssetsCents, negateCents(totalLiabilitiesCents)]),
+  };
+}
