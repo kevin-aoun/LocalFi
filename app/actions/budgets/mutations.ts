@@ -2,11 +2,22 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { revalidate } from "@/lib/revalidate";
 import { withDb } from "@/lib/db/client";
 import { budgets, categories, transactions, type Budget } from "@/lib/db/schema";
-import { periodContaining } from "@/lib/budgets";
+import { periodContaining, type BudgetPeriod } from "@/lib/budgets";
 import { toDateKey, todayKey, type DateKey } from "@/lib/dates";
-import { parseAmount } from "@/lib/money";
+import { parseAmount, type Cents } from "@/lib/money";
 import { incomeBudgetRefusal } from "@/components/budgets/budget-view-logic";
 import { str, parsePeriod, requireDateKey, goalFieldsFromFormData, type ActionResult } from "./shared";
+
+// A budget governs whole periods: one set mid-month would otherwise skip that month.
+function periodStart(period: BudgetPeriod, dateKey: DateKey): DateKey {
+  return periodContaining(period, dateKey).startKey;
+}
+
+function parseBudgetLimit(raw: string): Cents {
+  const cents = parseAmount(raw);
+  if (cents < 0) throw new Error("A budget limit cannot be negative");
+  return cents;
+}
 
 export async function createBudget(formData: FormData): Promise<ActionResult<Budget>> {
   try {
@@ -17,11 +28,8 @@ export async function createBudget(formData: FormData): Promise<ActionResult<Bud
       return { error: "A budget needs a category" };
     }
     const period = parsePeriod(str(formData, "period") ?? "monthly");
-    const limitCents = parseAmount(str(formData, "limit") ?? "");
-    const effectiveFrom = requireDateKey(
-      str(formData, "effectiveFrom") ?? periodContaining(period, todayKey()).startKey,
-      "effectiveFrom",
-    );
+    const limitCents = parseBudgetLimit(str(formData, "limit") ?? "");
+    const effectiveFrom = periodStart(period, requireDateKey(str(formData, "effectiveFrom") ?? todayKey(), "effectiveFrom"));
     const effectiveToRaw = str(formData, "effectiveTo");
     const effectiveTo = effectiveToRaw === null ? null : requireDateKey(effectiveToRaw, "effectiveTo");
     if (effectiveTo !== null && effectiveTo < effectiveFrom) {
@@ -127,7 +135,7 @@ export async function updateBudget(id: number, formData: FormData): Promise<Acti
           earliest ? toDateKey(earliest) : todayKey(),
         ).startKey;
         const effectiveFrom = formData.has("effectiveFrom")
-          ? requireDateKey(str(formData, "effectiveFrom"), "effectiveFrom")
+          ? periodStart(period, requireDateKey(str(formData, "effectiveFrom"), "effectiveFrom"))
           : fallbackFrom;
         const effectiveTo = formData.has("effectiveTo")
           ? (() => {
@@ -155,7 +163,7 @@ export async function updateBudget(id: number, formData: FormData): Promise<Acti
             categoryId,
             period,
             limitCents:
-              limitRaw === null ? category.monthlyLimitCents : parseAmount(limitRaw),
+              limitRaw === null ? category.monthlyLimitCents : parseBudgetLimit(limitRaw),
             effectiveFrom,
             effectiveTo,
             rollover,
@@ -179,9 +187,9 @@ export async function updateBudget(id: number, formData: FormData): Promise<Acti
       if (category?.type === "Income") throw new Error(incomeBudgetRefusal(category.name));
 
       const period = formData.has("period") ? parsePeriod(str(formData, "period")) : existing.period;
-      const effectiveFrom = formData.has("effectiveFrom")
+      const effectiveFrom = periodStart(period, formData.has("effectiveFrom")
         ? requireDateKey(str(formData, "effectiveFrom"), "effectiveFrom")
-        : existing.effectiveFrom;
+        : existing.effectiveFrom as DateKey);
       const effectiveTo = formData.has("effectiveTo")
         ? (() => {
             const raw = str(formData, "effectiveTo");
@@ -204,7 +212,7 @@ export async function updateBudget(id: number, formData: FormData): Promise<Acti
         .update(budgets)
         .set({
           period,
-          limitCents: limitRaw === null ? existing.limitCents : parseAmount(limitRaw),
+          limitCents: limitRaw === null ? existing.limitCents : parseBudgetLimit(limitRaw),
           effectiveFrom,
           effectiveTo,
           rollover,
