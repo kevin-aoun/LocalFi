@@ -1,7 +1,6 @@
 
 import { recordNetWorthToday } from "@/app/actions/accounts";
 import { todayKey } from "@/lib/dates";
-import { formatMoney } from "@/lib/money";
 import {
   authorizeSnapshotRequest,
   snapshotAuthConfigured,
@@ -15,8 +14,11 @@ export const runtime = "nodejs";
 
 const NO_STORE = { "cache-control": "no-store" } as const;
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   if (!snapshotAuthConfigured()) return snapshotAuthDisabledResponse();
+  // The lock state is private too: answer only callers holding the snapshot token.
+  const auth = authorizeSnapshotRequest(request);
+  if (!auth.ok) return auth.response;
   try {
     return await withActiveVaultAuthorization(
       async () => Response.json({ ok: true, today: todayKey() }, { headers: NO_STORE }),
@@ -41,22 +43,8 @@ export async function POST(request: Request): Promise<Response> {
       return Response.json({ ok: false, error: result.error }, { status: 400, headers: NO_STORE });
     }
 
-    const snap = result.data;
-
-    return Response.json(
-      {
-        ok: true,
-        date: snap.date,
-        netWorthCents: snap.netWorthCents,
-        prices: snap.prices,
-
-        summary:
-          `${snap.date}: net worth ${formatMoney(snap.netWorthCents)} ` +
-          `(assets ${formatMoney(snap.totalAssetsCents)}, ` +
-          `liabilities ${formatMoney(snap.totalLiabilitiesCents)}). ${snap.priceSummary}`,
-      },
-      { headers: NO_STORE },
-    );
+    // Only the day: the Compose scheduler logs this body, and logs must never hold financial values.
+    return Response.json({ ok: true, date: result.data.date }, { headers: NO_STORE });
   } catch (cause) {
     if (cause instanceof VaultLockedError) {
       return Response.json({ ok: false, error: "vault_locked" }, { status: 423, headers: NO_STORE });

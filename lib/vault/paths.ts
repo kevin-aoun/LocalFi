@@ -16,12 +16,12 @@ import {
   renameSync,
   statSync,
   unlinkSync,
-  writeSync,
+  writeFileSync,
 } from "node:fs";
 import type { Stats } from "node:fs";
 import path from "node:path";
 
-import { inspectVaultEnvelope, isVaultEnvelope } from "./envelope";
+import { inspectVaultEnvelope } from "./envelope";
 import { VaultPathError, VaultPermissionError } from "./errors";
 
 const DIRECTORY_MODE = 0o700;
@@ -194,7 +194,7 @@ export async function writeEncryptedGenerationAtomically(
       FILE_MODE,
     );
     try {
-      writeSync(descriptor, envelope, 0, envelope.byteLength, 0);
+      writeFileSync(descriptor, envelope);
       fsyncSync(descriptor);
     } finally {
       closeSync(descriptor);
@@ -255,17 +255,4 @@ export function managedVaultGenerationPaths(dbPath: string): string[] {
     identities.add(identity);
   }
   return paths;
-}
-
-export function assertNoPlaintextTemporaryGenerations(directory: string): void {
-  const resolved = path.resolve(directory);
-  if (!existsSync(resolved)) return;
-  for (const entry of readdirSync(resolved)) {
-    if (!entry.startsWith(".") || !entry.endsWith(".tmp")) continue;
-    const file = path.join(resolved, entry);
-    const bytes = readSensitiveGeneration(file, { requireOwnerOnly: false });
-    if (!isVaultEnvelope(bytes)) {
-      throw new VaultPathError(`Unencrypted vault temporary generation detected: ${file}`);
-    }
-  }
 }

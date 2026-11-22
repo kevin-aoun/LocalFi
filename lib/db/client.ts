@@ -16,7 +16,7 @@ import {
   renameSync,
   statSync,
   unlinkSync,
-  writeSync,
+  writeFileSync,
 } from "fs";
 import path from "path";
 import os from "node:os";
@@ -578,7 +578,7 @@ async function flush(entry: LoadedDb) {
   try {
     const fd = openSync(tmp, "wx", 0o600);
     try {
-      writeSync(fd, image, 0, image.length, 0);
+      writeFileSync(fd, image);
       fsyncSync(fd);
     } finally {
       closeSync(fd);

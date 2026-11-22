@@ -21,12 +21,17 @@ afterEach(() => {
 
 describe("snapshot vault boundary", () => {
   it("stays locked even with a valid bearer token", async () => {
-    expect((await GET()).status).toBe(423);
+    const authorized = { authorization: "Bearer test-snapshot-token-with-enough-entropy" };
+    expect((await GET(new Request("http://127.0.0.1:3000/api/snapshot", { headers: authorized }))).status).toBe(423);
     const response = await POST(new Request("http://127.0.0.1:3000/api/snapshot", {
       method: "POST",
       headers: { authorization: "Bearer test-snapshot-token-with-enough-entropy" },
     }));
     expect(response.status).toBe(423);
     expect(await response.json()).toEqual({ ok: false, error: "vault_locked" });
+  });
+
+  it("does not reveal the lock state without the snapshot token", async () => {
+    expect((await GET(new Request("http://127.0.0.1:3000/api/snapshot"))).status).toBe(401);
   });
 });
