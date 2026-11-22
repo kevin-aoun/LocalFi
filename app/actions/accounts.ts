@@ -17,7 +17,6 @@ import {
   type Account,
   type AccountKind,
   type AccountType,
-  type Transaction,
 } from "@/lib/db/schema";
 import {
   deriveNetWorth,
@@ -33,7 +32,8 @@ import { getCategories } from "./categories";
 import { refreshLivePricedAssets } from "./crypto";
 import { getSettings } from "./settings";
 import {
-  buildTransactionMovements,
+  buildProjectedTransactionMovements,
+  buildTransactionProjection,
   correctLedgerEventInput,
   deleteLedgerEventInput,
   postLedgerEventRaw,
@@ -743,112 +743,6 @@ export async function deleteNetWorthSnapshot(dateKey: DateKey) {
   }
 }
 
-type OrphanAllocation = { categoryId: number; amountCents: Cents };
-
-function transactionEpoch(value: Date): number {
-  const seconds = Math.floor(value.getTime() / 1000);
-  if (!Number.isSafeInteger(seconds)) throw new Error("Transaction timestamp is invalid");
-  return seconds;
-}
-
-function orphanSnapshot(
-  row: Transaction,
-  allocations: readonly OrphanAllocation[],
-  accountId: number,
-  updatedAt: Date,
-) {
-  return {
-    id: row.id,
-    date: transactionEpoch(row.date),
-    categoryId: row.categoryId,
-    accountId,
-    transferAccountId: row.transferAccountId,
-    amountCents: row.amountCents,
-    direction: row.direction,
-    currency: row.currency,
-    comment: row.comment,
-    pending: false,
-    recurringId: row.recurringId,
-    recurringOccurrence: row.recurringOccurrence,
-    instrumentId: row.instrumentId,
-    quantityDelta: row.quantityDelta,
-    transferPrincipalAmountCents: row.transferPrincipalAmountCents,
-    ...(row.feeForTransferId == null ? {} : { feeForTransferId: row.feeForTransferId }),
-    allocations: allocations.map((allocation) => ({ ...allocation })),
-    createdAt: transactionEpoch(row.createdAt),
-    updatedAt: transactionEpoch(updatedAt),
-  };
-}
-
-function targetForCategory(raw: Database, categoryId: number | null, currency: string): string {
-  if (categoryId === null) throw new Error("A posted orphan transaction requires a category");
-  return registerLedgerAccount(raw, {
-    targetType: "category",
-    targetRef: categoryId,
-    currency,
-  });
-}
-
-function orphanCurrentMovements(
-  raw: Database,
-  row: Transaction,
-  allocations: readonly OrphanAllocation[],
-  sourceTargetId: string,
-): LedgerMovementInput[] {
-  const currency = normalizeLedgerCurrency(row.currency);
-  if (row.direction === "transfer") {
-    if (row.transferAccountId === null) throw new Error("A posted orphan transfer requires a destination account");
-    const destinationTargetId = registerLedgerAccount(raw, {
-      targetType: "real_account",
-      targetRef: row.transferAccountId,
-      currency,
-    });
-    const principal = row.transferPrincipalAmountCents ?? row.amountCents;
-    const allocationTotal = allocations.reduce((sum, allocation) => sum + allocation.amountCents, 0);
-    if (principal + allocationTotal !== row.amountCents) {
-      throw new Error("Transfer principal and allocations must equal the total source amount");
-    }
-    return [
-      { ledgerAccountId: sourceTargetId, amountMinor: -row.amountCents, currency },
-      { ledgerAccountId: destinationTargetId, amountMinor: principal, currency },
-      ...allocations.map((allocation) => ({
-        ledgerAccountId: targetForCategory(raw, allocation.categoryId, currency),
-        amountMinor: allocation.amountCents,
-        currency,
-      })),
-    ];
-  }
-
-  let instrumentTargetId: string | null = null;
-  let instrumentBookCounterTargetId: string | null = null;
-  if (row.instrumentId !== null || row.quantityDelta !== null) {
-    if (row.instrumentId === null || row.quantityDelta === null) {
-      throw new Error("Investment instrument and exact quantity must be stored together");
-    }
-    instrumentTargetId = registerLedgerAccount(raw, {
-      targetType: "instrument",
-      targetRef: row.instrumentId,
-      currency,
-      instrumentId: row.instrumentId,
-    });
-    instrumentBookCounterTargetId = registerLedgerAccount(raw, {
-      targetType: "system",
-      targetRef: `instrument-book:${row.instrumentId}`,
-      currency,
-    });
-  }
-  return buildTransactionMovements({
-    direction: row.direction,
-    amountMinor: row.amountCents,
-    currency,
-    accountTargetId: sourceTargetId,
-    categoryTargetId: targetForCategory(raw, row.categoryId, currency),
-    instrumentTargetId,
-    instrumentBookCounterTargetId,
-    quantityDelta: row.quantityDelta,
-  });
-}
-
 function eventMetadata(raw: Database, eventId: string): CanonicalMetadata {
   const statement = raw.prepare("SELECT metadata_json FROM ledger_events WHERE event_id = ?");
   try {
@@ -889,17 +783,6 @@ export async function assignOrphanTransactions(accountId: number) {
           );
         }
       }
-      const postedOrphans = orphans.filter((orphan) => !orphan.pending);
-      const realTarget = postedOrphans.length === 0 ? null : registerLedgerAccount(raw, {
-        targetType: "real_account",
-        targetRef: accountId,
-        currency: account.currency,
-      });
-      const legacyTarget = postedOrphans.length === 0 ? null : registerLedgerAccount(raw, {
-        targetType: "system",
-        targetRef: "legacy-unassigned-account",
-        currency: account.currency,
-      });
       for (const orphan of orphans) {
         const now = new Date();
         if (orphan.pending) {
@@ -912,8 +795,8 @@ export async function assignOrphanTransactions(accountId: number) {
         const allocations = allocationRows
           .filter((allocation) => allocation.transactionId === orphan.id)
           .map(({ categoryId, amountCents }) => ({ categoryId, amountCents }));
-        const prior = orphanCurrentMovements(raw, orphan, allocations, legacyTarget!);
-        const next = orphanCurrentMovements(raw, orphan, allocations, realTarget!);
+        const prior = buildProjectedTransactionMovements(raw, orphan, allocations);
+        const next = buildProjectedTransactionMovements(raw, { ...orphan, accountId }, allocations);
         const priorMetadata = eventMetadata(raw, orphan.currentEventId!);
         const event = postLedgerEventRaw(raw, correctLedgerEventInput(
           orphan.currentEventId!,
@@ -925,7 +808,7 @@ export async function assignOrphanTransactions(accountId: number) {
             metadata: {
               ...priorMetadata,
               projectionKey: orphan.id,
-              transaction: orphanSnapshot(orphan, allocations, accountId, now),
+              transaction: buildTransactionProjection({ ...orphan, accountId, updatedAt: now }, allocations),
               reassignment: {
                 from: "legacy-unassigned-account",
                 toAccountId: accountId,

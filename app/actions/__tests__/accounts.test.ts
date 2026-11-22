@@ -736,6 +736,18 @@ describe("assignOrphanTransactions", () => {
     expect(verification.ok).toBe(true);
   });
 
+  it("reassigns a legacy orphan that has no category", async () => {
+    seedTransaction(temp, { id: 85, categoryId: null, accountId: null, amountCents: 2_500, dateKey: "2026-07-01" });
+
+    expect(unwrap(await assignOrphanTransactions(1))).toEqual({ moved: 1 });
+
+    expect(temp.query("SELECT account_id, category_id FROM transactions WHERE id = 85"))
+      .toEqual([{ account_id: 1, category_id: null }]);
+    expect(balanceOf(await getAccountBalances(), "Main").balanceCents).toBe(-2_500);
+    expect((await getNetWorth()).unassignedCents).toBe(0);
+    expect(await verifyLedger()).toMatchObject({ ok: true, failures: [] });
+  });
+
   it("rolls the whole reassignment batch back when a posted orphan is corrupt", async () => {
     seedTransaction(temp, { id: 91, categoryId: 2, accountId: null, amountCents: 10_000, dateKey: "2026-07-01" });
     seedTransaction(temp, { id: 92, categoryId: 1, accountId: null, amountCents: 1_000, dateKey: "2026-07-02" });
