@@ -18,9 +18,9 @@ import {
   deleteNetWorthSnapshot,
   getAccountBalances,
   getAccounts,
+  getDashboardData,
   getDefaultAccountId,
   getLatestNetWorthSnapshot,
-  getLedgerCashMovements,
   getNetWorth,
   getNetWorthHistory,
   setAccountArchived,
@@ -362,7 +362,7 @@ describe("createTransfer", () => {
       amount: "25.00",
       date: "2026-02-01",
     })));
-    const movements = await getLedgerCashMovements();
+    const movements = (await getDashboardData()).cashMovements;
     expect(movements.reduce((sum, movement) =>
       sum + (movement.direction === "inflow" ? movement.amountCents : -movement.amountCents), 0))
       .toBe(510_000);
@@ -668,7 +668,7 @@ describe("assignOrphanTransactions", () => {
     seedTransaction(temp, { categoryId: 1, accountId: 1, amountCents: 1_000, dateKey: "2026-07-03" });
 
     expect((await getNetWorth()).unassignedCents).toBe(96_000);
-    expect((await getLedgerCashMovements()).reduce(
+    expect((await getDashboardData()).cashMovements.reduce(
       (sum, movement) => sum + (movement.direction === "inflow" ? movement.amountCents : -movement.amountCents),
       0,
     )).toBe(95_000);
