@@ -48,6 +48,13 @@ describe("ledger asset sales", () => {
     expect((await verifyLedger()).failures).toEqual([]);
   });
 
+  it("labels priced holdings by ticker in Reports however they were created", async () => {
+    await save(trade("XAU", { quantity: "1" }));
+    await save(trade("STOCK:NVDA", { quantity: "1" }));
+    await save(trade("BTC", { quantity: "1" }));
+    expect([...new Set((await getInvestmentHistory()).map((row) => row.label))].sort()).toEqual(["BTC", "NVDA", "XAU"]);
+  });
+
   it("records a gifted holding at zero cost without pricing the market at zero", async () => {
     await save(trade("BTC", { quantity: "1", unitPrice: "100", fees: "0" }));
     const gift = await save(trade("BTC", { quantity: "1", unitPrice: "0", fees: "0", date: "2026-01-03" }));
