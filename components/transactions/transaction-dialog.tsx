@@ -50,6 +50,7 @@ type Transaction = {
   quantityDelta?: string | null;
   investmentUnitPrice?: string | null;
   investmentFeeAmountCents?: Cents | null;
+  investmentGift?: boolean;
 };
 
 type AccountOption = {
@@ -138,6 +139,7 @@ export function TransactionDialog({
         unitPrice: transaction.investmentUnitPrice ?? inferredUnitPrice,
         instrumentUnit: pricedHolding(instrumentSymbol)?.defaultUnit ?? "",
         fees: centsToInputValue(transaction.investmentFeeAmountCents ?? 0 as Cents),
+        gift: transaction.investmentGift === true,
       });
     } else {
       setFormData({

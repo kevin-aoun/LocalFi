@@ -23,7 +23,6 @@ import {
   buildProjectedTransactionMovements,
   buildTransactionProjection,
   correctLedgerEventInput,
-  deleteLedgerEventInput,
   postLedgerEventRaw,
   projectionEpochSeconds,
   readCategoryMovements,
@@ -41,6 +40,13 @@ import { assertAvailableInvestmentUnits, type InvestmentSide } from "@/lib/inves
 import { assertAmountOnlyCategory, investmentKindForSymbol } from "@/lib/investments/categories";
 import { negateCanonicalDecimal } from "@/lib/ledger/decimal";
 import { requireMagnitude } from "./shared";
+import {
+  deleteTransactionWithin,
+  linkedTransferFee,
+  loadAllocations,
+  type AllocationInput,
+  type TransactionState,
+} from "./transaction-delete";
 
 async function resolveAccountId(db: BudgetDb, formData: FormData): Promise<number | null> {
   const raw = formData.get("accountId");
@@ -128,9 +134,11 @@ export async function getTransactions(categoryId?: number) {
         const metadata: InvestmentEventMetadata = transaction.currentEventId
           ? purchaseMetadata.get(transaction.currentEventId) ?? {}
           : transaction.investmentDraft ? JSON.parse(transaction.investmentDraft) : {};
+        const cost = recordedInvestmentCost(transaction, metadata);
         return {
           investmentUnitPrice: metadata.investmentUnitPrice ?? null,
-          investmentFeeAmountCents: recordedInvestmentCost(transaction, metadata)?.feeAmountCents ?? null,
+          investmentFeeAmountCents: cost?.feeAmountCents ?? null,
+          investmentGift: transaction.direction === "outflow" && cost?.paidAmountCents === 0,
         };
       })() : {}),
       allocations: allocationsByTransaction.get(transaction.id) ?? [],
@@ -175,39 +183,8 @@ function requireFormDate(formData: FormData): Date {
   return requireCalendarDate(formData.get("date"));
 }
 
-type AllocationInput = { categoryId: number; amountCents: Cents };
 
-type TransactionState = Pick<
-  Transaction,
-  | "id"
-  | "date"
-  | "categoryId"
-  | "accountId"
-  | "transferAccountId"
-  | "amountCents"
-  | "direction"
-  | "currency"
-  | "instrumentId"
-  | "quantityDelta"
-  | "transferPrincipalAmountCents"
-  | "feeForTransferId"
-  | "comment"
-  | "pending"
-  | "recurringId"
-  | "recurringOccurrence"
-  | "createdAt"
-  | "updatedAt"
-  | "currentEventId"
->;
 
-async function loadAllocations(db: BudgetDb, transactionId: number): Promise<AllocationInput[]> {
-  const rows = await db
-    .select({ categoryId: transactionAllocations.categoryId, amountCents: transactionAllocations.amountCents })
-    .from(transactionAllocations)
-    .where(eq(transactionAllocations.transactionId, transactionId))
-    .orderBy(asc(transactionAllocations.position));
-  return rows;
-}
 
 
 async function validateExpenseAllocations(
@@ -277,6 +254,8 @@ type InvestmentFields = {
   unit: string | undefined;
   unitPriceMinor: number;
   unitPrice: string;
+  /** A received gift: the price records its value, and only fees are billed. */
+  gift: boolean;
 };
 
 function readInvestmentFields(formData: FormData, fallbackSide: InvestmentSide = "buy"): InvestmentFields | null {
@@ -306,6 +285,7 @@ function readInvestmentFields(formData: FormData, fallbackSide: InvestmentSide =
     unit: typeof unit === "string" && unit.trim() !== "" ? unit.trim() : undefined,
     unitPrice: parsePurchaseUnitPrice(unitPrice),
     unitPriceMinor: requireMagnitude(parseAmount(unitPrice), "Unit price"),
+    gift: formData.get("gift") === "true",
   };
 }
 
@@ -392,28 +372,7 @@ function readTransferFee(formData: FormData): TransferFeeInput | null {
   return { amountCents, categoryId: amountCents > 0 ? requireId(formData.get("feeCategoryId"), "fee category") : null };
 }
 
-async function linkedTransferFee(db: BudgetDb, transferId: number) {
-  const [fee] = await db.select().from(transactions).where(eq(transactions.feeForTransferId, transferId));
-  return fee;
-}
 
-async function deleteTransactionWithin(db: BudgetDb, raw: Database, existing: TransactionState): Promise<void> {
-  const fee = await linkedTransferFee(db, existing.id);
-  if (fee) await deleteTransactionWithin(db, raw, fee);
-  if (!existing.pending) {
-    if (!existing.currentEventId) throw new Error("Confirmed transaction is missing its current ledger event");
-    const allocations = await loadAllocations(db, existing.id);
-    postLedgerEventRaw(raw, deleteLedgerEventInput(existing.currentEventId, buildProjectedTransactionMovements(raw, existing, allocations), {
-      effectiveDate: toDateKey(existing.date), description: existing.comment ?? "",
-      metadata: { projectionKey: existing.id, transaction: null },
-    }));
-  }
-  await db.delete(transactions).where(eq(transactions.id, existing.id));
-  if (existing.instrumentId) {
-    if (!existing.pending) assertAvailableInvestmentUnits(raw, existing.instrumentId, existing.currency);
-    syncPositionHoldingProjection(raw, existing.instrumentId, existing.currency);
-  }
-}
 
 async function syncTransferFeeWithin(db: BudgetDb, raw: Database, transfer: TransactionState, input: TransferFeeInput | null): Promise<void> {
   const existing = await linkedTransferFee(db, transfer.id);
@@ -459,11 +418,11 @@ export async function createTransaction(formData: FormData) {
       if (!fields) assertAmountOnlyCategory(category);
       const date = requireFormDate(formData);
       const paidAmountCents = fields
-        ? purchaseAmountCents(fields.quantity, fields.unitPrice)
+        ? fields.gift ? 0 : purchaseAmountCents(fields.quantity, fields.unitPrice)
         : requireMagnitude(parseAmount(formData.get("amount") as string));
       const rawFees = formData.get("fees");
       const feeAmountCents = rawFees === null || rawFees === "" ? 0 : requireMagnitude(parseAmount(rawFees as string), "Fees");
-      const amountCents = fields ? tradeCashAmount(fields.quantity, fields.unitPrice, feeAmountCents as Cents, fields.side) : sumCents([paidAmountCents, feeAmountCents]);
+      const amountCents = fields ? tradeCashAmount(fields.quantity, fields.unitPrice, feeAmountCents as Cents, fields.side, fields.gift) : sumCents([paidAmountCents, feeAmountCents]);
       const direction = fields ? fields.side === "sell" ? "inflow" : "outflow" : await categoryDirection(db, categoryId);
       const currency = await accountCurrency(db, accountId);
       const now = new Date(Math.floor(Date.now() / 1000) * 1000);
@@ -621,7 +580,7 @@ export async function updateTransaction(id: number, formData: FormData) {
       const manualTrade = isManualInstrument(raw, existing.instrumentId);
       const purchase = prepareInvestment(raw, fields, currency, date);
       if (fields) {
-        const paidAmountCents = purchaseAmountCents(fields.quantity, fields.unitPrice);
+        const paidAmountCents = fields.gift ? 0 : purchaseAmountCents(fields.quantity, fields.unitPrice);
         const rawFees = formData.get("fees");
         const feeAmountCents = rawFees === null
           ? investmentCost?.feeAmountCents ?? 0
@@ -649,7 +608,7 @@ export async function updateTransaction(id: number, formData: FormData) {
         categoryId,
         accountId: resolvedAccountId,
         amountCents: fields && investmentCost
-          ? tradeCashAmount(fields.quantity, fields.unitPrice, investmentCost.feeAmountCents, fields.side)
+          ? tradeCashAmount(fields.quantity, fields.unitPrice, investmentCost.feeAmountCents, fields.side, fields.gift)
           : typeof amountRaw === "string" && amountRaw.trim() !== ""
             ? requireMagnitude(parseAmount(amountRaw))
             : existing.amountCents,

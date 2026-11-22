@@ -26,15 +26,17 @@ export type TransactionFormState = {
   instrumentUnit?: string;
   fees?: string;
   investmentSide?: InvestmentSide;
+  /** A received gift: the price records its value, and only fees are billed. */
+  gift?: boolean;
 };
 
 
-export function transactionCashAmount(state: Pick<TransactionFormState, "amount" | "instrumentSymbol" | "quantity" | "unitPrice" | "fees" | "investmentSide">): string {
+export function transactionCashAmount(state: Pick<TransactionFormState, "amount" | "instrumentSymbol" | "quantity" | "unitPrice" | "fees" | "investmentSide" | "gift">): string {
   if (!state.instrumentSymbol?.trim()) return state.amount;
   try {
     const fees = tryParseAmount(state.fees?.trim() || "0");
     if (fees === null || fees < 0) return "";
-    return centsToDecimal(tradeCashAmount(state.quantity ?? "", state.unitPrice ?? "", fees, state.investmentSide ?? "buy")).toString();
+    return centsToDecimal(tradeCashAmount(state.quantity ?? "", state.unitPrice ?? "", fees, state.investmentSide ?? "buy", state.gift)).toString();
   } catch { return ""; }
 }
 
@@ -59,11 +61,11 @@ export function validateTransactionForm(state: TransactionFormState): string | n
       return "Enter an exact positive investment quantity.";
     }
     try { parsePurchaseUnitPrice(investmentValues[2]); } catch {
-      return "Enter a unit price of 0 or more with up to four decimal places.";
+      return "Enter a positive unit price with up to four decimal places.";
     }
     const fees = tryParseAmount(state.fees?.trim() || "0");
     if (fees === null || fees < 0) return "Enter a non-negative fee amount.";
-    try { tradeCashAmount(investmentValues[1], investmentValues[2], fees, state.investmentSide ?? "buy"); }
+    try { tradeCashAmount(investmentValues[1], investmentValues[2], fees, state.investmentSide ?? "buy", state.gift); }
     catch (error) { return (error as Error).message; }
   }
   const amountCents = tryParseAmount(transactionCashAmount(state));
@@ -94,6 +96,7 @@ export function buildTransactionFormValues(
     values.instrumentUnit = state.instrumentUnit?.trim() ?? "";
     values.fees = state.fees?.trim() || "0";
     values.investmentSide = state.investmentSide ?? "buy";
+    values.gift = state.gift ? "true" : "false";
     values.amount = transactionCashAmount(state);
   }
   return values;

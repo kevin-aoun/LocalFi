@@ -630,7 +630,8 @@ export default function DashboardPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Asset</AlertDialogTitle>
             <AlertDialogDescription>
-              Permanently delete this holding and every daily history row attached to it? This
+              Permanently delete this holding and every daily history row attached to it? Its buy
+              and sell transactions are deleted too, and their cash goes back to the accounts. This
               action cannot be undone. Archive it from the table instead if you want to retain
               history.
             </AlertDialogDescription>
