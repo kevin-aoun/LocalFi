@@ -23,7 +23,6 @@ import {
   buildProjectedTransactionMovements,
   buildTransactionProjection,
   correctLedgerEventInput,
-  deleteLedgerEventInput,
   postLedgerEventRaw,
   projectionEpochSeconds,
   readCategoryMovements,
@@ -41,6 +40,13 @@ import { assertAvailableInvestmentUnits, type InvestmentSide } from "@/lib/inves
 import { assertAmountOnlyCategory, investmentKindForSymbol } from "@/lib/investments/categories";
 import { negateCanonicalDecimal } from "@/lib/ledger/decimal";
 import { requireMagnitude } from "./shared";
+import {
+  deleteTransactionWithin,
+  linkedTransferFee,
+  loadAllocations,
+  type AllocationInput,
+  type TransactionState,
+} from "./transaction-delete";
 
 async function resolveAccountId(db: BudgetDb, formData: FormData): Promise<number | null> {
   const raw = formData.get("accountId");
@@ -175,39 +181,8 @@ function requireFormDate(formData: FormData): Date {
   return requireCalendarDate(formData.get("date"));
 }
 
-type AllocationInput = { categoryId: number; amountCents: Cents };
 
-type TransactionState = Pick<
-  Transaction,
-  | "id"
-  | "date"
-  | "categoryId"
-  | "accountId"
-  | "transferAccountId"
-  | "amountCents"
-  | "direction"
-  | "currency"
-  | "instrumentId"
-  | "quantityDelta"
-  | "transferPrincipalAmountCents"
-  | "feeForTransferId"
-  | "comment"
-  | "pending"
-  | "recurringId"
-  | "recurringOccurrence"
-  | "createdAt"
-  | "updatedAt"
-  | "currentEventId"
->;
 
-async function loadAllocations(db: BudgetDb, transactionId: number): Promise<AllocationInput[]> {
-  const rows = await db
-    .select({ categoryId: transactionAllocations.categoryId, amountCents: transactionAllocations.amountCents })
-    .from(transactionAllocations)
-    .where(eq(transactionAllocations.transactionId, transactionId))
-    .orderBy(asc(transactionAllocations.position));
-  return rows;
-}
 
 
 async function validateExpenseAllocations(
@@ -392,28 +367,7 @@ function readTransferFee(formData: FormData): TransferFeeInput | null {
   return { amountCents, categoryId: amountCents > 0 ? requireId(formData.get("feeCategoryId"), "fee category") : null };
 }
 
-async function linkedTransferFee(db: BudgetDb, transferId: number) {
-  const [fee] = await db.select().from(transactions).where(eq(transactions.feeForTransferId, transferId));
-  return fee;
-}
 
-async function deleteTransactionWithin(db: BudgetDb, raw: Database, existing: TransactionState): Promise<void> {
-  const fee = await linkedTransferFee(db, existing.id);
-  if (fee) await deleteTransactionWithin(db, raw, fee);
-  if (!existing.pending) {
-    if (!existing.currentEventId) throw new Error("Confirmed transaction is missing its current ledger event");
-    const allocations = await loadAllocations(db, existing.id);
-    postLedgerEventRaw(raw, deleteLedgerEventInput(existing.currentEventId, buildProjectedTransactionMovements(raw, existing, allocations), {
-      effectiveDate: toDateKey(existing.date), description: existing.comment ?? "",
-      metadata: { projectionKey: existing.id, transaction: null },
-    }));
-  }
-  await db.delete(transactions).where(eq(transactions.id, existing.id));
-  if (existing.instrumentId) {
-    if (!existing.pending) assertAvailableInvestmentUnits(raw, existing.instrumentId, existing.currency);
-    syncPositionHoldingProjection(raw, existing.instrumentId, existing.currency);
-  }
-}
 
 async function syncTransferFeeWithin(db: BudgetDb, raw: Database, transfer: TransactionState, input: TransferFeeInput | null): Promise<void> {
   const existing = await linkedTransferFee(db, transfer.id);

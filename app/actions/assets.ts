@@ -26,8 +26,10 @@ import {
   pricedHolding,
   quantityInPriceUnits,
 } from "@/lib/prices";
-import { readCurrentMovements, readPositionHistory, readPositionValuations } from "@/lib/ledger";
+import { readPositionHistory, readPositionValuations } from "@/lib/ledger";
 import { currentHoldings } from "@/lib/investments/holdings";
+import { syncCashAssetWithin } from "@/lib/db/sync-cash";
+import { deleteHoldingTransactionsWithin } from "./transaction-delete";
 
 export async function getAssets(options?: { includeArchived?: boolean }) {
   const includeArchived = options?.includeArchived === true;
@@ -445,27 +447,27 @@ export async function deleteAsset(id: number, options?: { confirmed?: boolean })
             "Permanent delete requires explicit confirmation. Archive this holding to keep its history.",
         } as const;
       }
+      let cashChanged = false;
       if (asset.instrumentId) {
-        const opening = findAssetOpeningChain(raw, id);
-        const position = getExactPosition(raw, asset.instrumentId, asset.currency);
-        const hasTransactions = readCurrentMovements(raw).some((movement) =>
-          movement.instrumentId === asset.instrumentId && movement.currency === asset.currency &&
-          movement.quantityDelta !== null && movement.chainRootEventId !== opening?.rootEventId);
-        if ((position && !opening) || hasTransactions) {
-          return {
-            error: "This holding is transaction-backed; delete its purchase transaction instead.",
-          } as const;
-        }
+        cashChanged = await deleteHoldingTransactionsWithin(db, raw, asset.instrumentId, asset.currency) > 0;
         deleteAssetOpeningPosition(raw, id);
+        const left = getExactPosition(raw, asset.instrumentId, asset.currency);
+        if (left && (left.quantity !== "0" || left.bookAmountMinor !== 0)) {
+          // Throwing rolls back the transactions deleted above.
+          throw new AssetProtectedError(
+            "Part of this holding comes from ledger entries that are not transactions, so it cannot be deleted here.",
+          );
+        }
       }
       await db.delete(assets).where(eq(assets.id, id));
+      if (cashChanged) await syncCashAssetWithin(db);
       return { success: true as const };
     });
 
     if ("error" in outcome) return outcome;
 
 
-    revalidate("/", "/accounts");
+    revalidate("/", "/accounts", "/transactions", "/reports");
     return outcome;
   } catch (error) {
     if (error instanceof AssetProtectedError) return { error: error.message };
