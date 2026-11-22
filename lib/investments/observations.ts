@@ -112,29 +112,6 @@ export function recordInstrumentObservation(
   return observationFromRow(stored);
 }
 
-export function latestInstrumentObservation(
-  raw: Database,
-  instrumentId: string,
-  observationKind: InstrumentObservationKind,
-  currency?: string,
-): InvestmentObservation | null {
-  const normalizedCurrency = currency?.trim().toUpperCase();
-  const row = firstRow(
-    raw,
-    `SELECT *
-       FROM instrument_observations
-      WHERE instrument_id = ? AND observation_kind = ?
-        ${normalizedCurrency ? "AND currency = ?" : ""}
-      ORDER BY observed_day DESC, observed_at DESC
-      LIMIT 1`,
-    normalizedCurrency
-      ? [instrumentId, observationKind, normalizedCurrency]
-      : [instrumentId, observationKind],
-  );
-  return row ? observationFromRow(row) : null;
-}
-
-
 export function latestPositionObservation(
   raw: Database,
   instrumentId: string,

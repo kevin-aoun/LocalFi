@@ -43,27 +43,6 @@ export function transactionCashAmount(state: Pick<TransactionFormState, "amount"
 }
 
 
-export function previewInvestmentQuantity(amount: string, unitPrice: string, precision = 12): string | null {
-  if (!Number.isInteger(precision) || precision < 0 || precision > 18) return null;
-  const paidMinor = tryParseAmount(amount);
-  if (paidMinor === null || paidMinor < 0) return null;
-  let exactPrice: string;
-  try { exactPrice = parsePurchaseUnitPrice(unitPrice); } catch { return null; }
-  const [whole, fraction = ""] = exactPrice.split(".");
-  const scale = BigInt(10) ** BigInt(precision);
-  const numerator = BigInt(paidMinor) * scale * BigInt(10) ** BigInt(fraction.length);
-  const denominator = BigInt(whole + fraction) * BigInt(100);
-  let quotient = numerator / denominator;
-  if ((numerator % denominator) * BigInt(2) >= denominator) quotient += BigInt(1);
-  if (precision === 0) return quotient.toString();
-  const digits = quotient.toString().padStart(precision + 1, "0");
-  const value = `${digits.slice(0, -precision)}.${digits.slice(-precision)}`
-    .replace(/\.0+$/, "")
-    .replace(/(\.\d*?)0+$/, "$1");
-  return value === "" ? "0" : value;
-}
-
-
 export function validateTransactionForm(state: TransactionFormState): string | null {
   const categoryId = Number(state.categoryId);
   if (!Number.isInteger(categoryId) || categoryId <= 0) return "Choose a category.";

@@ -6,7 +6,6 @@ import {
   createTransfer,
   deleteTransaction,
   getTransactions,
-  previewInvestmentPurchase,
   updateTransaction,
   updateTransfer,
 } from "@/app/actions/transactions";
@@ -75,25 +74,6 @@ const invalidAllocationCategories = [
 ] as const;
 
 describe("immutable interactive transaction flows", () => {
-  it("previews provider quantity while leaving the confirmed quantity overridable", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: "OK",
-      json: async () => ({ bitcoin: { usd: 50_000 } }),
-    }));
-    expect(await previewInvestmentPurchase("BTC", "1000.00")).toMatchObject({
-      success: true,
-      data: {
-        symbol: "BTC",
-        instrumentUnit: "coins",
-        unitPriceMinor: 5_000_000,
-        quantity: "0.02",
-        sourceLabel: "CoinGecko",
-      },
-    });
-  });
-
   it("rolls back a projection when posting fails and rolls back an event when projection update fails", async () => {
     execOn(temp, (db) => db.run(
       "CREATE TRIGGER force_event_failure BEFORE INSERT ON ledger_events BEGIN SELECT RAISE(ABORT, 'forced event failure'); END",

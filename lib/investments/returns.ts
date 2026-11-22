@@ -1,4 +1,4 @@
-import { addCanonicalDecimals, canonicalDecimal, negateCanonicalDecimal } from "@/lib/ledger/decimal";
+import { addCanonicalDecimals, canonicalDecimal, divideRoundHalfUp, negateCanonicalDecimal } from "@/lib/ledger/decimal";
 import type { CurrentLedgerMovement } from "@/lib/ledger/reads";
 import { assertCents, sumCents, type Cents } from "@/lib/money";
 
@@ -30,7 +30,7 @@ function allocatedCost(cost: Cents, sold: string, held: string): Cents {
   const numerator = BigInt(cost) * a.units * b.scale;
   const denominator = b.units * a.scale;
   if (denominator <= BigInt(0)) throw new Error("A sale needs an existing holding");
-  const rounded = Number(numerator / denominator + ((numerator % denominator) * BigInt(2) >= denominator ? BigInt(1) : BigInt(0)));
+  const rounded = Number(divideRoundHalfUp(numerator, denominator));
   assertCents(rounded);
   return rounded;
 }

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { monthKey, toDateKey } from "@/lib/dates";
 import {
   buildTransactionFormValues,
-  previewInvestmentQuantity,
   toTransactionDateValue,
   toTransactionFormData,
   transactionDateKey,
@@ -148,8 +147,7 @@ describe("buildTransactionFormValues", () => {
     expect(() => toTransactionFormData(invalid)).toThrow(/negative/i);
   });
 
-  it("previews provider-priced quantity but transports an exact user override", () => {
-    expect(previewInvestmentQuantity("1000.00", "50000.00")).toBe("0.02");
+  it("transports an exact user-entered quantity and price unchanged", () => {
     const values = buildTransactionFormValues({
       categoryId: "3",
       accountId: "7",

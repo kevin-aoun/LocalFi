@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Database } from "sql.js";
 
 import type { InstrumentKind } from "@/lib/db/schema/instruments";
-import { pricedHolding, type PriceSymbol } from "@/lib/prices";
+import { pricedHolding } from "@/lib/prices";
 
 import { firstRow, type SqlRow } from "./sql";
 
@@ -134,8 +134,4 @@ export function createManualInstrument(
     },
     input.createdAt,
   );
-}
-
-export function isSupportedPriceSymbol(value: string | null): value is PriceSymbol {
-  return value !== null && pricedHolding(value) !== null;
 }

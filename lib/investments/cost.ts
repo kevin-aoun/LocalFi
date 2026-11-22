@@ -1,4 +1,4 @@
-import { canonicalDecimal } from "@/lib/ledger/decimal";
+import { canonicalDecimal, divideRoundHalfUp } from "@/lib/ledger/decimal";
 import { assertCents, sumCents, type Cents } from "@/lib/money";
 import type { InvestmentSide } from "./trades";
 
@@ -34,7 +34,7 @@ export function quantityValueMinor(quantity: string, unitPriceMinor: Cents, unit
   const [priceWhole, priceFraction = ""] = exactPrice.replace(/^-/, "").split(".");
   const denominator = BigInt(10) ** BigInt(fraction.length + priceFraction.length);
   const numerator = BigInt(whole + fraction) * BigInt(priceWhole + priceFraction) * (unitPrice == null ? BigInt(1) : BigInt(100));
-  const rounded = numerator / denominator + ((numerator % denominator) * BigInt(2) >= denominator ? BigInt(1) : BigInt(0));
+  const rounded = divideRoundHalfUp(numerator, denominator);
   const result = Number(exactQuantity.startsWith("-") !== exactPrice.startsWith("-") ? -rounded : rounded);
   assertCents(result);
   return result;
@@ -56,7 +56,7 @@ export function unitPriceFromAmountCents(paidAmount: Cents, quantity: string): s
   const [whole, fraction = ""] = exact.split(".");
   const denominator = BigInt(whole + fraction);
   const numerator = BigInt(paidAmount) * BigInt(10) ** BigInt(fraction.length + 2);
-  const rounded = numerator / denominator + ((numerator % denominator) * BigInt(2) >= denominator ? BigInt(1) : BigInt(0));
+  const rounded = divideRoundHalfUp(numerator, denominator);
   const digits = rounded.toString().padStart(5, "0");
   return canonicalDecimal(`${digits.slice(0, -4)}.${digits.slice(-4)}`);
 }

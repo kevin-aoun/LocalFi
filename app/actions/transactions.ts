@@ -32,12 +32,10 @@ import {
   findInstrument,
   getExactPosition,
   prepareInvestmentPurchase,
-  previewPurchaseQuantity,
   projectPositionHolding,
   syncPositionHoldingProjection,
   type PreparedInvestmentPurchase,
 } from "@/lib/investments";
-import { describePriceError, fetchPriceQuote, pricedHolding } from "@/lib/prices";
 import { parsePurchaseQuantity, parsePurchaseUnitPrice, purchaseAmountCents, tradeCashAmount } from "@/lib/investments/cost";
 import { assertAvailableInvestmentUnits, type InvestmentSide } from "@/lib/investments/trades";
 import { investmentKindForSymbol } from "@/lib/investments/categories";
@@ -465,34 +463,6 @@ async function syncTransferFeeWithin(db: BudgetDb, raw: Database, transfer: Tran
   await db.update(transactions).set({ currentEventId: event.eventId }).where(eq(transactions.id, row.id));
 }
 
-
-export async function previewInvestmentPurchase(symbol: string, paidAmount: string) {
-  try {
-    const spec = pricedHolding(symbol);
-    if (!spec) return { error: "Choose a supported investment instrument" };
-    const paidAmountMinor = requireMagnitude(parseAmount(paidAmount), "Purchase amount");
-    const result = await fetchPriceQuote(spec.symbol);
-    if (!result.ok) return { error: describePriceError(result.error) };
-    const unitPriceMinor = requireMagnitude(
-      parseAmount(String(result.quote.pricePerUnitUsd)),
-      "Provider unit price",
-    );
-    if (unitPriceMinor === 0) return { error: "Provider unit price must be positive" };
-    return {
-      success: true as const,
-      data: {
-        symbol: spec.symbol,
-        instrumentUnit: spec.defaultUnit,
-        unitPriceMinor,
-        quantity: previewPurchaseQuantity(paidAmountMinor, unitPriceMinor),
-        sourceLabel: result.quote.sourceLabel,
-        fetchedAt: result.quote.fetchedAt,
-      },
-    };
-  } catch (error) {
-    return { error: (error as Error).message || "Failed to preview investment purchase" };
-  }
-}
 
 export async function createTransaction(formData: FormData) {
   try {

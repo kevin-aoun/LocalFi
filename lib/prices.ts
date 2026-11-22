@@ -226,12 +226,6 @@ export function priceSymbolForCommodityType(
   return null;
 }
 
-export function commodityTypeForPriceSymbol(
-  symbol: unknown,
-): PricedHoldingSpec["commodityType"] {
-  return pricedHolding(symbol)?.commodityType ?? null;
-}
-
 export type PriceSourceKind = "direct" | "proxy" | "none";
 
 export type PriceSourceDisclosure = {
@@ -823,46 +817,6 @@ export async function fetchHoldingValueCents(
   if (!valued.ok) return valued;
 
   return { ok: true, valueCents: valued.valueCents, quote: quoted.quote };
-}
-
-
-export function holdingValueFromQuotes(
-  symbol: string,
-  quantity: number | null | undefined,
-  unit: string | null | undefined,
-  quotes: ReadonlyMap<PriceSymbol, PriceQuote>,
-  errors?: ReadonlyMap<string, PriceError>,
-): HoldingValueResult {
-  const spec = pricedHolding(symbol);
-  if (!spec) {
-    return fail(
-      "unknown_symbol",
-      String(symbol),
-      null,
-      `no price provider is registered for "${String(symbol)}"`,
-    );
-  }
-
-  const converted = quantityInPriceUnits(quantity, unit, spec);
-  if (!converted.ok) {
-    return fail(converted.code, spec.symbol, spec.provider, converted.message);
-  }
-
-  const quote = quotes.get(spec.symbol);
-  if (!quote) {
-    const known = errors?.get(spec.symbol);
-    if (known) return { ok: false, error: known };
-    return fail(
-      "malformed_response",
-      spec.symbol,
-      spec.provider,
-      `no quote for ${spec.symbol} was returned by the batch request`,
-    );
-  }
-
-  const valued = holdingValueCents(quote, quantity, unit);
-  if (!valued.ok) return valued;
-  return { ok: true, valueCents: valued.valueCents, quote };
 }
 
 

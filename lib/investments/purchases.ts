@@ -2,7 +2,6 @@ import type { Database } from "sql.js";
 
 import { canonicalDecimal } from "@/lib/ledger/decimal";
 import { registerLedgerAccount } from "@/lib/ledger/targets";
-import type { LedgerProjectionCallback } from "@/lib/ledger/types";
 
 import { ensurePricedInstrument, type InvestmentInstrument } from "./instruments";
 import { observationDay, recordInstrumentObservation } from "./observations";
@@ -32,33 +31,6 @@ export type PrepareInvestmentPurchaseInput = {
   observedDay?: string;
   source?: string | null;
 };
-
-export function previewPurchaseQuantity(
-  paidAmountMinor: number,
-  unitPriceMinor: number,
-  precision = 12,
-): string {
-  if (!Number.isSafeInteger(paidAmountMinor) || paidAmountMinor < 0) {
-    throw new Error("Paid amount must be a non-negative integer minor-unit amount");
-  }
-  if (!Number.isSafeInteger(unitPriceMinor) || unitPriceMinor <= 0) {
-    throw new Error("Unit price must be a positive integer minor-unit amount");
-  }
-  if (!Number.isInteger(precision) || precision < 0 || precision > 18) {
-    throw new Error("Quantity preview precision must be between 0 and 18");
-  }
-  const scale = BigInt(10) ** BigInt(precision);
-  const numerator = BigInt(paidAmountMinor) * scale;
-  const denominator = BigInt(unitPriceMinor);
-  let result = numerator / denominator;
-  if ((numerator % denominator) * BigInt(2) >= denominator) result += BigInt(1);
-  const digits = result.toString().padStart(precision + 1, "0");
-  const decimal = precision === 0
-    ? digits
-    : `${digits.slice(0, -precision)}.${digits.slice(-precision)}`;
-  return canonicalDecimal(decimal);
-}
-
 
 export function prepareInvestmentPurchase(
   raw: Database,
@@ -123,10 +95,4 @@ export function projectInvestmentPurchase(
   purchase: Pick<PreparedInvestmentPurchase, "instrumentId" | "currency">,
 ): PositionHoldingProjection | null {
   return syncPositionHoldingProjection(raw, purchase.instrumentId, purchase.currency);
-}
-
-export function investmentPurchaseProjection(
-  purchase: Pick<PreparedInvestmentPurchase, "instrumentId" | "currency">,
-): LedgerProjectionCallback<PositionHoldingProjection | null> {
-  return (_db, raw) => projectInvestmentPurchase(raw, purchase);
 }

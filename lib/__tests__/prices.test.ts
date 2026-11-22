@@ -17,7 +17,6 @@ import {
   fetchPriceQuote,
   fetchPriceQuotes,
   holdingValueCents,
-  holdingValueFromQuotes,
   isPriceSymbol,
   parseCoinGeckoPrice,
   priceRequestInit,
@@ -702,41 +701,3 @@ describe("fetchHoldingValueCents", () => {
   });
 });
 
-describe("holdingValueFromQuotes — valuing N holdings off one batch", () => {
-  it("values a holding against a quote already in hand", async () => {
-    const { fetchImpl, calls } = stubFetch(ok(COINGECKO_OK));
-    const { quotes, errors } = await fetchPriceQuotes(["XAU", "BTC"], { fetchImpl });
-    expect(calls).toHaveLength(1);
-
-    expect(holdingValueFromQuotes("XAU", 1.1376, "oz", quotes, errors)).toMatchObject({
-      ok: true,
-      valueCents: 484_375,
-    });
-    expect(holdingValueFromQuotes("BTC", 0.0345, "coins", quotes, errors)).toMatchObject({
-      ok: true,
-      valueCents: 408_590,
-    });
-    expect(calls).toHaveLength(1);
-  });
-
-  it("passes the batch's own error through rather than inventing one", async () => {
-    const { fetchImpl } = stubFetch({
-      ok: false,
-      status: 429,
-      statusText: "Too Many Requests",
-      json: async () => ({}),
-    });
-    const { quotes, errors } = await fetchPriceQuotes(["BTC"], { fetchImpl });
-    expect(holdingValueFromQuotes("BTC", 1, "coins", quotes, errors)).toMatchObject({
-      ok: false,
-      error: { code: "rate_limited" },
-    });
-  });
-
-  it("still rejects a bad quantity before looking for a quote", () => {
-    expect(holdingValueFromQuotes("BTC", -1, "coins", new Map())).toMatchObject({
-      ok: false,
-      error: { code: "invalid_quantity" },
-    });
-  });
-});
