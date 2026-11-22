@@ -1,5 +1,6 @@
 import type { Database, SqlValue } from "sql.js";
 
+import { allRows, type SqlRow } from "@/lib/db/sql";
 import type { CashLedgerCategory, CashLedgerTransaction } from "@/lib/cash-balance";
 import { readDb } from "@/lib/db/client";
 import {
@@ -28,20 +29,6 @@ import type {
   LedgerVerificationResult,
   PositionedMovement,
 } from "./types";
-
-type Row = Record<string, SqlValue>;
-
-function rows(raw: Database, query: string, parameters: SqlValue[] = []): Row[] {
-  const statement = raw.prepare(query);
-  try {
-    statement.bind(parameters);
-    const result: Row[] = [];
-    while (statement.step()) result.push(statement.getAsObject());
-    return result;
-  } finally {
-    statement.free();
-  }
-}
 
 function count(raw: Database, table: string): number {
   if (!/^[a-z_]+$/.test(table)) throw new Error("unsafe verification table");
@@ -97,7 +84,7 @@ export type DerivedPosition = {
 
 export function deriveInstrumentPositions(raw: Database): DerivedPosition[] {
   const values = new Map<string, DerivedPosition>();
-  for (const row of rows(
+  for (const row of allRows(
     raw,
     `SELECT a.instrument_id, m.currency, m.amount_minor, m.quantity_delta, m.event_id
      FROM ledger_movements m
@@ -135,7 +122,7 @@ type ProjectedTransaction = {
 };
 
 export function deriveCurrentTransactions(raw: Database): ProjectedTransaction[] {
-  const current = rows(
+  const current = allRows(
     raw,
     `SELECT e.event_id, e.metadata_json
      FROM ledger_events e
@@ -178,14 +165,14 @@ export function deriveCashAssetProjectionFromJournal(
   const ledgerTransactions = deriveCurrentTransactions(raw)
     .flatMap((item) => item.transaction === null ? [] : [item.transaction])
     .map((transaction) => transaction as unknown as CashLedgerTransaction);
-  const ledgerCategories = rows(raw, "SELECT id, type FROM categories ORDER BY id")
+  const ledgerCategories = allRows(raw, "SELECT id, type FROM categories ORDER BY id")
     .map((row): CashLedgerCategory => ({ id: Number(row.id), type: String(row.type) }));
-  const cashAssets = rows(
+  const cashAssets = allRows(
     raw,
     `SELECT id, currency FROM assets
       WHERE category = 'Cash' ORDER BY id`,
   ).map((row) => ({ id: Number(row.id), currency: row.currency }));
-  const projectionNames = rows(
+  const projectionNames = allRows(
     raw,
     `SELECT projection FROM ledger_projection_state
       WHERE projection LIKE 'cash:%' ORDER BY projection`,
@@ -212,12 +199,12 @@ export function expectedCashProjectionMarker(
 }
 
 function cashProjectionIsRequired(raw: Database): boolean {
-  const hasJournal = rows(
+  const hasJournal = allRows(
     raw,
     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'localfi_schema_journal' LIMIT 1",
   ).length > 0;
   if (!hasJournal) return false;
-  return rows(
+  return allRows(
     raw,
     `SELECT 1 FROM localfi_schema_journal
       WHERE idx = 12 AND tag = '0012_immutable-ledger' LIMIT 1`,
@@ -242,12 +229,12 @@ const REQUIRED_GUARDS = [
 export function verifyLedgerRaw(raw: Database): LedgerVerificationResult {
   const failures: LedgerFailure[] = [];
   const triggers = new Set(
-    rows(raw, "SELECT name FROM sqlite_master WHERE type = 'trigger'").map((row) => String(row.name)),
+    allRows(raw, "SELECT name FROM sqlite_master WHERE type = 'trigger'").map((row) => String(row.name)),
   );
   for (const guard of REQUIRED_GUARDS) {
     if (!triggers.has(guard)) failure(failures, `schema.guard.${guard}`);
   }
-  const targetRows = rows(
+  const targetRows = allRows(
     raw,
     "SELECT id, target_type, target_ref, currency, instrument_id FROM ledger_accounts",
   );
@@ -257,13 +244,13 @@ export function verifyLedgerRaw(raw: Database): LedgerVerificationResult {
     if (type === "instrument") {
       if (
         target.instrument_id == null ||
-        rows(raw, "SELECT 1 FROM instruments WHERE id = ? LIMIT 1", [target.instrument_id]).length === 0
+        allRows(raw, "SELECT 1 FROM instruments WHERE id = ? LIMIT 1", [target.instrument_id]).length === 0
       ) {
         failure(failures, "target.instrument_registration");
       }
     }
   }
-  const events = rows(raw, "SELECT * FROM ledger_events ORDER BY sequence");
+  const events = allRows(raw, "SELECT * FROM ledger_events ORDER BY sequence");
   const eventsById = new Map(events.map((row) => [String(row.event_id), row]));
   const metadataByEventId = new Map(
     events.map((row) => [String(row.event_id), parseMetadata(row.metadata_json)]),
@@ -325,7 +312,7 @@ export function verifyLedgerRaw(raw: Database): LedgerVerificationResult {
       failure(failures, "hash.payload_invalid", event);
     }
 
-    const movementRows = rows(
+    const movementRows = allRows(
       raw,
       "SELECT * FROM ledger_movements WHERE event_id = ? ORDER BY position",
       [event.eventId],
@@ -435,7 +422,7 @@ export function verifyLedgerRaw(raw: Database): LedgerVerificationResult {
         failure(failures, "projection.transaction_effective_date");
       }
     }
-    const actual = rows(
+    const actual = allRows(
       raw,
       `SELECT *
        FROM transactions WHERE pending = 0 ORDER BY id`,
@@ -463,7 +450,7 @@ export function verifyLedgerRaw(raw: Database): LedgerVerificationResult {
         transferPrincipalAmountCents: row.transfer_principal_amount_cents == null
           ? null : Number(row.transfer_principal_amount_cents),
         ...(row.fee_for_transfer_id == null ? {} : { feeForTransferId: Number(row.fee_for_transfer_id) }),
-        allocations: rows(
+        allocations: allRows(
           raw,
           `SELECT category_id, amount_cents FROM transaction_allocations
            WHERE transaction_id = ? ORDER BY position`,
@@ -486,7 +473,7 @@ export function verifyLedgerRaw(raw: Database): LedgerVerificationResult {
       if (expectedCash.assetId === null) {
         failure(failures, "projection.cash_missing");
       } else {
-        const actualCash = rows(
+        const actualCash = allRows(
           raw,
           `SELECT current_value_cents, currency FROM assets
             WHERE id = ? AND category = 'Cash'`,
@@ -503,7 +490,7 @@ export function verifyLedgerRaw(raw: Database): LedgerVerificationResult {
     }
 
     const expectedPositions = deriveInstrumentPositions(raw);
-    const actualPositions = rows(
+    const actualPositions = allRows(
       raw,
       `SELECT instrument_id, currency, quantity, book_amount_minor, current_event_id
        FROM instrument_positions ORDER BY instrument_id, currency`,
@@ -519,13 +506,13 @@ export function verifyLedgerRaw(raw: Database): LedgerVerificationResult {
     const expectedPositionByKey = new Map(
       expectedPositions.map((position) => [`${position.instrumentId}\u0000${position.currency}`, position]),
     );
-    const assetRows = rows(
+    const assetRows = allRows(
       raw,
       `SELECT id, category, current_value_cents, currency, instrument_id, commodity_type,
               quantity, unit, price_symbol, priced_at, use_live_price
          FROM assets WHERE category <> 'Cash' ORDER BY id`,
     );
-    const assetsByPosition = new Map<string, Row[]>();
+    const assetsByPosition = new Map<string, SqlRow[]>();
     for (const asset of assetRows) {
       if (asset.instrument_id == null) {
         failure(failures, "projection.asset_opening_provenance");

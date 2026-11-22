@@ -5,7 +5,7 @@ import type { Database } from "sql.js";
 import type { InstrumentKind } from "@/lib/db/schema/instruments";
 import { pricedHolding } from "@/lib/prices";
 
-import { firstRow, type SqlRow } from "./sql";
+import { firstRow, type SqlRow } from "@/lib/db/sql";
 
 export type InvestmentInstrument = {
   id: string;
