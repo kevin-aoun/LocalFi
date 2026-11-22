@@ -13,13 +13,26 @@ import { AlertTriangle, ChartNoAxesCombined } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { usePrivacyMode } from "@/components/shared/privacy-provider";
-import { formatMoney, tryParseAmount } from "@/lib/money";
+import { formatMoney, tryParseAmount, type Cents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import type { DateKey } from "@/lib/dates";
 import {
+  TOTAL_KEY,
   buildInvestmentHistory,
+  isolateLine,
+  summarizeTotals,
   type InvestmentHistoryInput,
+  type InvestmentLine,
   type InvestmentSeries,
 } from "./investment-history";
 
@@ -36,19 +49,43 @@ function SignedMoney({ cents, currency }: { cents: number; currency: string }) {
   return <>{cents > 0 ? "+" : ""}{formatMoney(cents, currency)}</>;
 }
 
+const UNKNOWN_COST = "Opened without a cash purchase, so its cost is unknown.";
+
+function MoneyCell({ cents, currency, signed, className }: { cents: Cents | null | undefined; currency: string; signed?: boolean; className?: string }) {
+  if (cents === undefined) return <TableCell />;
+  if (cents === null) return <TableCell className="text-right text-muted-foreground" title={UNKNOWN_COST}>Unknown</TableCell>;
+  return (
+    <TableCell className={cn("text-right", signed && gainTone(cents), className)}>
+      {signed ? <SignedMoney cents={cents} currency={currency} /> : formatMoney(cents, currency)}
+    </TableCell>
+  );
+}
+
 export function InvestmentPerformance({ rows, range }: Props) {
   const { enabled: privacyEnabled } = usePrivacyMode();
   const model = useMemo(() => buildInvestmentHistory(rows, range), [rows, range]);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
-  const byKey = useMemo(() => new Map(model.series.flatMap((item) => [[item.key, item], [item.costKey, item]] as const)), [model.series]);
+  const [hovered, setHovered] = useState<string | null>(null);
+  const totals = useMemo(() => summarizeTotals(model.summaries), [model.summaries]);
+  const lines = useMemo<InvestmentLine[]>(
+    () => (model.total ? [model.total, ...model.series] : model.series),
+    [model.total, model.series],
+  );
+  const byKey = useMemo(
+    () => new Map<string, InvestmentLine>([
+      ...lines.map((item) => [item.key, item] as const),
+      ...model.series.map((item) => [item.costKey, item] as const),
+    ]),
+    [lines, model.series],
+  );
   const chartConfig = useMemo(
     () =>
       Object.fromEntries(
-        model.series.map((item) => [item.key, { label: item.label, color: item.color }]),
+        lines.map((item) => [item.key, { label: item.label, color: item.color }]),
       ) satisfies ChartConfig,
-    [model.series],
+    [lines],
   );
-  const visibleCount = model.series.filter((item) => !hidden.has(item.key)).length;
+  const visibleCount = lines.filter((item) => !hidden.has(item.key)).length;
 
   const toggle = (key: string) => {
     setHidden((current) => {
@@ -59,13 +96,19 @@ export function InvestmentPerformance({ rows, range }: Props) {
     });
   };
 
+  const isolate = (key: string) => {
+    setHidden((current) => isolateLine(lines.map((item) => item.key), current, key));
+  };
+
   const InvestmentTooltip = ({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) => {
-    if (!active || !payload?.length) return null;
+    // Only the line under the pointer, with its cost basis when it has one.
+    const entries = (payload ?? []).filter((entry) => byKey.get(String(entry.dataKey))?.key === hovered);
+    if (!active || entries.length === 0) return null;
     return (
       <div className="min-w-44 rounded-lg border bg-popover px-3 py-2 text-xs text-popover-foreground">
         <div className="mb-1.5 font-medium">{label}</div>
         <div className="space-y-1">
-          {payload.map((entry) => {
+          {entries.map((entry) => {
             const item = byKey.get(String(entry.dataKey));
             const cents = tryParseAmount(entry.value);
             if (!item || cents === null) return null;
@@ -73,7 +116,7 @@ export function InvestmentPerformance({ rows, range }: Props) {
               <div key={String(entry.dataKey)} className="flex items-center justify-between gap-5">
                 <span className="flex items-center gap-2 text-muted-foreground">
                   <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
-                  {item.label}{entry.dataKey === item.costKey ? " · cost basis" : " · value"}
+                  {item.label}{item.key === TOTAL_KEY ? "" : entry.dataKey === item.key ? " · value" : " · cost basis"}
                 </span>
                 <span className="font-mono font-medium">
                   {formatMoney(cents, item.currency)}
@@ -94,28 +137,54 @@ export function InvestmentPerformance({ rows, range }: Props) {
         <CardTitle>Investment performance</CardTitle>
         <CardDescription>
           Solid lines show market value; matching dashed lines show what the units still held cost, at average price including fees.
-          The gap is the unrealized gain. Sales move gains into realized; total return adds both. Click a holding to show or hide its lines.
+          The gap is the unrealized gain. Sales move gains into realized; total return adds both. Hover a line for its values. Click a legend entry to show or hide it; double-click to show only that line.
         </CardDescription>
       </CardHeader>
       <CardContent>
         {model.summaries.length > 0 && (
-          <div className="mb-6 divide-y rounded-md border px-4" data-private-value>
-            {model.summaries.map((item) => (
-              <div key={item.key} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 py-3 text-sm">
-                <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} /><span className="font-medium">{item.label}</span>{item.closed && <span className="text-xs text-muted-foreground">Sold</span>}</div>
-                <div className="flex flex-wrap items-center gap-x-5 gap-y-1 tabular-nums">
-                  {!item.closed && <span>{formatMoney(item.valueCents, item.currency)} <span className="text-muted-foreground">value</span></span>}
-                  {item.costBasisCents === null
-                    ? <span className="text-muted-foreground">Cost unknown: opened without a cash purchase</span>
-                    : <>
-                        {!item.closed && <span className="text-muted-foreground">{formatMoney(item.costBasisCents, item.currency)} cost basis</span>}
-                        {!item.closed && <span className="text-muted-foreground"><SignedMoney cents={item.unrealizedGainCents!} currency={item.currency} /> unrealized</span>}
-                        {(item.closed || item.realizedGainCents !== 0) && <span className="text-muted-foreground"><SignedMoney cents={item.realizedGainCents!} currency={item.currency} /> realized</span>}
-                        <span className={cn("font-medium", gainTone(item.totalReturnCents!))}><SignedMoney cents={item.totalReturnCents!} currency={item.currency} /> total return</span>
-                      </>}
-                </div>
-              </div>
-            ))}
+          <div className="mb-6 rounded-md border" data-private-value>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Holding</TableHead>
+                  <TableHead className="text-right">Value</TableHead>
+                  <TableHead className="text-right">Cost basis</TableHead>
+                  <TableHead className="text-right">Unrealized</TableHead>
+                  <TableHead className="text-right">Realized</TableHead>
+                  <TableHead className="text-right">Total return</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="tabular-nums">
+                {model.summaries.map((item) => (
+                  <TableRow key={item.key}>
+                    <TableCell>
+                      <span className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+                        <span className="font-medium">{item.label}</span>
+                        {item.closed && <span className="text-xs text-muted-foreground">Sold</span>}
+                      </span>
+                    </TableCell>
+                    <MoneyCell cents={item.closed ? undefined : item.valueCents} currency={item.currency} />
+                    <MoneyCell cents={item.closed ? undefined : item.costBasisCents} currency={item.currency} className="text-muted-foreground" />
+                    <MoneyCell cents={item.closed ? undefined : item.unrealizedGainCents} currency={item.currency} signed />
+                    <MoneyCell cents={item.realizedGainCents} currency={item.currency} signed />
+                    <MoneyCell cents={item.totalReturnCents} currency={item.currency} signed className="font-medium" />
+                  </TableRow>
+                ))}
+              </TableBody>
+              {totals && model.summaries.length > 1 && (
+                <TableFooter className="tabular-nums">
+                  <TableRow>
+                    <TableCell className="font-medium">Total portfolio</TableCell>
+                    <MoneyCell cents={totals.valueCents} currency={totals.currency} className="font-medium" />
+                    <MoneyCell cents={totals.costBasisCents} currency={totals.currency} className="text-muted-foreground" />
+                    <MoneyCell cents={totals.unrealizedGainCents} currency={totals.currency} signed />
+                    <MoneyCell cents={totals.realizedGainCents} currency={totals.currency} signed />
+                    <MoneyCell cents={totals.totalReturnCents} currency={totals.currency} signed className="font-medium" />
+                  </TableRow>
+                </TableFooter>
+              )}
+            </Table>
           </div>
         )}
         {model.mixedCurrency && (
@@ -140,16 +209,18 @@ export function InvestmentPerformance({ rows, range }: Props) {
         ) : (
           <>
             <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Investment lines">
-              {model.series.map((item) => {
+              {lines.map((item) => {
                 const shown = !hidden.has(item.key);
                 return (
                   <button
                     key={item.key}
                     type="button"
                     aria-pressed={shown}
+                    title="Click to show or hide. Double-click to show only this line."
                     onClick={() => toggle(item.key)}
+                    onDoubleClick={() => isolate(item.key)}
                     className={cn(
-                      "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "flex select-none items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       !shown && "opacity-40",
                     )}
                   >
@@ -190,12 +261,52 @@ export function InvestmentPerformance({ rows, range }: Props) {
                       stroke={item.color}
                       strokeWidth={2}
                       dot={model.points.length === 1}
+                      activeDot={hovered === item.key}
                       connectNulls={false}
                       hide={hidden.has(item.key)}
                       isAnimationActive={false}
                     />,
-                    <Line key={item.costKey} type="stepAfter" dataKey={item.costKey} name={`${item.label} · cost basis`} stroke={item.color} strokeWidth={2} strokeDasharray="6 4" dot={false} connectNulls={false} hide={hidden.has(item.key)} isAnimationActive={false} />,
+                    <Line key={item.costKey} type="stepAfter" dataKey={item.costKey} name={`${item.label} · cost basis`} stroke={item.color} strokeWidth={2} strokeDasharray="6 4" dot={false} activeDot={hovered === item.key} connectNulls={false} hide={hidden.has(item.key)} isAnimationActive={false} />,
                   ])}
+                  {model.total && (
+                    <Line
+                      key={TOTAL_KEY}
+                      type="linear"
+                      dataKey={TOTAL_KEY}
+                      name={model.total.label}
+                      stroke={model.total.color}
+                      strokeWidth={2.5}
+                      dot={model.points.length === 1}
+                      activeDot={hovered === TOTAL_KEY}
+                      hide={hidden.has(TOTAL_KEY)}
+                      isAnimationActive={false}
+                    />
+                  )}
+                  {/* Invisible wide strokes on top make thin lines easy to hover. */}
+                  {[
+                    ...model.series.flatMap((item) => [
+                      { dataKey: item.key, owner: item.key, type: "linear" as const },
+                      { dataKey: item.costKey, owner: item.key, type: "stepAfter" as const },
+                    ]),
+                    ...(model.total ? [{ dataKey: TOTAL_KEY, owner: TOTAL_KEY, type: "linear" as const }] : []),
+                  ].map((hit) => (
+                    <Line
+                      key={`hit_${hit.dataKey}`}
+                      type={hit.type}
+                      dataKey={hit.dataKey}
+                      stroke="transparent"
+                      strokeWidth={14}
+                      dot={false}
+                      activeDot={false}
+                      legendType="none"
+                      tooltipType="none"
+                      connectNulls={false}
+                      hide={hidden.has(hit.owner)}
+                      isAnimationActive={false}
+                      onMouseEnter={() => setHovered(hit.owner)}
+                      onMouseLeave={() => setHovered(null)}
+                    />
+                  ))}
                 </LineChart>
               </ChartContainer>
             </div>
