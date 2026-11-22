@@ -253,6 +253,20 @@ export function spendInRange(
   return sumCents(amounts);
 }
 
+/** Group movements by category once, so per-category, per-period spend never rescans the whole ledger. */
+export function transactionsByCategory(
+  transactions: readonly BudgetLedgerTransaction[],
+): Map<number, BudgetLedgerTransaction[]> {
+  const byCategory = new Map<number, BudgetLedgerTransaction[]>();
+  for (const tx of transactions) {
+    if (tx.categoryId == null) continue;
+    const bucket = byCategory.get(tx.categoryId);
+    if (bucket) bucket.push(tx);
+    else byCategory.set(tx.categoryId, [tx]);
+  }
+  return byCategory;
+}
+
 export type BudgetPerformanceInput = {
   budgets: readonly BudgetRow[];
   transactions: readonly BudgetLedgerTransaction[];
@@ -354,6 +368,7 @@ export function budgetPerformance(input: BudgetPerformanceInput): BudgetPeriodRe
   }
 
   const out: BudgetPeriodResult[] = [];
+  const byCategory = transactionsByCategory(transactions);
 
   for (const rows of groups.values()) {
     const group = [...rows].sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : 1));
@@ -389,7 +404,12 @@ export function budgetPerformance(input: BudgetPerformanceInput): BudgetPeriodRe
 
       const appliedCarry = budget.rollover ? carriedInCents : 0;
       const availableCents = sumCents([effectiveLimitCents, appliedCarry]);
-      const spentCents = spendInRange(transactions, groupCategory, range.startKey, range.endKey);
+      const spentCents = spendInRange(
+        byCategory.get(groupCategory) ?? [],
+        groupCategory,
+        range.startKey,
+        range.endKey,
+      );
       const remainingCents = sumCents([availableCents, negateCents(spentCents)]);
       const carriedOutCents = budget.rollover && remainingCents > 0 ? remainingCents : 0;
 
