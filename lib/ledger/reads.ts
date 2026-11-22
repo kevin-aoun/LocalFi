@@ -414,7 +414,7 @@ export function readPortfolioMovements(
 
 
 // Priced holdings show their ticker (XAU, BTC, NVDA), whether a trade or an import created the instrument.
-function holdingLabel(instrument: Row): string {
+function holdingLabel(instrument: SqlRow): string {
   const spec = pricedHolding(instrument.symbol);
   if (!spec) return String(instrument.label);
   return spec.symbol.startsWith("STOCK:") ? spec.label : spec.symbol;
