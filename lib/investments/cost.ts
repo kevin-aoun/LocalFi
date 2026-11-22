@@ -17,10 +17,11 @@ export function parsePurchaseQuantity(value: string): string {
   return quantity;
 }
 
+// A price of zero is valid: a gift costs nothing.
 export function parsePurchaseUnitPrice(value: string): string {
   const price = canonicalDecimal(value);
-  if (price === "0" || price.startsWith("-") || (price.split(".")[1]?.length ?? 0) > 4) {
-    throw new Error("Enter a positive price per unit with up to four decimal places.");
+  if (price.startsWith("-") || (price.split(".")[1]?.length ?? 0) > 4) {
+    throw new Error("Enter a price per unit of 0 or more with up to four decimal places.");
   }
   return price;
 }
@@ -42,16 +43,18 @@ export function quantityValueMinor(quantity: string, unitPriceMinor: Cents, unit
 
 export function purchaseAmountCents(quantity: string, unitPrice: string): Cents {
   const exact = parsePurchaseQuantity(quantity);
-  const amount = quantityValueMinor(exact, 0, parsePurchaseUnitPrice(unitPrice));
-  if (amount <= 0) throw new Error("The purchase total must be at least one cent.");
+  const price = parsePurchaseUnitPrice(unitPrice);
+  const amount = quantityValueMinor(exact, 0, price);
+  // Only an exact zero price (a gift) may total zero; a real price must reach a cent.
+  if (amount === 0 && price !== "0") throw new Error("The purchase total must be at least one cent.");
   return amount;
 }
 
 export function unitPriceFromAmountCents(paidAmount: Cents, quantity: string): string {
   assertCents(paidAmount);
   const exact = canonicalDecimal(quantity);
-  if (paidAmount <= 0 || exact === "0" || exact.startsWith("-")) {
-    throw new Error("Enter a positive purchase amount and quantity.");
+  if (paidAmount < 0 || exact === "0" || exact.startsWith("-")) {
+    throw new Error("Enter a purchase amount of 0 or more and a positive quantity.");
   }
   const [whole, fraction = ""] = exact.split(".");
   const denominator = BigInt(whole + fraction);

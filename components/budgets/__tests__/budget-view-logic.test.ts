@@ -889,10 +889,13 @@ describe("the Budgets UI keeps the house conventions", () => {
     expect(source).toMatch(/BudgetDialog/);
   });
 
-  it("the page uses the tested engine instead of re-deriving spend", () => {
+  it("the page uses the tested engine instead of re-deriving spend, from one ledger load", () => {
     const source = read("app/(dashboard)/budgets/page.tsx");
-    expect(source).toMatch(/getSpendVsBudget/);
-    expect(source).toMatch(/getBudgetHistory/);
+    expect(source).toMatch(/getBudgetOverview/);
+    expect(source).not.toMatch(/getSpendVsBudget|getBudgetHistory|getCategorySpend/);
+    const reads = read("app/actions/budgets/read.ts");
+    expect(reads).toMatch(/spendVsBudget\(/);
+    expect(reads).toMatch(/budgetPerformance\(/);
   });
 
   it("the reallocation dialog offers 25%, 50%, and a ledger-safe Max shortcut", () => {

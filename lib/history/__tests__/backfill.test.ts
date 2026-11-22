@@ -10,7 +10,6 @@ import {
 } from "@/app/actions/__tests__/support/domain-fixture";
 import { applyNetWorthReconstruction, planNetWorthReconstruction, runNetWorthReconstruction } from "../run";
 import { renderPlan, renderWriteReport } from "../format";
-import { previewNetWorthReconstruction } from "@/app/actions/history";
 import { postLedgerEventRaw, registerLedgerAccount } from "@/lib/ledger";
 import { prepareInvestmentPurchase, syncPositionHoldingProjection } from "@/lib/investments";
 
@@ -273,15 +272,14 @@ describe("range defaults", () => {
   });
 });
 
-describe("the server action", () => {
+describe("planning", () => {
   it("previews without writing", async () => {
     seedGoldHolding();
-    const result = await previewNetWorthReconstruction(RANGE);
-    expect("success" in result).toBe(true);
-    if (!("success" in result)) return;
-    expect(result.data.dayCount).toBe(8);
-    expect(result.data.series[0].dateKey).toBe("2026-01-08");
-    expect(result.data.report).toMatch(/RECONSTRUCTED SERIES/);
+    const planned = await planNetWorthReconstruction(RANGE);
+    if (!planned.ok) throw new Error(planned.error.message);
+    expect(planned.plan.days).toHaveLength(8);
+    expect(planned.plan.days[0].dateKey).toBe("2026-01-08");
+    expect(renderPlan(planned.plan)).toMatch(/RECONSTRUCTED SERIES/);
     expect(snapshots()).toEqual([]);
   });
 
@@ -290,8 +288,8 @@ describe("the server action", () => {
     vi.stubGlobal("fetch", async () => {
       throw new Error("offline");
     });
-    const result = await previewNetWorthReconstruction(RANGE);
-    expect("success" in result).toBe(true);
+    const planned = await planNetWorthReconstruction(RANGE);
+    expect(planned.ok).toBe(true);
     expect(snapshots()).toEqual([]);
   });
 });

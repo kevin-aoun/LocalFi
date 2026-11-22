@@ -237,17 +237,31 @@ function readTargetMovements(
   targetType: "real_account" | "category",
   fromKey?: DateKey,
   toKey?: DateKey,
+  currentMovements?: readonly CurrentLedgerMovement[],
 ): CurrentLedgerMovement[] {
-  return readCurrentMovements(raw, { fromKey, toKey })
-    .filter((movement) => movement.targetType === targetType);
+  validateRange(fromKey, toKey);
+  const current = currentMovements
+    ? movementsInRange(currentMovements, fromKey, toKey)
+    : readCurrentMovements(raw, { fromKey, toKey });
+  return current.filter((movement) => movement.targetType === targetType);
 }
 
 
 export function readAccountMovements(
   raw: Database,
-  options: { fromKey?: DateKey; toKey?: DateKey } = {},
+  options: {
+    fromKey?: DateKey;
+    toKey?: DateKey;
+    currentMovements?: readonly CurrentLedgerMovement[];
+  } = {},
 ): SignedAccountMovement[] {
-  return readTargetMovements(raw, "real_account", options.fromKey, options.toKey).map((row) => ({
+  return readTargetMovements(
+    raw,
+    "real_account",
+    options.fromKey,
+    options.toKey,
+    options.currentMovements,
+  ).map((row) => ({
     chainRootEventId: row.chainRootEventId,
     eventId: row.eventId,
     sequence: row.sequence,
@@ -413,6 +427,13 @@ export function readPortfolioMovements(
 }
 
 
+// Priced holdings show their ticker (XAU, BTC, NVDA), whether a trade or an import created the instrument.
+function holdingLabel(instrument: Row): string {
+  const spec = pricedHolding(instrument.symbol);
+  if (!spec) return String(instrument.label);
+  return spec.symbol.startsWith("STOCK:") ? spec.label : spec.symbol;
+}
+
 export function readPositionValuations(
   raw: Database,
   asOfKey: DateKey,
@@ -454,9 +475,7 @@ export function readPositionValuations(
       realizedGainCents: holdingReturns?.realizedGainCents ?? null,
       assetId: projection ? targetId(projection.id, "asset projection") : null,
       archived: projection ? Number(projection.archived) === 1 : false,
-      label: instrument.category === "Crypto"
-        ? pricedHolding(instrument.symbol)?.symbol ?? String(instrument.label)
-        : String(instrument.label),
+      label: holdingLabel(instrument),
       category: instrument.category == null ? "Other" : String(instrument.category),
       observationKind,
       observedDay: observation ? String(observation.observed_day) as DateKey : null,

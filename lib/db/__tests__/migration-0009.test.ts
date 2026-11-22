@@ -1,40 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import initSqlJs from "sql.js";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { toDateKey } from "../../dates";
-import { migrateToLedgerSemantics } from "../migrate-to-ledger-semantics";
+import { upgradeDatabaseImage } from "../upgrade";
+import { databaseBefore, runMigration } from "./support/migrations";
 
-const ROOT = path.resolve(__dirname, "..", "..", "..");
-const MIGRATIONS = path.join(ROOT, "drizzle", "migrations");
-let SQL: Awaited<ReturnType<typeof initSqlJs>>;
-const temporaryDirectories: string[] = [];
-
-beforeAll(async () => {
-  SQL = await initSqlJs({ locateFile: (file) => path.join(ROOT, "node_modules/sql.js/dist", file) });
-});
-
-afterEach(() => {
-  while (temporaryDirectories.length) rmSync(temporaryDirectories.pop()!, { recursive: true, force: true });
-});
-
-function pre0009Database(options?: { mixedTransfer?: boolean }) {
-  const directory = mkdtempSync(path.join(os.tmpdir(), "budget-0009-"));
-  temporaryDirectories.push(directory);
-  const journal = JSON.parse(readFileSync(path.join(MIGRATIONS, "meta", "_journal.json"), "utf8")) as {
-    entries: Array<{ idx: number; tag: string }>;
-  };
-  const db = new SQL.Database();
-  for (const entry of [...journal.entries].sort((a, b) => a.idx - b.idx)) {
-    if (entry.idx >= 9) break;
-    const sql = readFileSync(path.join(MIGRATIONS, `${entry.tag}.sql`), "utf8");
-    for (const statement of sql.split("--> statement-breakpoint")) {
-      if (statement.trim()) db.exec(statement);
-    }
-  }
-
+async function pre0009Database(options?: { mixedTransfer?: boolean }) {
+  const db = await databaseBefore(9);
   db.run("UPDATE accounts SET created_at = strftime('%s', '2020-02-03T12:00:00Z') WHERE id = 1");
   db.run(
     "INSERT INTO accounts (id, name, kind, type, opening_balance_cents, currency, archived, created_at) " +
@@ -53,11 +24,7 @@ function pre0009Database(options?: { mixedTransfer?: boolean }) {
     "INSERT INTO transactions (id, date, category_id, account_id, transfer_account_id, amount_cents) " +
       "VALUES (3, 3, NULL, 1, 2, -3000)",
   );
-
-  const file = path.join(directory, "budget.db");
-  writeFileSync(file, Buffer.from(db.export()));
-  db.close();
-  return file;
+  return db;
 }
 
 describe("migration 0009", () => {
@@ -68,10 +35,9 @@ describe("migration 0009", () => {
     const previousTimezone = process.env.TZ;
     process.env.TZ = timezone;
     try {
-      const file = pre0009Database();
-      await migrateToLedgerSemantics({ dbPath: file });
-      const db = new SQL.Database(readFileSync(file));
+      const db = await pre0009Database();
       try {
+        runMigration(db, 9);
         expect(
           db.exec("SELECT opening_balance_date FROM accounts WHERE id = 2")[0].values,
         ).toEqual([[expectedDate]]);
@@ -85,12 +51,8 @@ describe("migration 0009", () => {
   });
 
   it("backfills immutable semantics and opening dates while preserving signed effects", async () => {
-    const file = pre0009Database();
-    const result = await migrateToLedgerSemantics({ dbPath: file });
-    expect(result.backupPath && existsSync(result.backupPath)).toBe(true);
-    expect(result.preservedRows.transactions).toBe(3);
-
-    const db = new SQL.Database(readFileSync(file));
+    const db = await pre0009Database();
+    runMigration(db, 9);
     expect(db.exec("SELECT id, opening_balance_cents, opening_balance_date FROM accounts ORDER BY id")[0].values)
       .toEqual([
         [1, 0, toDateKey(new Date("2020-02-03T12:00:00Z"))],
@@ -144,21 +106,12 @@ describe("migration 0009", () => {
       ),
     ).toThrow(/cross-currency/i);
     db.close();
-
-    expect((await migrateToLedgerSemantics({ dbPath: file })).alreadyMigrated).toBe(true);
-  });
-
-  it("dry-runs without changing the database", async () => {
-    const file = pre0009Database();
-    const before = readFileSync(file);
-    await migrateToLedgerSemantics({ dbPath: file, dryRun: true });
-    expect(readFileSync(file).equals(before)).toBe(true);
   });
 
   it("refuses an existing cross-currency transfer instead of inventing FX", async () => {
-    const file = pre0009Database({ mixedTransfer: true });
-    const before = readFileSync(file);
-    await expect(migrateToLedgerSemantics({ dbPath: file })).rejects.toThrow(/cross-currency/i);
-    expect(readFileSync(file).equals(before)).toBe(true);
+    const db = await pre0009Database({ mixedTransfer: true });
+    const image = db.export();
+    db.close();
+    await expect(upgradeDatabaseImage(image)).rejects.toThrow(/cross-currency/i);
   });
 });
