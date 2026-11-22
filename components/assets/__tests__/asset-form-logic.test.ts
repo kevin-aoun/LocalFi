@@ -1,44 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { commodityQuantityFields, cryptoPurchaseForm, emptyAssetForm, formFromAsset, livePricingFor, purchaseCategoryIdFor, purchaseTotalFor } from "../asset-form-logic";
+import { DEFAULT_ASSET_TYPE, MANUAL_ASSET_TYPES, commodityQuantityFields, emptyAssetForm, formFromAsset, livePricingFor, purchaseTotalFor } from "../asset-form-logic";
 
-describe("cryptoPurchaseForm", () => {
-  it("opens the same asset form directly in its ledger-backed crypto mode", () => {
-    expect(cryptoPurchaseForm()).toMatchObject({
-      category: "Crypto",
-      currency: "USD",
-      useLivePrice: true,
-      cryptoSymbol: "BTC",
-    });
-    expect(cryptoPurchaseForm()).not.toBe(emptyAssetForm());
-  });
-});
-
-describe("automatic purchase categories", () => {
-  const categories = [
-    { id: 1, name: "Crypto", type: "Expense" },
-    { id: 2, name: "Crypto", type: "Investment" },
-    { id: 3, name: "Investments", type: "Investment" },
-    { id: 4, name: "Retirement", type: "Investment" },
-  ];
-
-  it("uses the asset category when a matching investment category exists", () => {
-    expect(purchaseCategoryIdFor(categories, "Crypto")).toBe(2);
-    expect(purchaseCategoryIdFor(categories, "Investments")).toBe(3);
-    expect(purchaseCategoryIdFor([{ id: 5, name: " cRyPtO ", type: "Investment" }], "Crypto")).toBe(5);
-  });
-
-  it("keeps the category already chosen when entering from Transactions", () => {
-    expect(purchaseCategoryIdFor(categories, "Crypto", 4)).toBe(4);
-    expect(purchaseCategoryIdFor(categories, "Crypto", 1)).toBe(2);
-    expect(purchaseCategoryIdFor(categories, "Crypto", 99)).toBe(2);
-  });
-
-  it("falls back to a general investment category, then the first investment category", () => {
-    expect(purchaseCategoryIdFor(categories.filter((category) => category.id !== 2), "Crypto")).toBe(3);
-    expect(purchaseCategoryIdFor(categories.filter((category) => category.id === 4), "Crypto")).toBe(4);
-    expect(purchaseCategoryIdFor(categories.filter((category) => category.type === "Expense"), "Crypto")).toBeNull();
-    expect(purchaseCategoryIdFor([], "Investments")).toBeNull();
+describe("adding holdings on Home", () => {
+  it("offers only manually valued categories and never defaults to derived cash", () => {
+    expect(MANUAL_ASSET_TYPES).toEqual(["Properties", "Vehicles", "Other"]);
+    expect(emptyAssetForm()).toMatchObject({ category: DEFAULT_ASSET_TYPE, useLivePrice: false });
+    expect(MANUAL_ASSET_TYPES).toContain(emptyAssetForm().category);
+    expect(livePricingFor(emptyAssetForm())).toMatchObject({ usesLivePricing: false, isInvestment: false });
   });
 });
 

@@ -5,6 +5,7 @@ import type { Database } from "sql.js";
 import { readDb, withDb, type BudgetDb } from "@/lib/db/client";
 import {
   accounts,
+  assets,
   categories,
   ledgerEvents,
   transactionAllocations,
@@ -28,6 +29,8 @@ import {
   readCategoryMovements,
 } from "@/lib/ledger";
 import {
+  findInstrument,
+  getExactPosition,
   prepareInvestmentPurchase,
   previewPurchaseQuantity,
   projectPositionHolding,
@@ -352,6 +355,18 @@ async function validateInvestmentCategory(db: BudgetDb, categoryId: number, acco
   }
   const [account] = accountId === null ? [] : await db.select().from(accounts).where(eq(accounts.id, accountId));
   if (!account || account.archived || account.kind !== "asset") throw new Error("Choose an active asset account for this trade");
+  return category;
+}
+
+// Stock, Crypto and Commodities categories expect units and a price, which manual holdings lack.
+function assertPlainInvestmentCategory(category: { investmentKind: string | null }) {
+  if (category.investmentKind) {
+    throw new Error("Stock, crypto and commodity categories record units and prices. Choose another Investment category for this holding.");
+  }
+}
+
+function isManualInstrument(raw: Database, instrumentId: string | null): boolean {
+  return instrumentId !== null && findInstrument(raw, instrumentId)?.kind === "manual";
 }
 
 function buildCurrentMovements(
@@ -543,6 +558,67 @@ export async function createTransaction(formData: FormData) {
   }
 }
 
+/**
+ * Sells a manually valued holding (property, vehicle, other) in full. The sale
+ * is an ordinary confirmed Investment transaction: the proceeds enter the
+ * account and every unit leaves the holding, so later edits and deletes go
+ * through Transactions like any other trade.
+ */
+export async function sellManualHolding(assetId: number, formData: FormData) {
+  try {
+    const transaction = await withDb(async (db, raw) => {
+      const [asset] = await db.select().from(assets).where(eq(assets.id, assetId));
+      const instrument = asset?.instrumentId ? findInstrument(raw, asset.instrumentId) : null;
+      if (!asset || !instrument) throw new Error("That holding no longer exists");
+      if (instrument.kind !== "manual") throw new Error("Sell stocks, crypto and metals by units and price.");
+      const position = getExactPosition(raw, instrument.id, asset.currency);
+      if (!position || position.quantity === "0" || position.quantity.startsWith("-")) {
+        throw new Error("This holding has already been sold");
+      }
+      const accountId = requireId(formData.get("accountId"), "account");
+      const categoryId = requireId(formData.get("categoryId"), "category");
+      assertPlainInvestmentCategory(await validateInvestmentCategory(db, categoryId, accountId));
+      const currency = await accountCurrency(db, accountId);
+      if (currency !== position.currency) {
+        throw new Error(`Receive the proceeds into a ${position.currency} account; this holding is valued in ${position.currency}.`);
+      }
+      const rawAmount = formData.get("amount");
+      if (typeof rawAmount !== "string" || rawAmount.trim() === "") throw new Error("Enter the sale proceeds");
+      const comment = formData.get("comment");
+      const now = new Date(Math.floor(Date.now() / 1000) * 1000);
+      const [row] = await db.insert(transactions).values({
+        date: requireFormDate(formData),
+        categoryId,
+        accountId,
+        amountCents: requireMagnitude(parseAmount(rawAmount), "Sale proceeds"),
+        direction: "inflow",
+        currency,
+        instrumentId: instrument.id,
+        quantityDelta: negateCanonicalDecimal(position.quantity),
+        comment: typeof comment === "string" && comment.trim() !== "" ? comment.trim() : `Sold ${instrument.label}`,
+        pending: false,
+        createdAt: now,
+        updatedAt: now,
+      }).returning();
+      const event = postFirstTransactionEvent(raw, row, []);
+      assertAvailableInvestmentUnits(raw, instrument.id, currency);
+      const [projected] = await db.update(transactions)
+        .set({ currentEventId: event.eventId })
+        .where(eq(transactions.id, row.id))
+        .returning();
+      syncPositionHoldingProjection(raw, instrument.id, currency);
+      await syncCashAssetWithin(db);
+      return projected;
+    });
+
+    revalidate("/transactions", "/", "/accounts", "/reports");
+    return { success: true as const, data: transaction };
+  } catch (error) {
+    console.error("Failed to sell holding:", error);
+    return { error: (error as Error).message || "Failed to sell holding" };
+  }
+}
+
 export async function updateTransaction(id: number, formData: FormData) {
   try {
     const pendingValue = formData.get("pending");
@@ -589,6 +665,7 @@ export async function updateTransaction(id: number, formData: FormData) {
         ? existing.currency
         : await accountCurrency(db, resolvedAccountId);
       const fields = readInvestmentFields(formData, existing.instrumentId && existing.direction === "inflow" ? "sell" : "buy");
+      const manualTrade = isManualInstrument(raw, existing.instrumentId);
       const purchase = prepareInvestment(raw, fields, currency, date);
       if (fields) {
         const paidAmountCents = purchaseAmountCents(fields.quantity, fields.unitPrice);
@@ -598,12 +675,15 @@ export async function updateTransaction(id: number, formData: FormData) {
           : rawFees === "" ? 0 : requireMagnitude(parseAmount(rawFees as string), "Fees");
         investmentCost = { paidAmountCents, feeAmountCents };
         await validateInvestmentCategory(db, categoryId, resolvedAccountId, fields.symbol);
-      } else if (existing.instrumentId && (
+      } else if (existing.instrumentId && !manualTrade && (
         formData.has("fees") || (typeof amountRaw === "string" && amountRaw.trim() !== "" && parseAmount(amountRaw) !== existing.amountCents)
       )) {
         throw new Error("Edit the investment units, price, and fees together to change its cash amount");
       }
-      if (!fields && existing.instrumentId) await validateInvestmentCategory(db, categoryId, resolvedAccountId);
+      if (!fields && existing.instrumentId) {
+        const category = await validateInvestmentCategory(db, categoryId, resolvedAccountId);
+        if (manualTrade) assertPlainInvestmentCategory(category);
+      }
       const now = new Date(Math.floor(Date.now() / 1000) * 1000);
       const next: TransactionState = {
         ...existing,

@@ -46,6 +46,7 @@ function asset(values: Partial<SidebarAssetRow> & { category: string }): Sidebar
     quantity: values.quantity ?? null,
     quantityExact: values.quantityExact ?? null,
     unit: values.unit ?? null,
+    instrumentId: values.instrumentId ?? null,
   };
 }
 
@@ -1252,5 +1253,24 @@ describe("the owner's portfolio, row by row", () => {
     const total = view.allocations.reduce((sum, entry) => sum + (entry.percentage ?? 0), 0);
     expect(total).toBeCloseTo(100, 10);
     expect(view.visibleTotalsLabel).toBe("$699.34");
+  });
+});
+
+describe("sell actions on Home rows", () => {
+  it("sells manual holdings in full, priced holdings by units, and never cash accounts", () => {
+    const view = buildAssetTable({
+      assets: [
+        asset({ id: 501, category: "Properties", notes: "Demo flat", currentValueCents: 100_00, quantityExact: "1", instrumentId: "instrument:manual:a" }),
+        asset({ id: 502, category: "Crypto", priceSymbol: "BTC", currentValueCents: 50_00, quantityExact: "0.25", instrumentId: "instrument:security:BTC" }),
+        asset({ id: 503, category: "Other", notes: "Legacy", currentValueCents: 10_00 }),
+      ],
+      accounts: [account({ name: "Checking", balanceCents: 20_00 })],
+    });
+    const holdings = view.categories.flatMap((category) => category.holdings);
+    const saleOf = (name: string) => holdings.find((holding) => holding.name === name)?.sale;
+    expect(saleOf("Demo flat")).toEqual({ kind: "manual", assetId: 501, label: "Demo flat", currency: "USD" });
+    expect(saleOf("BTC")).toMatchObject({ kind: "priced", symbol: "BTC", quantity: "0.25", unit: "coins" });
+    expect(saleOf("Legacy")).toBeNull();
+    expect(saleOf("Checking")).toBeNull();
   });
 });

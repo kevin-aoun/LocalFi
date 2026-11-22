@@ -20,7 +20,7 @@ type FormProps = {
   setFormData: Dispatch<SetStateAction<AssetFormData>>;
 };
 
-export function AssetCategoryField({ formData, setFormData }: FormProps) {
+export function AssetCategoryField({ formData, setFormData, options = ASSET_TYPES }: FormProps & { options?: readonly string[] }) {
   return (
     <div className="space-y-2">
       <Label htmlFor="category">Category</Label>
@@ -31,7 +31,7 @@ export function AssetCategoryField({ formData, setFormData }: FormProps) {
         currency: category === "Crypto" || category === "Investments" ? "USD" : prev.currency,
       }))} required>
         <SelectTrigger id="category"><SelectValue /></SelectTrigger>
-        <SelectContent>{ASSET_TYPES.map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent>
+        <SelectContent>{options.map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent>
       </Select>
     </div>
   );

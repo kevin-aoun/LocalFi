@@ -1,18 +1,12 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createAsset, updateAsset } from "@/app/actions/assets";
-import { createTransaction } from "@/app/actions/transactions";
-import {
-  createLivePricedAsset,
-  getLivePriceQuote,
-  updateLivePricedAsset,
-} from "@/app/actions/crypto";
+import { getLivePriceQuote, updateLivePricedAsset } from "@/app/actions/crypto";
 import { AlertCircle, Loader2, TrendingUp } from "lucide-react";
 import { purchaseAmountCents } from "@/lib/investments/cost";
 import { centsToDecimal, formatMoney, tryParseAmount, type Cents } from "@/lib/money";
@@ -22,12 +16,12 @@ import {
   type PriceQuote,
 } from "@/lib/prices";
 import {
-  cryptoPurchaseForm,
+  ASSET_TYPES,
+  MANUAL_ASSET_TYPES,
   commodityQuantityFields,
   emptyAssetForm,
   formFromAsset,
   livePricingFor,
-  purchaseCategoryIdFor,
   type AssetFormData,
 } from "./asset-form-logic";
 import {
@@ -59,12 +53,8 @@ type Asset = {
 type AssetDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Edits this holding; without one the dialog adds a manually valued holding. */
   asset?: Asset | null;
-  accounts?: Array<{ id: number; name: string; currency: string; kind?: string; archived?: boolean }>;
-  categories?: Array<{ id: number; name: string; type: string }>;
-  cryptoPurchase?: boolean;
-  initialPurchaseAccountId?: number | null;
-  initialPurchaseCategoryId?: number | null;
   onSuccess: () => void;
 };
 
@@ -79,11 +69,6 @@ export function AssetDialog({
   open,
   onOpenChange,
   asset,
-  accounts = [],
-  categories = [],
-  cryptoPurchase = false,
-  initialPurchaseAccountId = null,
-  initialPurchaseCategoryId = null,
   onSuccess,
 }: AssetDialogProps) {
   const [loading, setLoading] = useState(false);
@@ -94,11 +79,8 @@ export function AssetDialog({
 
   const [priceError, setPriceError] = useState<string | null>(null);
   const [formData, setFormData] = useState<AssetFormData>(emptyAssetForm);
-  const [purchaseAccountId, setPurchaseAccountId] = useState("");
-  const purchaseCategoryId = purchaseCategoryIdFor(categories, formData.category, initialPurchaseCategoryId);
 
   const { isCommodity, isInvestment, liveSymbol, usesLivePricing, liveUnit, liveQuantityText } = livePricingFor(formData);
-  const recordingPurchase = !asset && isInvestment && usesLivePricing;
   const activeQuote = quote?.symbol === liveSymbol ? quote : null;
   const liveQuantityGiven = liveQuantityText.trim() !== "";
 
@@ -109,11 +91,6 @@ export function AssetDialog({
       : null;
 
   const storedPricedAt = pricedAtLabel(asset?.pricedAt);
-  const purchaseAccounts = useMemo(
-    () => accounts.filter((account) => account.archived !== true && account.kind !== "liability" && account.currency === "USD"),
-    [accounts],
-  );
-  const defaultPurchaseAccountId = purchaseAccounts[0] ? String(purchaseAccounts[0].id) : "";
   useEffect(() => {
     if (!open || isInvestment || !usesLivePricing || liveSymbol === null) {
       setQuote(null);
@@ -145,21 +122,8 @@ export function AssetDialog({
 
   useEffect(() => {
     setError(null);
-    if (asset) {
-
-
-      setFormData(formFromAsset(asset, centsToDecimal));
-    } else {
-      setFormData(cryptoPurchase ? cryptoPurchaseForm() : emptyAssetForm());
-      setPurchaseAccountId(initialPurchaseAccountId == null ? defaultPurchaseAccountId : String(initialPurchaseAccountId));
-    }
-  }, [
-    asset,
-    cryptoPurchase,
-    defaultPurchaseAccountId,
-    initialPurchaseAccountId,
-    open,
-  ]);
+    setFormData(asset ? formFromAsset(asset, centsToDecimal) : emptyAssetForm());
+  }, [asset, open]);
 
 
 
@@ -185,44 +149,17 @@ export function AssetDialog({
     try {
       let result:
         | Awaited<ReturnType<typeof createAsset>>
-        | Awaited<ReturnType<typeof createLivePricedAsset>>
-        | Awaited<ReturnType<typeof createTransaction>>;
+        | Awaited<ReturnType<typeof updateLivePricedAsset>>;
 
       if (usesLivePricing) {
-        if (liveSymbol === null) throw new Error("Enter a valid stock ticker.");
-        if (isInvestment && !asset) {
-          if (purchaseAccountId === "") {
-            setError("Choose the account for this purchase.");
-            return;
-          }
-          if (purchaseCategoryId === null) {
-            setError("Add an Investment category in Budgets before recording a purchase.");
-            return;
-          }
-          const purchase = new FormData();
-          purchase.set("accountId", purchaseAccountId);
-          purchase.set("categoryId", String(purchaseCategoryId));
-          purchase.set("fees", formData.fees);
-          purchase.set("date", formData.purchaseDate);
-          purchase.set("comment", formData.notes.trim() || `Buy ${liveSymbol.replace(/^STOCK:/, "")}`);
-          purchase.set("pending", "false");
-          purchase.set("instrumentSymbol", liveSymbol);
-          purchase.set("quantity", liveQuantityText.trim());
-          purchase.set("instrumentUnit", liveUnit);
-          purchase.set("unitPrice", formData.unitPrice);
-          result = await createTransaction(purchase);
-        } else {
-
-
-
+        // Priced holdings are bought and sold in Transactions; this only refreshes an existing one.
+        if (liveSymbol === null || !asset) throw new Error("Enter a valid stock ticker.");
         const livePriceForm = new FormData();
         livePriceForm.append("priceSymbol", liveSymbol);
-
-
         if (liveQuantityGiven) {
           livePriceForm.append("quantity", liveQuantityText.trim());
         }
-        if (isInvestment && asset?.costBasisCents == null && formData.unitPrice.trim() !== "") {
+        if (isInvestment && asset.costBasisCents == null && formData.unitPrice.trim() !== "") {
           livePriceForm.append("paidAmount", String(centsToDecimal(purchaseAmountCents(liveQuantityText, formData.unitPrice))));
         }
         livePriceForm.append("unit", liveUnit);
@@ -231,10 +168,7 @@ export function AssetDialog({
         if (formData.notes) {
           livePriceForm.append("notes", formData.notes);
         }
-        result = asset
-          ? await updateLivePricedAsset(asset.id, livePriceForm)
-          : await createLivePricedAsset(livePriceForm);
-        }
+        result = await updateLivePricedAsset(asset.id, livePriceForm);
       } else {
         const formDataObj = new FormData();
         formDataObj.append("category", formData.category);
@@ -363,37 +297,7 @@ export function AssetDialog({
 
           {asset?.costBasisCents != null && <p className="text-sm text-muted-foreground">Quantity and cash invested come from purchase transactions. Edit those in Transactions; this action refreshes the market value.</p>}
           <fieldset disabled={loading || asset?.costBasisCents != null} className="min-w-0 space-y-4">
-          <div className={recordingPurchase ? "space-y-3 rounded-md border p-3" : undefined}>
-            {recordingPurchase && (
-              <div>
-                <p className="text-sm font-medium">Record purchase</p>
-                <p className="text-xs text-muted-foreground">
-                  This creates one confirmed transaction and decreases the selected account.
-                </p>
-              </div>
-            )}
-            <div className={recordingPurchase ? "grid gap-3 sm:grid-cols-2" : undefined}>
-              {recordingPurchase && (
-                  <div className="space-y-2">
-                    <Label htmlFor="crypto-purchase-account">Paid from</Label>
-                    <Select value={purchaseAccountId} onValueChange={setPurchaseAccountId}>
-                      <SelectTrigger id="crypto-purchase-account"><SelectValue placeholder="Choose account" /></SelectTrigger>
-                      <SelectContent>
-                        {purchaseAccounts.map((account) => (
-                          <SelectItem key={account.id} value={String(account.id)}>{account.name} ({account.currency})</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-              )}
-              <AssetCategoryField formData={formData} setFormData={setFormData} />
-            </div>
-            {recordingPurchase && (purchaseAccounts.length === 0 || purchaseCategoryId === null) && (
-              <p role="alert" className="text-xs text-destructive">
-                Add an active USD asset account and an Investment category before recording a purchase.
-              </p>
-            )}
-          </div>
+          <AssetCategoryField formData={formData} setFormData={setFormData} options={asset ? ASSET_TYPES : MANUAL_ASSET_TYPES} />
           <AssetValueFields formData={formData} setFormData={setFormData} usesLivePricing={usesLivePricing} />
 
           {isInvestment && (

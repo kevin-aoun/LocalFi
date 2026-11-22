@@ -15,7 +15,7 @@ import {
 } from "@/app/actions/accounts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, ArchiveRestore, EyeOff, TrendingUp, TrendingDown, Wallet } from "lucide-react";
+import { AlertTriangle, ArchiveRestore, EyeOff, Plus, TrendingUp, TrendingDown, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -24,6 +24,8 @@ import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
 import { AssetDialog } from "@/components/assets/asset-dialog";
+import { SellHoldingDialog } from "@/components/assets/sell-holding-dialog";
+import type { SaleTarget } from "@/components/assets/sell-holding-logic";
 import { LivePriceRefresh } from "@/components/assets/live-price-refresh";
 import {
   AlertDialog,
@@ -67,9 +69,11 @@ export default function DashboardPage() {
     setDeleteDialogOpen,
     selectedAsset,
     assetToDelete,
+    openAddDialog,
     openEditDialog,
     openDeleteDialog,
   } = useDashboardStore();
+  const [saleTarget, setSaleTarget] = useState<SaleTarget | null>(null);
 
   const [transactions, setTransactions] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -311,7 +315,10 @@ export default function DashboardPage() {
           </h1>
           <p className="text-muted-foreground">Here&apos;s what&apos;s happening with your finances</p>
         </div>
-
+        <Button onClick={openAddDialog}>
+          <Plus className="mr-2 h-4 w-4" />
+          New asset
+        </Button>
       </div>
 
       {}
@@ -520,9 +527,12 @@ export default function DashboardPage() {
               <Wallet className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No assets yet</h3>
               <p className="text-sm text-muted-foreground mb-4 text-center max-w-sm">
-                Record an asset purchase in Transactions to track your holdings and net worth.
+                Add a property, vehicle or other asset you own, or record a stock, crypto or metal purchase in Transactions.
               </p>
-              <Button asChild><Link href="/transactions">Open Transactions</Link></Button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button onClick={openAddDialog}><Plus className="mr-2 h-4 w-4" />Add an asset</Button>
+                <Button variant="outline" asChild><Link href="/transactions">Open Transactions</Link></Button>
+              </div>
             </CardContent>
           </Card>
         ) : (
@@ -578,6 +588,7 @@ export default function DashboardPage() {
               onEdit={openEditDialog}
               onArchive={(assetId) => void handleAssetArchived(assetId, true)}
               onDelete={openDeleteDialog}
+              onSell={setSaleTarget}
               onHide={hideHoldings}
               onShowAll={showAllHoldings}
             />
@@ -614,19 +625,21 @@ export default function DashboardPage() {
       </div>
 
       <AssetDialog
-        open={dialogOpen && selectedAsset !== null}
+        open={dialogOpen}
         onOpenChange={setDialogOpen}
         asset={selectedAsset}
-        accounts={accountRows.map((account) => ({
-          id: account.id,
-          name: account.name,
-          currency: account.currency,
-          kind: account.kind,
-          archived: account.archived,
-        }))}
-        categories={categories}
         onSuccess={loadData}
       />
+
+      {saleTarget && (
+        <SellHoldingDialog
+          target={saleTarget}
+          accounts={accountRows}
+          categories={categories}
+          onOpenChange={(open) => { if (!open) setSaleTarget(null); }}
+          onSuccess={loadData}
+        />
+      )}
 
       <AlertDialog
         open={deleteDialogOpen}

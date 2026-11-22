@@ -105,9 +105,19 @@ This file records durable choices and rejected alternatives. See the
 - **One category-driven transaction form.** Categories configure optional stock,
   crypto, or commodity fields through `investment_kind`; renaming a category
   preserves that behavior. Stock, Crypto, and Commodities are supplied by default,
-  reusing recognized existing investment categories on upgrade. Home creates no
-  holdings; purchases and sales enter through Transactions with one category
-  selection. Ordinary investment categories can still use amount-only entries.
+  reusing recognized existing investment categories on upgrade. Stock, crypto,
+  and metal purchases enter through Transactions with one category selection.
+  Ordinary investment categories can still use amount-only entries.
+- **Every holding can be sold from Home.** Home adds only manually valued
+  holdings (property, vehicles, other) as opening positions, since they have no
+  units or market price. Each holding row has a Sell action. Priced holdings
+  sell units at a price through the same trade path as Transactions. Manual
+  holdings sell in full through `sellManualHolding`: an ordinary confirmed
+  Investment transaction that credits the proceeds and removes the holding's
+  whole quantity. Later edits and deletes therefore go through Transactions,
+  where a manual sale's amount stays editable because it has no unit price.
+  Manual sales use an Investment category without `investment_kind`, and
+  proceeds must arrive in the holding's currency.
 - **Ledger sales.** A sale records a negative exact quantity and credits its
   receiving account with units × frozen price minus fees. Instrument cash amounts
   use the same sign as cash invested: buys add cost, sales subtract net proceeds.

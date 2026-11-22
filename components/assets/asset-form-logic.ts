@@ -52,7 +52,9 @@ export const ASSET_TYPES = [
   "Commodities",
   "Other",
 ];
-export const DEFAULT_ASSET_TYPE = "Savings";
+// Home adds only manually valued holdings; stocks, crypto and metals are bought in Transactions.
+export const MANUAL_ASSET_TYPES = ["Properties", "Vehicles", "Other"];
+export const DEFAULT_ASSET_TYPE = "Properties";
 export const COMMODITY_CHOICES = commodityPriceSymbols.map(
   (symbol) => PRICED_HOLDINGS[symbol].label,
 );
@@ -60,18 +62,6 @@ export const CRYPTO_CHOICES = cryptoPriceSymbols.map((symbol) => ({
   symbol,
   label: PRICED_HOLDINGS[symbol].label,
 }));
-
-export function purchaseCategoryIdFor(
-  categories: readonly { id: number; name: string; type: string }[],
-  assetCategory: string,
-  preferredId: number | null = null,
-): number | null {
-  const investments = categories.filter((category) => category.type === "Investment");
-  const preferred = investments.find((category) => category.id === preferredId);
-  const matching = investments.find((category) => category.name.trim().toLowerCase() === assetCategory.toLowerCase());
-  const general = investments.find((category) => ["investment", "investments"].includes(category.name.trim().toLowerCase()));
-  return (preferred ?? matching ?? general ?? investments[0])?.id ?? null;
-}
 
 export function emptyAssetForm(): AssetFormData {
   return {
@@ -92,14 +82,6 @@ export function emptyAssetForm(): AssetFormData {
   };
 }
 
-export function cryptoPurchaseForm(): AssetFormData {
-  return {
-    ...emptyAssetForm(),
-    category: "Crypto",
-    currency: "USD",
-    useLivePrice: true,
-  };
-}
 export function gramsToOz(grams: number): number {
   return grams / GRAMS_PER_TROY_OUNCE;
 }

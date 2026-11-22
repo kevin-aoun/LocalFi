@@ -17,6 +17,7 @@ code moves.
 | Domain rules | `lib/` | Pure calculations and validation |
 | Ledger | `lib/ledger/` | Events, movements, integrity, and projections |
 | Investments | `lib/investments/`, `components/transactions/investment-fields.tsx` | Category-configured buy/sell form, exact units and frozen prices, sale availability, cash totals, weighted average returns, positions, and observations |
+| Holding sales | `components/assets/sell-holding-*`, `sellManualHolding` in `app/actions/transactions.ts` | Sell action on Home rows: priced holdings by units, manual holdings in full |
 | Historical reconstruction | `lib/history/run.ts`, `lib/history/reconstruct.ts` | Replays ledger positions and stored observations without external price requests |
 | Market prices | `lib/prices.ts`, `components/assets/live-price-refresh.tsx` | Shared CoinGecko/Yahoo quotes; visible investment views refresh each minute |
 | Database | `lib/db/` | Client, migrations, recovery, and schema utilities |

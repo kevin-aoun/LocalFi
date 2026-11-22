@@ -24,8 +24,11 @@ describe("one category-driven transaction form", () => {
     const fields = readFileSync(path.join(root, "components/transactions/investment-fields.tsx"), "utf8");
     expect(fields).toMatch(/id="investment-quantity"[^>]*data-private-input/);
   });
-  it("removes Home's creation entry points", () => {
-    expect(home).not.toMatch(/openAddDialog|Add Your First Asset|setDialogOpen\(true\)/);
+  it("adds only manual holdings on Home and sells any holding from its row", () => {
+    expect(home).toContain("openAddDialog");
+    expect(home).not.toMatch(/cryptoPurchase|createLivePricedAsset/);
     expect(home).toContain('href="/transactions"');
+    expect(home).toMatch(/onSell=\{setSaleTarget\}/);
+    expect(home).toMatch(/<SellHoldingDialog/);
   });
 });

@@ -59,39 +59,20 @@ describe("Bitcoin and Ethereum are pickable live-priced holdings", () => {
     expect(source).toMatch(/Price \(USD\)/);
     expect(source).toMatch(/Price per/);
     expect(source).toMatch(/step="0\.0001"/);
-    expect(source).toMatch(/purchase.set\("unitPrice", formData.unitPrice\)/);
     const fields = source.slice(source.indexOf("export function InvestmentFields"), source.indexOf("export function CommodityFields"));
     expect(fields).not.toMatch(/LivePriceCheckbox|formData\.useLivePrice/);
     expect(source).not.toMatch(/Live profit \/ loss|purchase.set\("refreshPrice"/);
   });
 
-  it("routes a live-priced save through the priced-holding action", () => {
-    expect(source).toMatch(/createLivePricedAsset/);
+  it("routes a live-priced save through the priced-holding refresh action", () => {
     expect(source).toMatch(/updateLivePricedAsset/);
     expect(source).toMatch(/getLivePriceQuote/);
   });
 
-  it("records a new coin as one account-backed investment transaction", () => {
-    expect(source).toMatch(/createTransaction/);
-    expect(source).toMatch(/Paid from/);
-    expect(source).not.toMatch(/Tag \/ category|crypto-purchase-category/);
-    expect(source).toMatch(/purchaseCategoryIdFor\(categories, formData.category, initialPurchaseCategoryId\)/);
-    expect(source).toMatch(/instrumentSymbol/);
-    expect(source).toMatch(/This creates one confirmed transaction and decreases the selected account/);
-  });
-
-  it("can open the same purchase form from a transaction entry point", () => {
-    expect(source).toMatch(/cryptoPurchase/);
-    expect(source).toMatch(/initialPurchaseAccountId/);
-    expect(source).toMatch(/initialPurchaseCategoryId/);
-  });
-
-  it("puts Paid from and one Category selector at the top before investment details", () => {
-    const form = source.slice(source.indexOf("<form "));
-    expect(form.indexOf("Record purchase")).toBeLessThan(form.indexOf("Paid from"));
-    expect(form.indexOf("Paid from")).toBeLessThan(form.indexOf("<AssetCategoryField"));
-    expect(form.indexOf("<AssetCategoryField")).toBeLessThan(form.indexOf("<InvestmentFields"));
-    expect(form.match(/<AssetCategoryField\b/g)).toHaveLength(1);
+  it("adds only manually valued holdings; priced purchases stay in Transactions", () => {
+    expect(source).toMatch(/options=\{asset \? ASSET_TYPES : MANUAL_ASSET_TYPES\}/);
+    expect(source).not.toMatch(/createLivePricedAsset|createTransaction|cryptoPurchase|Paid from/);
+    expect(source.match(/<AssetCategoryField\b/g)).toHaveLength(1);
   });
 });
 
@@ -143,7 +124,7 @@ describe("failure is visible, never a silent $0", () => {
     const list = /const ASSET_TYPES = \[([^\]]*)\]/.exec(source);
     expect(list).not.toBeNull();
     expect(list![1]).not.toMatch(/"Cash"/);
-    expect(source).toMatch(/const DEFAULT_ASSET_TYPE = "Savings"/);
+    expect(source).toMatch(/const DEFAULT_ASSET_TYPE = "Properties"/);
   });
 
   it("treats a quantity of 0 as a value, not as absent", () => {
