@@ -167,7 +167,7 @@ describe("buildTransactionFormValues", () => {
     });
   });
 
-  it("requires complete purchase facts with positive units and a non-negative price", () => {
+  it("requires complete purchase facts with positive units and a positive price", () => {
     const base = {
       categoryId: "3",
       amount: "1000.00",
@@ -183,8 +183,20 @@ describe("buildTransactionFormValues", () => {
     expect(validateTransactionForm({ ...base, quantity: "" })).toMatch(/quantity/i);
     expect(validateTransactionForm({ ...base, quantity: "-0.02" })).toMatch(/positive/i);
     expect(validateTransactionForm({ ...base, unitPrice: "-1" })).toMatch(/unit price/i);
-    // A gift is a purchase at zero.
-    expect(validateTransactionForm({ ...base, unitPrice: "0", amount: "0" })).toBeNull();
+    expect(validateTransactionForm({ ...base, unitPrice: "0" })).toMatch(/unit price/i);
+  });
+
+  it("keeps a gift's price but bills only its fees, and sends the gift flag", () => {
+    const gift = {
+      categoryId: "3", accountId: "9", amount: "", comment: "Gift", date: new Date(2026, 5, 1), pending: false,
+      instrumentSymbol: "XAU", instrumentUnit: "oz", quantity: "0.25", unitPrice: "3650", fees: "0", gift: true,
+    };
+    expect(validateTransactionForm(gift)).toBeNull();
+    expect(validateTransactionForm({ ...gift, unitPrice: "0" })).toMatch(/unit price/i);
+    expect(buildTransactionFormValues(gift)).toMatchObject({ amount: "0", unitPrice: "3650", gift: "true" });
+    expect(buildTransactionFormValues({ ...gift, fees: "2.5" })).toMatchObject({ amount: "2.5" });
+    expect(buildTransactionFormValues({ ...gift, gift: false })).toMatchObject({ amount: "912.5", gift: "false" });
+    expect(validateTransactionForm({ ...gift, investmentSide: "sell" })).toMatch(/only a buy/i);
   });
 });
 

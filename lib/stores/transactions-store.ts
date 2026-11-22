@@ -29,6 +29,7 @@ type Transaction = {
   quantityDelta?: string | null;
   investmentUnitPrice?: string | null;
   investmentFeeAmountCents?: Cents | null;
+  investmentGift?: boolean;
   transferPrincipalAmountCents?: Cents | null;
   feeForTransferId?: number | null;
   feeAmountCents?: Cents | null;

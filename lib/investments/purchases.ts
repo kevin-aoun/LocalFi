@@ -52,9 +52,7 @@ export function prepareInvestmentPurchase(
     );
   }
   const observedAt = input.observedAt ?? Math.floor(Date.now() / 1000);
-  // A zero price (a gift) says nothing about the market, so it is not a price observation.
-  const priced = input.unitPrice ? canonicalDecimal(input.unitPrice) !== "0" : input.unitPriceMinor > 0;
-  if (priced) recordInstrumentObservation(raw, {
+  recordInstrumentObservation(raw, {
     instrumentId: instrument.id,
     observationKind: "price",
     observedDay: input.observedDay ?? observationDay(observedAt),

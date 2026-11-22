@@ -134,9 +134,11 @@ export async function getTransactions(categoryId?: number) {
         const metadata: InvestmentEventMetadata = transaction.currentEventId
           ? purchaseMetadata.get(transaction.currentEventId) ?? {}
           : transaction.investmentDraft ? JSON.parse(transaction.investmentDraft) : {};
+        const cost = recordedInvestmentCost(transaction, metadata);
         return {
           investmentUnitPrice: metadata.investmentUnitPrice ?? null,
-          investmentFeeAmountCents: recordedInvestmentCost(transaction, metadata)?.feeAmountCents ?? null,
+          investmentFeeAmountCents: cost?.feeAmountCents ?? null,
+          investmentGift: transaction.direction === "outflow" && cost?.paidAmountCents === 0,
         };
       })() : {}),
       allocations: allocationsByTransaction.get(transaction.id) ?? [],
@@ -252,6 +254,8 @@ type InvestmentFields = {
   unit: string | undefined;
   unitPriceMinor: number;
   unitPrice: string;
+  /** A received gift: the price records its value, and only fees are billed. */
+  gift: boolean;
 };
 
 function readInvestmentFields(formData: FormData, fallbackSide: InvestmentSide = "buy"): InvestmentFields | null {
@@ -281,6 +285,7 @@ function readInvestmentFields(formData: FormData, fallbackSide: InvestmentSide =
     unit: typeof unit === "string" && unit.trim() !== "" ? unit.trim() : undefined,
     unitPrice: parsePurchaseUnitPrice(unitPrice),
     unitPriceMinor: requireMagnitude(parseAmount(unitPrice), "Unit price"),
+    gift: formData.get("gift") === "true",
   };
 }
 
@@ -413,11 +418,11 @@ export async function createTransaction(formData: FormData) {
       if (!fields) assertAmountOnlyCategory(category);
       const date = requireFormDate(formData);
       const paidAmountCents = fields
-        ? purchaseAmountCents(fields.quantity, fields.unitPrice)
+        ? fields.gift ? 0 : purchaseAmountCents(fields.quantity, fields.unitPrice)
         : requireMagnitude(parseAmount(formData.get("amount") as string));
       const rawFees = formData.get("fees");
       const feeAmountCents = rawFees === null || rawFees === "" ? 0 : requireMagnitude(parseAmount(rawFees as string), "Fees");
-      const amountCents = fields ? tradeCashAmount(fields.quantity, fields.unitPrice, feeAmountCents as Cents, fields.side) : sumCents([paidAmountCents, feeAmountCents]);
+      const amountCents = fields ? tradeCashAmount(fields.quantity, fields.unitPrice, feeAmountCents as Cents, fields.side, fields.gift) : sumCents([paidAmountCents, feeAmountCents]);
       const direction = fields ? fields.side === "sell" ? "inflow" : "outflow" : await categoryDirection(db, categoryId);
       const currency = await accountCurrency(db, accountId);
       const now = new Date(Math.floor(Date.now() / 1000) * 1000);
@@ -575,7 +580,7 @@ export async function updateTransaction(id: number, formData: FormData) {
       const manualTrade = isManualInstrument(raw, existing.instrumentId);
       const purchase = prepareInvestment(raw, fields, currency, date);
       if (fields) {
-        const paidAmountCents = purchaseAmountCents(fields.quantity, fields.unitPrice);
+        const paidAmountCents = fields.gift ? 0 : purchaseAmountCents(fields.quantity, fields.unitPrice);
         const rawFees = formData.get("fees");
         const feeAmountCents = rawFees === null
           ? investmentCost?.feeAmountCents ?? 0
@@ -603,7 +608,7 @@ export async function updateTransaction(id: number, formData: FormData) {
         categoryId,
         accountId: resolvedAccountId,
         amountCents: fields && investmentCost
-          ? tradeCashAmount(fields.quantity, fields.unitPrice, investmentCost.feeAmountCents, fields.side)
+          ? tradeCashAmount(fields.quantity, fields.unitPrice, investmentCost.feeAmountCents, fields.side, fields.gift)
           : typeof amountRaw === "string" && amountRaw.trim() !== ""
             ? requireMagnitude(parseAmount(amountRaw))
             : existing.amountCents,
