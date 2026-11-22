@@ -151,12 +151,18 @@ export async function readEncryptedGeneration(file: string): Promise<Buffer> {
   return bytes;
 }
 
-function fsyncDirectory(directory: string): void {
-  const descriptor = openSync(directory, "r");
+// Best effort: callers run this after rename, when the new generation is already live,
+// so a failure here must not report that write as failed. Some filesystems cannot fsync directories.
+export function fsyncDirectory(directory: string): void {
   try {
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
+    const descriptor = openSync(directory, "r");
+    try {
+      fsyncSync(descriptor);
+    } finally {
+      closeSync(descriptor);
+    }
+  } catch {
+    // Durability of the directory entry is not guaranteed on this filesystem.
   }
 }
 

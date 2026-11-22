@@ -25,7 +25,11 @@ import {
   unlockVaultEnvelope,
 } from "../vault/envelope";
 import { VaultLockedError } from "../vault/errors";
-import { readSensitiveGeneration, writeEncryptedGenerationAtomically } from "../vault/paths";
+import {
+  fsyncDirectory,
+  readSensitiveGeneration,
+  writeEncryptedGenerationAtomically,
+} from "../vault/paths";
 
 export const SCHEMA_JOURNAL_TABLE = "localfi_schema_journal";
 
@@ -532,19 +536,6 @@ function fsyncFile(file: string) {
     fsyncSync(fd);
   } finally {
     closeSync(fd);
-  }
-}
-
-function fsyncDirectory(directory: string) {
-  try {
-    const fd = openSync(directory, "r");
-    try {
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-  } catch {
-
   }
 }
 
