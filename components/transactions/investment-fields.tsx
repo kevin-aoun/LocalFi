@@ -1,8 +1,12 @@
 "use client";
 
+import { Gift } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { pricedHolding, PRICE_SYMBOLS } from "@/lib/prices";
 import { investmentKindForSymbol, type InvestmentKind } from "@/lib/investments/categories";
 import type { InvestmentSide } from "@/lib/investments/trades";
@@ -14,11 +18,12 @@ export type InvestmentForm = {
   instrumentUnit: string;
   fees: string;
   investmentSide: InvestmentSide;
+  gift: boolean;
 };
 
 export function emptyInvestment(kind: InvestmentKind | null = null): InvestmentForm {
   const instrumentSymbol = kind === "crypto" ? "BTC" : kind === "commodity" ? "XAU" : "";
-  return { instrumentSymbol, quantity: "", unitPrice: "", instrumentUnit: pricedHolding(instrumentSymbol)?.defaultUnit ?? "", fees: "0", investmentSide: "buy" };
+  return { instrumentSymbol, quantity: "", unitPrice: "", instrumentUnit: pricedHolding(instrumentSymbol)?.defaultUnit ?? "", fees: "0", investmentSide: "buy", gift: false };
 }
 
 export function InvestmentFields({ kind, value, onChange }: {
@@ -32,7 +37,7 @@ export function InvestmentFields({ kind, value, onChange }: {
     <div className="space-y-4" data-private-value>
       <div className="space-y-2">
         <Label htmlFor="investment-side">Action</Label>
-        <Select value={value.investmentSide} onValueChange={(side) => set({ investmentSide: side as InvestmentSide })}>
+        <Select value={value.investmentSide} onValueChange={(side) => set({ investmentSide: side as InvestmentSide, gift: false })}>
           <SelectTrigger id="investment-side"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="buy">Buy</SelectItem><SelectItem value="sell">Sell</SelectItem></SelectContent>
         </Select>
@@ -58,7 +63,21 @@ export function InvestmentFields({ kind, value, onChange }: {
         </div>
         <div className="space-y-2">
           <Label htmlFor="investment-unit-price">Price (USD){kind === "commodity" ? " / oz" : ""}</Label>
-          <Input id="investment-unit-price" type="number" min="0.0001" step="0.0001" value={value.unitPrice} placeholder="0.0000" onChange={(event) => set({ unitPrice: event.target.value })} required />
+          <div className="flex gap-2">
+            <Input id="investment-unit-price" type="number" min="0.0001" step="0.0001" value={value.unitPrice} placeholder="0.0000" onChange={(event) => set({ unitPrice: event.target.value })} required />
+            {value.investmentSide === "buy" && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button type="button" variant="outline" size="icon" aria-label="Mark this as gift" aria-pressed={value.gift}
+                    className={cn("shrink-0", value.gift && "border-primary bg-primary/10 text-primary")}
+                    onClick={() => set({ gift: !value.gift })}>
+                    <Gift className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{value.gift ? "Gift: the price records its value and only fees are billed" : "Mark this as gift"}</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
         </div>
       </div>
       <div className="space-y-2">

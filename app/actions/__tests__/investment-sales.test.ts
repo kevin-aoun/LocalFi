@@ -55,23 +55,30 @@ describe("ledger asset sales", () => {
     expect([...new Set((await getInvestmentHistory()).map((row) => row.label))].sort()).toEqual(["BTC", "NVDA", "XAU"]);
   });
 
-  it("records a gifted holding at zero cost without pricing the market at zero", async () => {
+  it("records a gift at its real price without billing the account", async () => {
     await save(trade("BTC", { quantity: "1", unitPrice: "100", fees: "0" }));
-    const gift = await save(trade("BTC", { quantity: "1", unitPrice: "0", fees: "0", date: "2026-01-03" }));
-    expect(gift).toMatchObject({ amountCents: 0, quantityDelta: "1" });
+    const gift = await save(trade("BTC", { quantity: "1", unitPrice: "150", fees: "0", gift: "true", date: "2026-01-03" }));
+    expect(gift).toMatchObject({ amountCents: 0, quantityDelta: "1", direction: "outflow" });
     expect(temp.query("SELECT amount_minor FROM instrument_observations ORDER BY observed_day")).toEqual([
-      { amount_minor: 10_000 },
+      { amount_minor: 10_000 }, { amount_minor: 15_000 },
     ]);
-    // Two coins cost 100.00 in total and are still valued at the last market price.
-    expect((await getInvestmentHistory()).at(-1)).toMatchObject({ valueCents: 20_000, costBasisCents: 10_000, realizedGainCents: 0 });
+    // Two coins cost 100.00 in total and are valued at the gift's 150.00 price.
+    expect((await getInvestmentHistory()).at(-1)).toMatchObject({ valueCents: 30_000, costBasisCents: 10_000, realizedGainCents: 0 });
     expect((await getAccountBalances()).find((row) => row.id === 9)?.balanceCents).toBe(90_000);
+    expect((await getTransactions()).find((row) => row.id === gift.id)).toMatchObject({ investmentUnitPrice: "150", investmentGift: true });
+
+    expect(await updateTransaction(gift.id, trade("BTC", { quantity: "1", unitPrice: "160", fees: "0", gift: "true", date: "2026-01-03" })))
+      .toMatchObject({ success: true, data: { amountCents: 0 } });
+    expect(await updateTransaction(gift.id, form({ comment: "Birthday" }))).toMatchObject({ success: true, data: { amountCents: 0 } });
+    expect((await getTransactions()).find((row) => row.id === gift.id)).toMatchObject({ investmentUnitPrice: "160", investmentGift: true });
     expect((await verifyLedger()).failures).toEqual([]);
   });
 
-  it("keeps a gift as the only purchase at a known zero cost", async () => {
-    await save(trade("XAU", { quantity: "1", unitPrice: "0", fees: "0" }));
-    expect((await getInvestmentHistory()).at(-1)).toMatchObject({ costBasisCents: 0, realizedGainCents: 0, closed: false });
-    expect(temp.query("SELECT COUNT(*) AS count FROM instrument_observations")).toEqual([{ count: 0 }]);
+  it("refuses a zero price and a gifted sale", async () => {
+    expect(await createTransaction(trade("XAU", { quantity: "1", unitPrice: "0", fees: "0" }))).toMatchObject({ error: expect.stringMatching(/positive price/i) });
+    await save(trade("XAU", { quantity: "1", unitPrice: "100", fees: "0" }));
+    expect(await createTransaction(trade("XAU", { investmentSide: "sell", quantity: "1", unitPrice: "100", fees: "0", gift: "true" })))
+      .toMatchObject({ error: expect.stringMatching(/only a buy/i) });
   });
 
   it("uses weighted average purchase cost for partial sales, including fees", async () => {
