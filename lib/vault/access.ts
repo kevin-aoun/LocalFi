@@ -75,22 +75,6 @@ export async function withActiveVaultAuthorization<T>(
   return authorizationContext.run(authorization, task);
 }
 
-export async function withVaultSessionToken<T>(
-  token: string,
-  task: () => Promise<T>,
-): Promise<T> {
-  const authorization = await vaultSessionManager.authorizationForToken(token);
-  return withDatabaseVaultAuthorization(authorization, task);
-}
-
-export function withDatabaseVaultAuthorization<T>(
-  authorization: DatabaseVaultAuthorization | null,
-  task: () => Promise<T>,
-): Promise<T> {
-  if (!authorization) throw new VaultLockedError();
-  return authorizationContext.run(authorization, task);
-}
-
 export function assertSameOriginJsonPost(request: Request): void {
   if (request.method !== "POST") throw new Error("method_not_allowed");
   const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";

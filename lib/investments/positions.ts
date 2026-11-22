@@ -5,7 +5,7 @@ import { pricedHolding } from "@/lib/prices";
 
 import { findInstrument } from "./instruments";
 import { latestPositionObservation } from "./observations";
-import { allRows, firstRow, type SqlRow } from "./sql";
+import { allRows, firstRow, type SqlRow } from "@/lib/db/sql";
 import { quantityValueMinor } from "./cost";
 export { quantityValueMinor } from "./cost";
 

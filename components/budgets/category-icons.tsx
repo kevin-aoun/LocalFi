@@ -53,8 +53,6 @@ export const CATEGORY_ICON_OPTIONS = [
   "TrendingUp",
 ] as const;
 
-export type CategoryIconName = (typeof CATEGORY_ICON_OPTIONS)[number];
-
 type IconProps = {
   className?: string;
   style?: React.CSSProperties;

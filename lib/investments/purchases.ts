@@ -5,10 +5,6 @@ import { registerLedgerAccount } from "@/lib/ledger/targets";
 
 import { ensurePricedInstrument, type InvestmentInstrument } from "./instruments";
 import { observationDay, recordInstrumentObservation } from "./observations";
-import {
-  syncPositionHoldingProjection,
-  type PositionHoldingProjection,
-} from "./positions";
 
 export type PreparedInvestmentPurchase = {
   instrument: InvestmentInstrument;
@@ -56,7 +52,9 @@ export function prepareInvestmentPurchase(
     );
   }
   const observedAt = input.observedAt ?? Math.floor(Date.now() / 1000);
-  recordInstrumentObservation(raw, {
+  // A zero price (a gift) says nothing about the market, so it is not a price observation.
+  const priced = input.unitPrice ? canonicalDecimal(input.unitPrice) !== "0" : input.unitPriceMinor > 0;
+  if (priced) recordInstrumentObservation(raw, {
     instrumentId: instrument.id,
     observationKind: "price",
     observedDay: input.observedDay ?? observationDay(observedAt),
@@ -87,12 +85,4 @@ export function prepareInvestmentPurchase(
     frozenUnitPriceMinor: input.unitPriceMinor,
     currency,
   };
-}
-
-
-export function projectInvestmentPurchase(
-  raw: Database,
-  purchase: Pick<PreparedInvestmentPurchase, "instrumentId" | "currency">,
-): PositionHoldingProjection | null {
-  return syncPositionHoldingProjection(raw, purchase.instrumentId, purchase.currency);
 }

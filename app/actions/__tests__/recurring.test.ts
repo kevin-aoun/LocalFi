@@ -20,6 +20,7 @@ import {
   setRecurringArchived,
   updateRecurringTransaction,
 } from "@/app/actions/recurring";
+import { updateTransfer } from "@/app/actions/transactions";
 
 let temp: DomainDb;
 
@@ -791,6 +792,29 @@ describe("deleteRecurringTransaction", () => {
     expect(Number(temp.scalar("SELECT COUNT(*) FROM ledger_events"))).toBe(6);
     expect(await verifyLedger()).toMatchObject({ ok: true });
     expect(await getRecurringTransactions()).toEqual([]);
+  });
+
+  it("detaches a transfer occurrence that was later split into principal and interest", async () => {
+    seedAccount(temp, { id: 3, name: "Car loan", kind: "liability", type: "Loan" });
+    seedRecurring(temp, {
+      id: 1, name: "Loan payment", accountId: 1, transferAccountId: 3, categoryId: null, amountCents: 50_000,
+      frequency: "monthly", startDate: "2026-01-01",
+    });
+    unwrap(await generateDueTransactions({ throughKey: "2026-01-15" }));
+    const occurrenceId = Number(temp.scalar("SELECT id FROM transactions WHERE recurring_id = 1"));
+    unwrap(await updateTransfer(occurrenceId, form({ principalAmount: "450.00", interestCategoryId: 1 })));
+
+    unwrap(await deleteRecurringTransaction(1));
+
+    expect(temp.query("SELECT recurring_id, transfer_principal_amount_cents FROM transactions"))
+      .toEqual([{ recurring_id: null, transfer_principal_amount_cents: 45_000 }]);
+    const detach = JSON.parse(String(temp.scalar("SELECT metadata_json FROM ledger_events ORDER BY sequence DESC LIMIT 1")));
+    expect(detach.transaction).toMatchObject({
+      recurringId: null,
+      transferPrincipalAmountCents: 45_000,
+      allocations: [{ categoryId: 1, amountCents: 5_000 }],
+    });
+    expect(await verifyLedger()).toMatchObject({ ok: true, failures: [] });
   });
 
   it("deletes an unmaterialized template without creating an event", async () => {

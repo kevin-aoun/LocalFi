@@ -5,7 +5,6 @@ import {
   buildTransactionFormValues,
   toTransactionDateValue,
   toTransactionFormData,
-  transactionDateKey,
   validateTransactionForm,
 } from "../transaction-form-logic";
 
@@ -41,7 +40,7 @@ describe("the calendar day the user picked survives serialization", () => {
       const picked = new Date(y, m, d);
       const wire = toTransactionDateValue(picked);
       const stored = new Date(wire);
-      expect(transactionDateKey(stored)).toBe(toDateKey(picked));
+      expect(toDateKey(stored)).toBe(toDateKey(picked));
       expect(monthKey(stored)).toBe(monthKey(picked));
     }
   });
@@ -168,7 +167,7 @@ describe("buildTransactionFormValues", () => {
     });
   });
 
-  it("requires complete positive purchase facts", () => {
+  it("requires complete purchase facts with positive units and a non-negative price", () => {
     const base = {
       categoryId: "3",
       amount: "1000.00",
@@ -183,7 +182,9 @@ describe("buildTransactionFormValues", () => {
     expect(validateTransactionForm(base)).toBeNull();
     expect(validateTransactionForm({ ...base, quantity: "" })).toMatch(/quantity/i);
     expect(validateTransactionForm({ ...base, quantity: "-0.02" })).toMatch(/positive/i);
-    expect(validateTransactionForm({ ...base, unitPrice: "0" })).toMatch(/unit price/i);
+    expect(validateTransactionForm({ ...base, unitPrice: "-1" })).toMatch(/unit price/i);
+    // A gift is a purchase at zero.
+    expect(validateTransactionForm({ ...base, unitPrice: "0", amount: "0" })).toBeNull();
   });
 });
 

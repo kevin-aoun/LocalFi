@@ -6,7 +6,8 @@ import { periodContaining, type BudgetPeriod } from "@/lib/budgets";
 import { toDateKey, todayKey, type DateKey } from "@/lib/dates";
 import { parseAmount, type Cents } from "@/lib/money";
 import { incomeBudgetRefusal } from "@/components/budgets/budget-view-logic";
-import { str, parsePeriod, requireDateKey, goalFieldsFromFormData, type ActionResult } from "./shared";
+import { parsePeriod, goalFieldsFromFormData } from "./shared";
+import { str, requireDateKey, type ActionResult } from "../shared";
 
 // A budget governs whole periods: one set mid-month would otherwise skip that month.
 function periodStart(period: BudgetPeriod, dateKey: DateKey): DateKey {
@@ -335,60 +336,6 @@ export async function deleteBudget(id: number): Promise<ActionResult<{ id: numbe
   } catch (error) {
     console.error("Failed to delete budget:", error);
     return { error: (error as Error).message || "Failed to delete budget" };
-  }
-}
-
-
-export async function importLegacyBudgets(): Promise<ActionResult<{ created: number }>> {
-  try {
-    const created = await withDb(async (db) => {
-      const categoryRows = await db.select().from(categories);
-      const existing = await db.select().from(budgets);
-
-
-      const todayForCoverage = todayKey();
-      const covered = new Set(
-        existing
-          .filter((b) => b.period === "monthly")
-          .filter((b) => b.effectiveTo === null || b.effectiveTo >= todayForCoverage)
-          .map((b) => b.categoryId),
-      );
-      const txRows = await db.select().from(transactions);
-      const earliest = txRows.reduce<Date | null>(
-        (min, tx) => (min === null || tx.date < min ? tx.date : min),
-        null,
-      );
-      const effectiveFrom = earliest
-        ? periodContaining("monthly", toDateKey(earliest)).startKey
-        : todayKey();
-
-      let count = 0;
-      let nextOrder = existing.reduce(
-        (maximum, budget) => Math.max(maximum, budget.displayOrder),
-        -1,
-      ) + 1;
-      for (const category of categoryRows) {
-        if (category.type === "Income") continue;
-        if (category.monthlyLimitCents === null || covered.has(category.id)) continue;
-        await db.insert(budgets).values({
-          categoryId: category.id,
-          period: "monthly",
-          limitCents: category.monthlyLimitCents,
-          effectiveFrom,
-          effectiveTo: null,
-          rollover: false,
-          displayOrder: nextOrder++,
-        });
-        count++;
-      }
-      return count;
-    });
-
-    revalidate("/budgets");
-    return { success: true, data: { created } };
-  } catch (error) {
-    console.error("Failed to import legacy budgets:", error);
-    return { error: (error as Error).message || "Failed to import legacy budgets" };
   }
 }
 

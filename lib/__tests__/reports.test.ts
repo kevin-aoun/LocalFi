@@ -19,7 +19,6 @@ import {
   savingsRate,
   savingsRateExcludingInvestments,
   shiftYears,
-  toReportTransactions,
   type ReportCategory,
   type ReportTransaction,
 } from "@/lib/reports";
@@ -660,37 +659,5 @@ describe("buildTransactionsCsv", () => {
       },
     ]);
     expect(csv).toContain('"Coffee, ""black""\nsecond line"');
-  });
-});
-
-describe("toReportTransactions", () => {
-  it("uses the LOCAL calendar day of the stored timestamp", () => {
-
-    const rows = toReportTransactions([
-      { date: new Date(2026, 0, 31), amountCents: 100, categoryId: 2 },
-      { date: new Date(2026, 1, 1), amountCents: 200, categoryId: 2 },
-    ]);
-    expect(rows.map((r) => r.dateKey)).toEqual(["2026-01-31", "2026-02-01"]);
-  });
-
-  it("keeps the ledger fields the balance rule needs", () => {
-    const [row] = toReportTransactions([
-      {
-        date: new Date(2026, 2, 15),
-        amountCents: 500,
-        categoryId: 7,
-        pending: true,
-        accountId: 3,
-        transferAccountId: 4,
-      },
-    ]);
-    expect(row).toMatchObject({
-      dateKey: "2026-03-15",
-      amountCents: 500,
-      categoryId: 7,
-      pending: true,
-      accountId: 3,
-      transferAccountId: 4,
-    });
   });
 });

@@ -29,10 +29,8 @@ async function main() {
 
   process.env.BUDGET_DB_PATH = dbPath;
 
-  if (flag(argv, "migrate") && process.env.LOCALFI_VAULT_TEST_MODE !== "plaintext") {
-    throw new Error(
-      "--migrate is a legacy plaintext-only path; run the encryption-aware db:upgrade command.",
-    );
+  if (flag(argv, "migrate")) {
+    throw new Error("--migrate was removed; run the encryption-aware db:upgrade command.");
   }
   const releaseAuthorization = await authorizeDatabaseVaultFromEnvironment();
   try {
@@ -51,25 +49,8 @@ async function main() {
     );
   }
 
-  const { migrateDatabaseTo0005, format0005Report } = await import("@/lib/history/migrate-0005");
   const { runNetWorthReconstruction } = await import("@/lib/history/run");
   const { renderPlan, renderWriteReport } = await import("@/lib/history/format");
-
-  if (flag(argv, "migrate")) {
-    if (isLiveFile && !flag(argv, "live")) {
-      throw new Error(
-        `Refusing to migrate ${dbPath} without --live. Stop the Docker stack first ` +
-          "(lib/db/client.ts is a single writer), then re-run with --migrate --live.",
-      );
-    }
-    const result = await migrateDatabaseTo0005({
-      dbPath,
-      backupDir: path.resolve(path.dirname(dbPath), "backups"),
-      log: (message) => console.log(`  ${message}`),
-    });
-    console.log(format0005Report(result));
-    console.log("");
-  }
 
   const run = await runNetWorthReconstruction({
     fromKey: value(argv, "from"),

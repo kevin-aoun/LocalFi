@@ -47,22 +47,6 @@ export type FlowTotals = {
   pendingExpenseCents: Cents;
 };
 
-export function emptyFlowTotals(): FlowTotals {
-  return {
-    incomeCents: 0,
-    expenseCents: 0,
-    investmentCents: 0,
-    consumptionCents: 0,
-    netCents: 0,
-    countedCount: 0,
-    uncategorizedCount: 0,
-    transferCount: 0,
-    pendingCount: 0,
-    pendingIncomeCents: 0,
-    pendingExpenseCents: 0,
-  };
-}
-
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
@@ -554,34 +538,6 @@ export function filterByCurrency<T extends ReportTransaction>(
     return code === wanted;
   });
 }
-
-
-
-
-
-export type WithDateKey<T> = Omit<T, "date"> & { dateKey: DateKey };
-
-
-function asDate(value: Date | string | number): Date {
-  if (value instanceof Date) return value;
-  if (typeof value === "number") return new Date(value);
-
-  if (isDateKey(value)) return fromDateKey(value);
-  throw new Error(`Unsupported transaction date: ${JSON.stringify(value)}`);
-}
-
-export function toReportTransactions<
-  T extends CashLedgerTransaction & { date: Date | string | number },
->(rows: readonly T[]): Array<WithDateKey<T>> {
-  return rows.map((row) => {
-    const { date, ...rest } = row;
-    return { ...rest, dateKey: toDateKey(asDate(date)) } as WithDateKey<T>;
-  });
-}
-
-
-
-
 
 
 export function centsToDecimalString(cents: Cents): string {

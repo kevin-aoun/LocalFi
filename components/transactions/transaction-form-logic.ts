@@ -1,5 +1,5 @@
 
-import { toDateKey, type DateKey } from "@/lib/dates";
+import { toDateKey } from "@/lib/dates";
 import { centsToDecimal, tryParseAmount } from "@/lib/money";
 import { parsePurchaseQuantity, parsePurchaseUnitPrice, tradeCashAmount } from "@/lib/investments/cost";
 import type { InvestmentSide } from "@/lib/investments/trades";
@@ -9,10 +9,6 @@ export function toTransactionDateValue(date: Date): string {
   return `${toDateKey(date)}T00:00:00`;
 }
 
-
-export function transactionDateKey(stored: Date | number | string): DateKey {
-  return toDateKey(stored instanceof Date ? stored : new Date(stored));
-}
 
 export type TransactionFormState = {
   categoryId: string;
@@ -63,7 +59,7 @@ export function validateTransactionForm(state: TransactionFormState): string | n
       return "Enter an exact positive investment quantity.";
     }
     try { parsePurchaseUnitPrice(investmentValues[2]); } catch {
-      return "Enter a positive unit price with up to four decimal places.";
+      return "Enter a unit price of 0 or more with up to four decimal places.";
     }
     const fees = tryParseAmount(state.fees?.trim() || "0");
     if (fees === null || fees < 0) return "Enter a non-negative fee amount.";

@@ -13,9 +13,8 @@ import {
   withDb,
 } from "../../db/client";
 import { buildInitialDatabaseImage } from "../../db/init";
-import { withDatabaseVaultAuthorization } from "../access";
 import { decryptVaultGeneration, destroyVaultKey, unlockVaultEnvelopeWithRecovery } from "../envelope";
-import { VaultLockedError } from "../errors";
+import { VaultLockedError, VaultPermissionError } from "../errors";
 import {
   copyEncryptedGenerationAtomically,
   managedVaultGenerationPaths,
@@ -70,6 +69,21 @@ describe.sequential("single-owner vault sessions", () => {
     writeFileSync(dbPath, await buildInitialDatabaseImage(), { mode: 0o600 });
     const { manager } = controlledManager();
     expect(await manager.status(dbPath)).toBe("uninitialized");
+    chmodSync(dbPath, 0o644);
+    expect(await manager.status(dbPath)).toBe("uninitialized");
+  });
+
+  it("surfaces loose permissions on an encrypted vault instead of offering setup over it", async () => {
+    const { manager } = controlledManager();
+    const setup = await manager.setup(PASSPHRASE, dbPath);
+    await manager.lock(setup.token);
+    chmodSync(dbPath, 0o644);
+    const before = readFileSync(dbPath);
+
+    await expect(manager.status(dbPath)).rejects.toBeInstanceOf(VaultPermissionError);
+    expect(readFileSync(dbPath)).toEqual(before);
+    chmodSync(dbPath, 0o600);
+    expect(await manager.status(dbPath)).toBe("locked");
   });
 
   it("issues opaque sessions, rejects forged tokens, locks explicitly, and restarts locked", async () => {
@@ -82,14 +96,12 @@ describe.sequential("single-owner vault sessions", () => {
     expect(await manager.authorizationForToken("forged")).toBeNull();
     expect(await manager.authorizationForToken(setup.token)).not.toBeNull();
     expect(await manager.status(dbPath)).toBe("unlocked");
-    await expect(Promise.resolve().then(() =>
-      withDatabaseVaultAuthorization(null, () => readDb(() => null))
-    ))
-      .rejects.toBeInstanceOf(VaultLockedError);
-    const authorization = await manager.authorizationForToken(setup.token);
-    expect(await withDatabaseVaultAuthorization(authorization, () =>
-      readDb((_db, raw) => Number(raw.exec("SELECT COUNT(*) FROM categories")[0].values[0][0]))
-    )).toBe(18);
+    uninstallProvider = installDatabaseVaultAuthorizationProvider(() => manager.authorizationForToken("forged"));
+    await expect(readDb(() => null)).rejects.toBeInstanceOf(VaultLockedError);
+    uninstallProvider();
+    uninstallProvider = installDatabaseVaultAuthorizationProvider(() => manager.authorizationForToken(setup.token));
+    expect(await readDb((_db, raw) => Number(raw.exec("SELECT COUNT(*) FROM categories")[0].values[0][0])))
+      .toBe(18);
 
     const restarted = new VaultSessionManager();
     expect(await restarted.authorizationForToken(setup.token)).toBeNull();
@@ -184,11 +196,10 @@ describe.sequential("single-owner vault sessions", () => {
   it("loads the persisted timeout after a process-style restart and expires on it", async () => {
     const first = controlledManager();
     const setup = await first.manager.setup(PASSPHRASE, dbPath);
-    const authorization = await first.manager.authorizationForToken(setup.token, false);
-    await withDatabaseVaultAuthorization(authorization, async () => {
-      await withDb((_db, raw) => {
-        raw.run("INSERT INTO settings (id, idle_timeout_minutes) VALUES (7, 1)");
-      });
+    uninstallProvider = installDatabaseVaultAuthorizationProvider(() =>
+      first.manager.authorizationForToken(setup.token, false));
+    await withDb((_db, raw) => {
+      raw.run("INSERT INTO settings (id, idle_timeout_minutes) VALUES (7, 1)");
     });
     await first.manager.lock(setup.token);
 
@@ -215,6 +226,28 @@ describe.sequential("single-owner vault sessions", () => {
     await expect(unlockDatabaseVault(PASSPHRASE, dbPath)).rejects.toThrow();
     const authorization = await unlockDatabaseVault("moonlit olive harbor 83 cedar", dbPath);
     destroyDatabaseVaultAuthorization(authorization);
+    await manager.lock(recovered.token);
+  });
+
+  it("recovers while the database is loaded, and a wrong secret keeps the open session", async () => {
+    const { manager } = controlledManager();
+    const setup = await manager.setup(PASSPHRASE, dbPath);
+    uninstallProvider = installDatabaseVaultAuthorizationProvider(() =>
+      manager.authorizationForToken(setup.token));
+    await readDb(() => null);
+    const wrongSecret = (setup.recoverySecret.startsWith("A") ? "B" : "A") + setup.recoverySecret.slice(1);
+
+    await expect(manager.recover(wrongSecret, "moonlit olive harbor 83 cedar", dbPath)).rejects.toThrow();
+    expect(await manager.authorizationForToken(setup.token)).not.toBeNull();
+    await expect(readDb(() => "still open")).resolves.toBe("still open");
+
+    const recovered = await manager.recover(setup.recoverySecret, "moonlit olive harbor 83 cedar", dbPath);
+    expect(await manager.authorizationForToken(setup.token)).toBeNull();
+    uninstallProvider();
+    uninstallProvider = installDatabaseVaultAuthorizationProvider(() =>
+      manager.authorizationForToken(recovered.token));
+    expect(await readDb((_db, raw) => Number(raw.exec("SELECT COUNT(*) FROM categories")[0].values[0][0])))
+      .toBe(18);
     await manager.lock(recovered.token);
   });
 

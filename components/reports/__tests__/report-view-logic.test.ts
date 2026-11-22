@@ -17,7 +17,7 @@ import {
   suggestPeriod,
   toCashFlowChartRows,
 } from "@/components/reports/report-view-logic";
-import { cashFlowByPeriod, emptyFlowTotals, type ReportCategory } from "@/lib/reports";
+import { cashFlowByPeriod, flowInRange, type ReportCategory } from "@/lib/reports";
 
 const TODAY = "2026-07-28";
 
@@ -159,12 +159,12 @@ describe("comparisonRange", () => {
 
 describe("describeExclusions", () => {
   it("says nothing when there is nothing to say", () => {
-    expect(describeExclusions(emptyFlowTotals())).toEqual([]);
+    expect(describeExclusions(flowInRange([], [], TODAY, TODAY))).toEqual([]);
   });
 
   it("reports pending, transfers and uncategorized rows in plain words", () => {
     const notes = describeExclusions({
-      ...emptyFlowTotals(),
+      ...flowInRange([], [], TODAY, TODAY),
       pendingCount: 2,
       pendingIncomeCents: 30_000,
       pendingExpenseCents: 90_000,

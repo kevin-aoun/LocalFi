@@ -10,11 +10,13 @@ import {
   seedTransaction,
   type DomainDb,
 } from "../support/domain-fixture";
+import { countLedgerReplays } from "../support/ledger-replays";
 import {
   createBudget,
+  getBudgetOverview,
   getCategorySpend,
   getBudgetHistory,
-  getBudgetsForCategory,
+  getBudgets,
   getSpendVsBudget,
 } from "@/app/actions/budgets";
 import { createTransfer } from "@/app/actions/transactions";
@@ -25,6 +27,10 @@ const TRANSPORT = 3;
 const INTEREST = 4;
 
 let temp: DomainDb;
+
+async function budgetsForCategory(categoryId: number) {
+  return (await getBudgets()).filter((budget) => budget.categoryId === categoryId);
+}
 
 beforeEach(async () => {
   temp = await createDomainDb();
@@ -70,7 +76,7 @@ describe("createBudget", () => {
     expect(result).toMatchObject({ error: expect.stringMatching(/spending limit/i) });
     expect(result).toMatchObject({ error: expect.stringMatching(/Salary/) });
     // Nothing was written.
-    expect(await getBudgetsForCategory(SALARY)).toEqual([]);
+    expect(await budgetsForCategory(SALARY)).toEqual([]);
     expect(temp.scalar("SELECT COUNT(*) FROM budgets")).toBe(0);
   });
 
@@ -83,7 +89,7 @@ describe("createBudget", () => {
     unwrap(await createBudget(form({ categoryId: FOOD, period: "monthly", limit: "400.00", effectiveFrom: "2026-01-01" })));
     unwrap(await createBudget(form({ categoryId: FOOD, period: "monthly", limit: "600.00", effectiveFrom: "2026-06-01" })));
 
-    const rows = await getBudgetsForCategory(FOOD);
+    const rows = await budgetsForCategory(FOOD);
     expect(rows.map((r) => [r.limitCents, r.effectiveFrom, r.effectiveTo])).toEqual([
       [40_000, "2026-01-01", "2026-05-31"],
       [60_000, "2026-06-01", null],
@@ -93,13 +99,13 @@ describe("createBudget", () => {
   it("keeps both rows open when closePrevious is false", async () => {
     unwrap(await createBudget(form({ categoryId: FOOD, period: "monthly", limit: "400.00", effectiveFrom: "2026-01-01" })));
     unwrap(await createBudget(form({ categoryId: FOOD, period: "monthly", limit: "600.00", effectiveFrom: "2026-06-01", closePrevious: false })));
-    expect((await getBudgetsForCategory(FOOD)).every((r) => r.effectiveTo === null)).toBe(true);
+    expect((await budgetsForCategory(FOOD)).every((r) => r.effectiveTo === null)).toBe(true);
   });
 
   it("does not close a budget of a DIFFERENT period", async () => {
     unwrap(await createBudget(form({ categoryId: FOOD, period: "weekly", limit: "100.00", effectiveFrom: "2026-01-05" })));
     unwrap(await createBudget(form({ categoryId: FOOD, period: "monthly", limit: "500.00", effectiveFrom: "2026-06-01" })));
-    const weekly = (await getBudgetsForCategory(FOOD)).find((r) => r.period === "weekly")!;
+    const weekly = (await budgetsForCategory(FOOD)).find((r) => r.period === "weekly")!;
     expect(weekly.effectiveTo).toBeNull();
   });
 
@@ -223,7 +229,7 @@ describe("getSpendVsBudget", () => {
     // The other budgets are unaffected.
     expect(rows.map((r) => r.categoryId)).toEqual([FOOD]);
     // The row itself is left alone, so the page can report and delete it.
-    expect((await getBudgetsForCategory(SALARY)).map((b) => b.limitCents)).toEqual([400_000]);
+    expect((await budgetsForCategory(SALARY)).map((b) => b.limitCents)).toEqual([400_000]);
   });
 
   it("rejects a malformed date key rather than guessing", async () => {
@@ -316,5 +322,39 @@ describe("getBudgetHistory", () => {
   it("rejects malformed bounds", async () => {
     await expect(getBudgetHistory({ fromKey: "nope", toKey: "2026-01-01" })).rejects.toThrow(/fromKey/);
     await expect(getBudgetHistory({ fromKey: "2026-01-01", toKey: "nope" })).rejects.toThrow(/toKey/);
+  });
+});
+
+describe("getBudgetOverview", () => {
+  const history = { fromKey: "2026-02-01", toKey: "2026-07-31", period: "monthly" as const };
+
+  beforeEach(() => {
+    seedBudget(temp, { id: 1, categoryId: FOOD, period: "monthly", limitCents: 50_000, effectiveFrom: "2026-01-01", rollover: true });
+    seedBudget(temp, { id: 2, categoryId: TRANSPORT, period: "weekly", limitCents: 5_000, effectiveFrom: "2026-01-05" });
+    spend("2026-03-04", 20_000);
+    spend("2026-07-05", 12_000);
+    spend("2026-07-06", 3_000, TRANSPORT);
+    spend("2026-07-07", 9_000, INTEREST);
+    spend("2026-07-08", 40_000, FOOD, { pending: true });
+    seedTransaction(temp, { accountId: 1, transferAccountId: 2, amountCents: 100_000, dateKey: "2026-07-09" });
+  });
+
+  it("returns what the per-section actions return, from one ledger replay", async () => {
+    const { result, replays } = await countLedgerReplays(() =>
+      getBudgetOverview({ dateKey: "2026-07-28", history }));
+    expect(replays).toBe(1);
+    expect(result).toEqual({
+      currentPeriod: await getSpendVsBudget({ dateKey: "2026-07-28" }),
+      history: await getBudgetHistory(history),
+      monthlySpendByCategory: await getCategorySpend({ dateKey: "2026-07-28" }),
+    });
+    expect(result.monthlySpendByCategory).toEqual({ [FOOD]: 12_000, [SALARY]: 0, [TRANSPORT]: 3_000, [INTEREST]: 9_000 });
+    expect(result.currentPeriod.find((row) => row.categoryId === FOOD)?.carriedInCents).toBeGreaterThan(0);
+  });
+
+  it("rejects malformed keys before reading the ledger", async () => {
+    await expect(getBudgetOverview({ dateKey: "2026-02-30", history })).rejects.toThrow(/dateKey/);
+    await expect(getBudgetOverview({ dateKey: "2026-07-28", history: { ...history, toKey: "nope" } }))
+      .rejects.toThrow(/toKey/);
   });
 });

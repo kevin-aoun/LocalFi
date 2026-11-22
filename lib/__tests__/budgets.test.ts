@@ -9,6 +9,7 @@ import {
   periodsBetween,
   spendInRange,
   spendVsBudget,
+  transactionsByCategory,
   type BudgetLedgerTransaction,
   type BudgetRow,
 } from "@/lib/budgets";
@@ -555,5 +556,63 @@ describe("budgetsFromLegacyLimits", () => {
     expect(results[0].limitCents).toBe(50_000);
     expect(results[0].spentCents).toBe(12_000);
     expect(results[0].remainingCents).toBe(38_000);
+  });
+});
+
+describe("category-bucketed spend", () => {
+  const TRANSPORT = 3;
+  const RENT = 4;
+  // Interleaved categories across five months, with rows spendInRange must skip.
+  const ledger: BudgetLedgerTransaction[] = [
+    tx("2026-01-03", 1_200),
+    tx("2026-01-04", 700, TRANSPORT),
+    tx("2026-01-05", 90_000, RENT),
+    tx("2026-01-31", 300),
+    tx("2026-02-01", 4_500, TRANSPORT),
+    tx("2026-02-02", 2_000, FOOD, { pending: true }),
+    tx("2026-02-03", 9_999, null),
+    tx("2026-02-14", 1_000, FOOD, { transferAccountId: 2 }),
+    tx("2026-02-15", 250_000, SALARY, { direction: "inflow" }),
+    { ...tx("2026-02-16", 800), categoryMovementCents: -800 },
+    tx("2026-03-01", 90_000, RENT),
+    tx("2026-03-09", 6_100),
+    tx("2026-03-10", 0, TRANSPORT),
+    tx("2026-04-30", 3_300, TRANSPORT, { direction: "outflow" }),
+    tx("2026-04-30", 5_000, FOOD, { direction: "inflow" }),
+    tx("2026-05-02", 90_000, RENT),
+    tx("2026-05-31", 4_400),
+  ];
+  const budgets: BudgetRow[] = [
+    { ...monthlyFood, rollover: true },
+    { id: 2, categoryId: TRANSPORT, period: "weekly", limitCents: 2_000, effectiveFrom: "2026-01-05", effectiveTo: null, rollover: false },
+    { id: 3, categoryId: RENT, period: "monthly", limitCents: 90_000, effectiveFrom: "2026-01-01", effectiveTo: "2026-03-31", rollover: false },
+    { id: 4, categoryId: RENT, period: "monthly", limitCents: 95_000, effectiveFrom: "2026-04-01", effectiveTo: null, rollover: true },
+    { id: 5, categoryId: FOOD, period: "yearly", limitCents: 600_000, effectiveFrom: "2026-01-01", effectiveTo: null, rollover: false },
+  ];
+
+  it("matches a full-ledger scan for every category and period", () => {
+    const byCategory = transactionsByCategory(ledger);
+    expect([...byCategory.keys()].sort()).toEqual([FOOD, SALARY, TRANSPORT, RENT].sort());
+    for (const period of ["weekly", "monthly", "yearly"] as const) {
+      for (const range of periodsBetween(period, "2026-01-01", "2026-05-31")) {
+        for (const categoryId of [FOOD, SALARY, TRANSPORT, RENT, 99]) {
+          expect(spendInRange(byCategory.get(categoryId) ?? [], categoryId, range.startKey, range.endKey))
+            .toBe(spendInRange(ledger, categoryId, range.startKey, range.endKey));
+        }
+      }
+    }
+  });
+
+  it("leaves every budget period's spend equal to the full-ledger scan", () => {
+    const rows = budgetPerformance({ budgets, transactions: ledger, fromKey: "2026-01-01", toKey: "2026-05-31" });
+    expect(rows.length).toBeGreaterThan(20);
+    for (const row of rows) {
+      expect(row.spentCents).toBe(spendInRange(ledger, row.categoryId, row.startKey, row.endKey));
+    }
+    expect(rows.find((row) => row.categoryId === FOOD && row.periodKey === "2026-02")?.spentCents).toBe(-800);
+    expect(rows.find((row) => row.categoryId === RENT && row.periodKey === "2026-05")).toMatchObject({
+      spentCents: 90_000,
+      carriedInCents: 95_000,
+    });
   });
 });

@@ -14,7 +14,7 @@ import type {
   LedgerMovementInput,
   PostedLedgerEvent,
 } from "@/lib/ledger/types";
-import { allRows } from "./sql";
+import { allRows } from "@/lib/db/sql";
 
 type AssetOpeningChain = {
   rootEventId: string;

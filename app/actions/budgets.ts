@@ -8,10 +8,6 @@ export async function getBudgets(...args: Parameters<typeof read.getBudgets>) {
   return read.getBudgets(...args);
 }
 
-export async function getBudgetsForCategory(...args: Parameters<typeof read.getBudgetsForCategory>) {
-  return read.getBudgetsForCategory(...args);
-}
-
 export async function getSpendVsBudget(...args: Parameters<typeof read.getSpendVsBudget>) {
   return read.getSpendVsBudget(...args);
 }
@@ -22,6 +18,10 @@ export async function getCategorySpend(...args: Parameters<typeof read.getCatego
 
 export async function getBudgetHistory(...args: Parameters<typeof read.getBudgetHistory>) {
   return read.getBudgetHistory(...args);
+}
+
+export async function getBudgetOverview(...args: Parameters<typeof read.getBudgetOverview>) {
+  return read.getBudgetOverview(...args);
 }
 
 export async function getBudgetReallocations(...args: Parameters<typeof reallocations.getBudgetReallocations>) {
@@ -56,9 +56,6 @@ export async function reorderBudgets(...args: Parameters<typeof mutations.reorde
   return mutations.reorderBudgets(...args);
 }
 
-export async function importLegacyBudgets(...args: Parameters<typeof mutations.importLegacyBudgets>) {
-  return mutations.importLegacyBudgets(...args);
-}
-
 export type { BudgetReallocationAvailability, BudgetReallocationView } from "./budgets/reallocations";
-export type { ActionResult, BudgetPerformanceRow } from "./budgets/shared";
+export type { BudgetPerformanceRow } from "./budgets/shared";
+export type { ActionResult } from "./shared";

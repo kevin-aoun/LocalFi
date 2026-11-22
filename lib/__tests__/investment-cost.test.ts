@@ -25,8 +25,12 @@ describe("exact prices per share or coin", () => {
     expect(quantityValueMinor("-2.5", 1235, "12.3456")).toBe(-3086);
     expect(unitPriceFromAmountCents(3086, "2.5")).toBe("12.344");
   });
+  it("accepts an exact zero price as a gift", () => {
+    expect(purchaseAmountCents("2.5", "0")).toBe(0);
+    expect(purchaseAmountCents("2.5", "0.0000")).toBe(0);
+  });
   it("rejects invalid prices, quantities, precision, sub-cent totals, and overflow", () => {
-    for (const price of ["0", "-1", "", "NaN", "12.34567"]) expect(() => purchaseAmountCents("2.5", price)).toThrow();
+    for (const price of ["-1", "", "NaN", "12.34567"]) expect(() => purchaseAmountCents("2.5", price)).toThrow();
     for (const quantity of ["0", "-1", "", "abc"]) expect(() => purchaseAmountCents(quantity, "12.3456")).toThrow();
     expect(() => purchaseAmountCents("0.1", "0.0001")).toThrow();
     expect(() => purchaseAmountCents("100000000000000", "10000.0001")).toThrow();

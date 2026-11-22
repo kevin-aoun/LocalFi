@@ -1,5 +1,6 @@
 import type { Database, SqlValue } from "sql.js";
 
+import { allRows, type SqlRow } from "@/lib/db/sql";
 import { readDb } from "@/lib/db/client";
 import { isDateKey, type DateKey } from "@/lib/dates";
 import {
@@ -16,20 +17,6 @@ import {
   type LedgerExplorerPage,
   type LedgerExplorerQuery,
 } from "./explorer-contract";
-
-type Row = Record<string, SqlValue>;
-
-function rows(raw: Database, query: string, parameters: SqlValue[] = []): Row[] {
-  const statement = raw.prepare(query);
-  try {
-    statement.bind(parameters);
-    const result: Row[] = [];
-    while (statement.step()) result.push(statement.getAsObject());
-    return result;
-  } finally {
-    statement.free();
-  }
-}
 
 function positiveInteger(value: number | null | undefined, label: string): number | null {
   if (value === null || value === undefined) return null;
@@ -96,7 +83,7 @@ function friendlySystemLabel(targetRef: string): string {
   return words ? words.replace(/\b\w/g, (letter) => letter.toUpperCase()) : "System";
 }
 
-function targetLabel(row: Row): string {
+function targetLabel(row: SqlRow): string {
   const targetType = String(row.target_type) as LedgerAccountTargetType;
   const targetRef = String(row.target_ref);
   const registered = row.target_name == null ? null : String(row.target_name).trim();
@@ -206,7 +193,7 @@ export function readLedgerExplorerPageRaw(
     }
   }
 
-  const eventRows = rows(
+  const eventRows = allRows(
     raw,
     `SELECT e.event_id, e.sequence, e.payload_version, e.effective_date,
             e.recorded_at, e.description, e.metadata_json, e.hash,
@@ -224,7 +211,7 @@ export function readLedgerExplorerPageRaw(
   const eventIds = pageRows.map((row) => String(row.event_id));
   const movementRows = eventIds.length === 0
     ? []
-    : rows(
+    : allRows(
         raw,
         `SELECT m.*, a.target_type, a.target_ref,
                 COALESCE(ac.name, ca.name, i.label, i.symbol) AS target_name,
@@ -293,17 +280,17 @@ export function readLedgerExplorerPageRaw(
     };
   });
 
-  const countRow = rows(
+  const countRow = allRows(
     raw,
     `SELECT
        (SELECT COUNT(*) FROM ledger_events) AS event_count,
        (SELECT COUNT(*) FROM ledger_movements) AS movement_count`,
   )[0];
-  const head = rows(
+  const head = allRows(
     raw,
     "SELECT sequence, event_id, hash FROM ledger_events ORDER BY sequence DESC LIMIT 1",
   )[0];
-  const currencies = rows(
+  const currencies = allRows(
     raw,
     "SELECT DISTINCT currency FROM ledger_movements ORDER BY currency",
   ).map((row) => String(row.currency));
@@ -341,7 +328,7 @@ export function readLedgerEventPayloadRaw(
   requestedEventId: string,
 ): LedgerEventPayload {
   const eventId = normalizeEventId(requestedEventId);
-  const row = rows(
+  const row = allRows(
     raw,
     `SELECT event_id, metadata_json, canonical_payload
        FROM ledger_events

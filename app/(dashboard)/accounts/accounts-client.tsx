@@ -13,7 +13,6 @@ import {
 
 import {
   deleteAccount,
-  recordNetWorthToday,
   setAccountArchived,
   type AccountWithBalance,
   type NetWorthView,
@@ -41,9 +40,13 @@ import {
   type AccountRow,
 } from "@/components/accounts/account-form-logic";
 import { formatCurrencyTotals } from "@/components/assets/currency-totals";
-import { fromDateKey, isDateKey } from "@/lib/dates";
+import {
+  BucketValues,
+  bucketLabel,
+  formatDateKey,
+  useRecordNetWorthToday,
+} from "@/components/dashboard/net-worth-shared";
 import { formatMoney } from "@/lib/money";
-import { cn } from "@/lib/utils";
 
 type SnapshotSummary = {
 
@@ -59,41 +62,6 @@ type AccountsClientProps = {
 
   orphanCount: number;
 };
-
-function formatDateKey(key: string): string {
-  return isDateKey(key) ? fromDateKey(key).toLocaleDateString() : key;
-}
-
-type BucketMoneyField =
-  | "totalAssetsCents"
-  | "totalLiabilitiesCents"
-  | "netWorthCents"
-  | "standaloneAssetsCents";
-
-function bucketLabel(netWorth: NetWorthView, field: BucketMoneyField): string {
-  return formatCurrencyTotals(
-    netWorth.currencyTotals.map((total) => ({
-      currency: total.currency,
-      totalCents: total[field],
-      count: 1,
-    })),
-  );
-}
-
-function BucketValues({ netWorth, field }: { netWorth: NetWorthView; field: BucketMoneyField }) {
-  return (
-    <div className="mt-1 space-y-0.5 text-2xl font-bold">
-      {netWorth.currencyTotals.map((total) => (
-        <div
-          key={total.currency}
-          className={cn(field === "netWorthCents" && total[field] < 0 && "text-red-600 dark:text-red-400")}
-        >
-          {formatMoney(total[field], total.currency)}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export default function AccountsClient({
   accounts,
@@ -111,8 +79,6 @@ export default function AccountsClient({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [actionError, setActionError] = useState<string | null>(null);
-  const [snapshotNote, setSnapshotNote] = useState<string | null>(null);
-  const [snapshotting, setSnapshotting] = useState(false);
 
   const grouped = groupAccountsByKind(accounts, { includeArchived: showArchived });
   const mixed = netWorth.aggregateCurrency === null;
@@ -120,6 +86,7 @@ export default function AccountsClient({
   const assignable = accounts.filter((account) => !account.archived);
 
   const refresh = () => router.refresh();
+  const { snapshotting, snapshotNote, handleSnapshot } = useRecordNetWorthToday(refresh, setActionError);
 
   const openCreate = () => {
     setSelectedAccount(null);
@@ -153,29 +120,6 @@ export default function AccountsClient({
     setDeleteError(null);
     setAccountToDelete(null);
     refresh();
-  };
-
-  const handleSnapshot = async () => {
-    setActionError(null);
-    setSnapshotNote(null);
-    setSnapshotting(true);
-    try {
-      const result = await recordNetWorthToday();
-      if (result && "error" in result) {
-        setActionError(result.error || "Failed to record net worth.");
-        return;
-      }
-      setSnapshotNote(
-        `Recorded ${formatMoney(result.data.netWorthCents, result.data.currency)} for ` +
-          `${formatDateKey(result.data.date)}. ${result.data.priceSummary}`,
-      );
-      refresh();
-    } catch (err) {
-      console.error("Failed to snapshot net worth:", err);
-      setActionError(err instanceof Error ? err.message : "Failed to record net worth.");
-    } finally {
-      setSnapshotting(false);
-    }
   };
 
   return (
@@ -218,7 +162,7 @@ export default function AccountsClient({
         <Card>
           <CardContent className="p-6">
             <div className="text-sm text-muted-foreground">Total assets</div>
-            <BucketValues netWorth={netWorth} field="totalAssetsCents" />
+            <BucketValues netWorth={netWorth} field="totalAssetsCents" className="mt-1 text-2xl font-bold" />
             <div className="mt-1 text-xs text-muted-foreground">
               Accounts you hold, plus standalone assets ({bucketLabel(netWorth, "standaloneAssetsCents")})
             </div>
@@ -227,7 +171,7 @@ export default function AccountsClient({
         <Card>
           <CardContent className="p-6">
             <div className="text-sm text-muted-foreground">Total liabilities</div>
-            <BucketValues netWorth={netWorth} field="totalLiabilitiesCents" />
+            <BucketValues netWorth={netWorth} field="totalLiabilitiesCents" className="mt-1 text-2xl font-bold" />
             <div className="mt-1 text-xs text-muted-foreground">
               What you owe, shown as a positive amount
             </div>
@@ -236,7 +180,7 @@ export default function AccountsClient({
         <Card>
           <CardContent className="p-6">
             <div className="text-sm text-muted-foreground">Net worth</div>
-            <BucketValues netWorth={netWorth} field="netWorthCents" />
+            <BucketValues netWorth={netWorth} field="netWorthCents" className="mt-1 text-2xl font-bold" />
             <div className="mt-1 text-xs text-muted-foreground">Assets minus liabilities</div>
           </CardContent>
         </Card>

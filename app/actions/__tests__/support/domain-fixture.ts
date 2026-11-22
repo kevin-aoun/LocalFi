@@ -353,12 +353,10 @@ export function seedTransaction(
         transferTargetId: destinationTarget,
       });
     } else {
-      if (categoryId === null) throw new Error("Fixture transaction requires a category");
-      const categoryTarget = registerLedgerAccount(db, {
-        targetType: "category",
-        targetRef: Number(categoryId),
-        currency: currencyCode,
-      });
+      // Like the 0012 migration, an uncategorized legacy row posts to the legacy-uncategorized target.
+      const categoryTarget = registerLedgerAccount(db, categoryId === null
+        ? { targetType: "system", targetRef: "legacy-uncategorized", currency: currencyCode }
+        : { targetType: "category", targetRef: Number(categoryId), currency: currencyCode });
       movements = buildTransactionMovements({
         direction: String(direction) as "inflow" | "outflow",
         amountMinor: Number(amountCents),

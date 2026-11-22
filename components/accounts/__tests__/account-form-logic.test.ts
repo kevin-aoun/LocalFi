@@ -11,7 +11,6 @@ import {
   DEFAULT_ACCOUNT_TYPE,
   IMPLIED_KIND,
   accountFormStateFromAccount,
-  currencyOf,
   describeBalance,
   emptyAccountFormState,
   groupAccountsByKind,
@@ -510,24 +509,6 @@ describe("presentNetWorth", () => {
   });
 });
 
-describe("currencyOf", () => {
-  it("uses the single currency when every account agrees", () => {
-    const shown = currencyOf([row({ currency: "EUR" }), row({ id: 2, currency: "eur" })]);
-    expect(shown.currency).toBe("EUR");
-    expect(shown.mixed).toBe(false);
-  });
-
-  it("flags a mixed-currency book instead of inventing an exchange rate", () => {
-    const shown = currencyOf([row({ currency: "USD" }), row({ id: 2, currency: "LBP" })]);
-    expect(shown.mixed).toBe(true);
-    expect(shown.currencies).toEqual(["LBP", "USD"]);
-  });
-
-  it("falls back to USD with no accounts", () => {
-    expect(currencyOf([])).toEqual({ currency: "USD", mixed: false, currencies: [] });
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Copy that has to be right
 // ---------------------------------------------------------------------------
@@ -626,7 +607,12 @@ describe("no calendar day is serialized through UTC", () => {
   }
 
   it("the accounts page renders DateKeys through lib/dates", () => {
-    expect(read("app/(dashboard)/accounts/accounts-client.tsx")).toMatch(/fromDateKey/);
+    expect(read("app/(dashboard)/accounts/accounts-client.tsx")).toMatch(
+      /import \{[^}]*\bformatDateKey\b[^}]*\} from "@\/components\/dashboard\/net-worth-shared"/,
+    );
+    const shared = stripComments(read("components/dashboard/net-worth-shared.tsx"));
+    expect(shared).toMatch(/fromDateKey/);
+    expect(shared).not.toMatch(/toISOString\(\)/);
   });
 });
 

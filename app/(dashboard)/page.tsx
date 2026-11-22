@@ -2,14 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { deleteAsset, getAssets, setAssetArchived } from "@/app/actions/assets";
-import { getCategories } from "@/app/actions/categories";
-import { getSettings } from "@/app/actions/settings";
+import { deleteAsset, setAssetArchived } from "@/app/actions/assets";
 import {
-  getAccountBalances,
-  getLedgerCashMovements,
-  getNetWorth,
-  getNetWorthHistory,
+  getDashboardData,
   type AccountWithBalance,
   type NetWorthView,
 } from "@/app/actions/accounts";
@@ -101,31 +96,14 @@ export default function DashboardPage() {
   const showAllHoldings = () => setHiddenHoldings(new Set<string>());
 
   const loadData = useCallback(async () => {
-    const [
-      assetsData,
-      transactionsData,
-      categoriesData,
-      settingsData,
-      netWorthData,
-      accountsData,
-      historyData,
-    ] = await Promise.all([
-      getAssets({ includeArchived: true }),
-      getLedgerCashMovements(),
-      getCategories(),
-      getSettings(),
-      getNetWorth(),
-
-      getAccountBalances({ includeArchived: true }),
-      getNetWorthHistory(),
-    ]);
-    setAssets(assetsData);
-    setTransactions(transactionsData);
-    setCategories(categoriesData);
-    setUserName(settingsData.userName || "");
-    setNetWorth(netWorthData);
-    setAccountRows(accountsData);
-    setHistory(historyData);
+    const data = await getDashboardData();
+    setAssets(data.assets);
+    setTransactions(data.cashMovements);
+    setCategories(data.categories);
+    setUserName(data.userName);
+    setNetWorth(data.netWorth);
+    setAccountRows(data.accounts);
+    setHistory(data.history);
   }, [setAssets]);
 
   useEffect(() => {

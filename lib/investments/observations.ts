@@ -4,7 +4,7 @@ import type { InstrumentObservationKind } from "@/lib/db/schema/instruments";
 import { canonicalDecimal } from "@/lib/ledger/decimal";
 import { parseAmount } from "@/lib/money";
 
-import { firstRow, type SqlRow } from "./sql";
+import { firstRow, type SqlRow } from "@/lib/db/sql";
 
 export type InvestmentObservation = {
   instrumentId: string;

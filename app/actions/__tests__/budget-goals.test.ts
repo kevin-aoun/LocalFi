@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   createBudget,
-  getBudgetsForCategory,
+  getBudgets,
   getSpendVsBudget,
   updateBudget,
 } from "@/app/actions/budgets";
@@ -15,6 +15,10 @@ import {
 
 const TRAVEL = 1;
 let temp: DomainDb;
+
+async function budgetsForCategory(categoryId: number) {
+  return (await getBudgets()).filter((budget) => budget.categoryId === categoryId);
+}
 
 beforeEach(async () => {
   temp = await createDomainDb();
@@ -86,7 +90,7 @@ describe("budget savings-goal actions", () => {
     expect(await updateBudget(created.id, form({ rollover: false }))).toMatchObject({
       error: expect.stringMatching(/rollover/i),
     });
-    expect(await getBudgetsForCategory(TRAVEL)).toMatchObject([
+    expect(await budgetsForCategory(TRAVEL)).toMatchObject([
       { rollover: true, goalName: "Japan trip", goalAmountCents: 120_000 },
     ]);
   });

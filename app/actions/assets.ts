@@ -5,7 +5,7 @@ import { assets } from "@/lib/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { revalidate } from "@/lib/revalidate";
 import { calculateCommodityValue } from "./commodities";
-import { negateCents, sumCents, tryParseAmount, type Cents } from "@/lib/money";
+import { tryParseAmount, type Cents } from "@/lib/money";
 import { todayKey } from "@/lib/dates";
 import { normalizeLedgerCurrency } from "@/lib/cash-balance";
 import {
@@ -27,7 +27,7 @@ import {
   quantityInPriceUnits,
 } from "@/lib/prices";
 import { readCurrentMovements, readPositionHistory, readPositionValuations } from "@/lib/ledger";
-import { holdingKey } from "@/lib/investments/returns";
+import { currentHoldings } from "@/lib/investments/holdings";
 
 export async function getAssets(options?: { includeArchived?: boolean }) {
   const includeArchived = options?.includeArchived === true;
@@ -36,27 +36,7 @@ export async function getAssets(options?: { includeArchived?: boolean }) {
     const rows = await (includeArchived
       ? query.orderBy(asc(assets.id))
       : query.where(eq(assets.archived, false)).orderBy(asc(assets.id)));
-    const positions = new Map(readPositionValuations(raw, todayKey())
-      .map((position) => [holdingKey(position.instrumentId, position.currency), position]));
-    return rows.flatMap((asset) => {
-      const position = positions.get(holdingKey(asset.instrumentId, asset.currency));
-      // Sold-out holdings leave the holdings list; Reports keep their history and realized gain.
-      if (asset.category !== "Cash" && asset.instrumentId && (!position || position.quantity === "0")) return [];
-      const currentValueCents = position ? position.valueMinor as Cents : asset.currentValueCents;
-      const costBasisCents = position?.costBasisCents;
-      const quantity = position ? Number(position.quantity) : asset.quantity;
-      if (quantity !== null && !Number.isFinite(quantity)) throw new Error("Position quantity cannot be represented by assets");
-      return [{
-        ...asset,
-        quantity,
-        currentValueCents,
-        quantityExact: position?.quantity ?? null,
-        costBasisCents: costBasisCents ?? null,
-        profitLossCents: costBasisCents == null
-          ? null
-          : sumCents([currentValueCents, negateCents(costBasisCents)]),
-      }];
-    });
+    return currentHoldings(rows, readPositionValuations(raw, todayKey()));
   });
 }
 
@@ -78,7 +58,8 @@ export async function getInvestmentHistory(): Promise<InvestmentHistoryRow[]> {
   const rows = await readDb((_db, raw) => readPositionHistory(raw));
 
   return rows
-    .filter((row) => row.assetId !== null && INVESTMENT_CATEGORIES.has(row.category))
+    // Archived holdings are hidden from Home's totals, so the report hides them too.
+    .filter((row) => row.assetId !== null && !row.archived && INVESTMENT_CATEGORIES.has(row.category))
     .map((row) => ({
       assetId: row.assetId!,
       dateKey: row.dateKey,

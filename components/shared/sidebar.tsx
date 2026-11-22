@@ -25,11 +25,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { getAssets } from "@/app/actions/assets";
 import { getSettings } from "@/app/actions/settings";
 import {
-  getAccountBalances,
-  getNetWorth,
+  getSidebarData,
   type AccountWithBalance,
   type NetWorthView,
 } from "@/app/actions/accounts";
@@ -67,18 +65,12 @@ export function Sidebar() {
   const load = useCallback(async () => {
 
     try {
-      const [netWorthData, accountsData, assetsData, settingsData] = await Promise.all([
-        getNetWorth(),
-
-        getAccountBalances({ includeArchived: true }),
-        getAssets(),
-        getSettings(),
-      ]);
-      setNetWorth(netWorthData);
-      setAccounts(accountsData);
-      setAssets(assetsData);
-      setUserName(settingsData.userName);
-      setShowLedger(settingsData.showLedger);
+      const data = await getSidebarData();
+      setNetWorth(data.netWorth);
+      setAccounts(data.accounts);
+      setAssets(data.assets);
+      setUserName(data.userName);
+      setShowLedger(data.showLedger);
       setLoadError(null);
     } catch (error) {
 

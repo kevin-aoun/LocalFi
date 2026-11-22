@@ -2,12 +2,11 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readDb, withDb } from "@/lib/db/client";
 import { DatabaseUpgradeError } from "@/lib/db/upgrade";
 import { WriterLeaseError } from "@/lib/db/writer-lease";
-import { withVaultSessionToken } from "@/lib/vault/access";
 import {
   VaultAuthenticationError,
   VaultLegacyMigrationError,
@@ -18,6 +17,14 @@ import { setupFailureDetail } from "@/lib/vault/setup-failure";
 import { VAULT_SESSION_COOKIE, vaultSessionManager } from "@/lib/vault/session";
 import { POST as setup } from "../setup/route";
 import { GET as status, POST as touchStatus } from "../status/route";
+
+// The request's session cookie, which the live vault provider reads through next/headers.
+const requestCookie = vi.hoisted(() => ({ token: null as string | null }));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (name: string) => (requestCookie.token === null ? undefined : { name, value: requestCookie.token }),
+  }),
+}));
 
 const PASSPHRASE = "cedar harbor lantern 47 violet";
 const BOOTSTRAP = "disposable-bootstrap-credential-47";
@@ -40,6 +47,7 @@ beforeEach(() => {
   delete process.env.LOCALFI_VAULT_TEST_MODE;
   process.env.LOCALFI_VAULT_BOOTSTRAP_TOKEN = BOOTSTRAP;
   activeToken = null;
+  requestCookie.token = null;
 });
 
 afterEach(async () => {
@@ -136,14 +144,15 @@ describe.sequential("vault setup route", () => {
     const stored = readFileSync(dbPath);
     await expect(readDb(() => null)).rejects.toBeInstanceOf(VaultLockedError);
     expect(readFileSync(dbPath)).toEqual(stored);
-    await expect(withVaultSessionToken("forged", () => readDb(() => null)))
-      .rejects.toBeInstanceOf(VaultLockedError);
-    await withVaultSessionToken(activeToken, () => withDb((_db, raw) => {
+    requestCookie.token = "forged";
+    await expect(readDb(() => null)).rejects.toBeInstanceOf(VaultLockedError);
+    requestCookie.token = activeToken;
+    await withDb((_db, raw) => {
       raw.run("INSERT INTO settings (id, user_name) VALUES (9, 'Authorized owner')");
-    }));
-    expect(await withVaultSessionToken(activeToken, () =>
-      readDb((_db, raw) => String(raw.exec("SELECT user_name FROM settings WHERE id = 9")[0].values[0][0]))
-    )).toBe("Authorized owner");
+    });
+    expect(await readDb((_db, raw) => String(raw.exec("SELECT user_name FROM settings WHERE id = 9")[0].values[0][0])))
+      .toBe("Authorized owner");
+    requestCookie.token = null;
     const statusRequest = new Request("http://127.0.0.1:1313/api/vault/status");
     expect(await (await status(statusRequest)).json()).toEqual({ status: "locked" });
   });

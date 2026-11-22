@@ -10,6 +10,7 @@ import {
   categories,
   recurringTransactions,
   recurrenceFrequencies,
+  transactionAllocations,
   transactions,
   type RecurringTransaction,
   type Transaction,
@@ -22,7 +23,7 @@ import {
   type Frequency,
   type RecurrenceRule,
 } from "@/lib/recurrence";
-import { parseAmount, type Cents } from "@/lib/money";
+import { parseAmount } from "@/lib/money";
 import { categoryCashDirection, normalizeLedgerCurrency } from "@/lib/cash-balance";
 import { assertAmountOnlyCategory } from "@/lib/investments/categories";
 import type { TransactionDirection } from "@/lib/db/schema";
@@ -31,9 +32,9 @@ import {
   buildTransactionProjection,
   correctLedgerEventInput,
   postLedgerEventRaw,
+  type CurrentTransactionAllocation,
 } from "@/lib/ledger";
-
-export type ActionResult<T> = { success: true; data: T } | { error: string };
+import { requireDateKey, requireMagnitude, str, type ActionResult } from "./shared";
 
 export type GenerationReport = {
 
@@ -54,13 +55,6 @@ export type GenerationReport = {
   }>;
 };
 
-function str(formData: FormData, key: string): string | null {
-  const raw = formData.get(key);
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  return trimmed === "" ? null : trimmed;
-}
-
 function num(formData: FormData, key: string): number | null {
   const value = str(formData, key);
   if (value === null) return null;
@@ -78,21 +72,9 @@ function parseFrequency(value: string | null): Frequency {
   return value as Frequency;
 }
 
-function requireDateKey(value: string | null, label: string): DateKey {
-  if (!isDateKey(value)) {
-    throw new Error(`Invalid ${label}: expected 'YYYY-MM-DD', received ${JSON.stringify(value)}`);
-  }
-  return value;
-}
-
 function optionalDateKey(value: string | null, label: string): DateKey | null {
   if (value === null) return null;
   return requireDateKey(value, label);
-}
-
-function requireMagnitude(cents: Cents): Cents {
-  if (cents < 0) throw new Error("A recurring amount cannot be negative");
-  return cents;
 }
 
 function recurringMovements(raw: Database, row: Transaction) {
@@ -120,15 +102,21 @@ function postRecurringProjection(raw: Database, row: Transaction, templateName: 
   raw.run("UPDATE transactions SET current_event_id = ? WHERE id = ?", [event.eventId, row.id]);
 }
 
-function detachRecurringProjection(raw: Database, row: Transaction, templateName: string): void {
+function detachRecurringProjection(
+  raw: Database,
+  row: Transaction,
+  allocations: CurrentTransactionAllocation[],
+  templateName: string,
+): void {
   if (!row.currentEventId) throw new Error("A confirmed recurring occurrence has no ledger event");
-  const movements = recurringMovements(raw, row);
+  // An occurrence edited into a principal + interest split carries allocations.
+  const movements = buildProjectedTransactionMovements(raw, row, allocations);
   const input = correctLedgerEventInput(row.currentEventId, movements, movements, {
     effectiveDate: toDateKey(row.date),
     description: row.comment ?? templateName,
     metadata: {
       projectionKey: row.id,
-      transaction: buildTransactionProjection(row, [], { recurringId: null }),
+      transaction: buildTransactionProjection(row, allocations, { recurringId: null }),
       provenance: {
         source: "recurring-template-detach",
         templateId: row.recurringId!,
@@ -256,7 +244,7 @@ export async function createRecurringTransaction(
       return { error: "The end date cannot be before the start date" };
     }
 
-    const amountCents = requireMagnitude(parseAmount(str(formData, "amount") ?? ""));
+    const amountCents = requireMagnitude(parseAmount(str(formData, "amount") ?? ""), "A recurring amount");
     const accountId = num(formData, "accountId");
     const transferAccountId = num(formData, "transferAccountId");
     const categoryId = num(formData, "categoryId");
@@ -357,7 +345,7 @@ export async function updateRecurringTransaction(
           accountId,
           transferAccountId,
           categoryId,
-          amountCents: amountRaw === null ? existing.amountCents : requireMagnitude(parseAmount(amountRaw)),
+          amountCents: amountRaw === null ? existing.amountCents : requireMagnitude(parseAmount(amountRaw), "A recurring amount"),
           comment: null,
           frequency,
           interval,
@@ -419,7 +407,14 @@ export async function deleteRecurringTransaction(id: number): Promise<ActionResu
         .select()
         .from(transactions)
         .where(eq(transactions.recurringId, id));
-      for (const row of materialized) detachRecurringProjection(raw, row, template.name);
+      for (const row of materialized) {
+        const allocations = await db
+          .select({ categoryId: transactionAllocations.categoryId, amountCents: transactionAllocations.amountCents })
+          .from(transactionAllocations)
+          .where(eq(transactionAllocations.transactionId, row.id))
+          .orderBy(asc(transactionAllocations.position));
+        detachRecurringProjection(raw, row, allocations, template.name);
+      }
       await db.delete(recurringTransactions).where(eq(recurringTransactions.id, id));
     });
     revalidate("/transactions", "/recurring", "/");
