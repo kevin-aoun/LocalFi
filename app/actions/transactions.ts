@@ -40,6 +40,7 @@ import { parsePurchaseQuantity, parsePurchaseUnitPrice, purchaseAmountCents, tra
 import { assertAvailableInvestmentUnits, type InvestmentSide } from "@/lib/investments/trades";
 import { assertAmountOnlyCategory, investmentKindForSymbol } from "@/lib/investments/categories";
 import { negateCanonicalDecimal } from "@/lib/ledger/decimal";
+import { requireMagnitude } from "./shared";
 
 async function resolveAccountId(db: BudgetDb, formData: FormData): Promise<number | null> {
   const raw = formData.get("accountId");
@@ -61,11 +62,6 @@ function requireId(value: FormDataEntryValue | null, label: string): number {
   const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : Number.NaN;
   if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`Invalid ${label}: ${String(value)}`);
   return parsed;
-}
-
-function requireMagnitude(cents: Cents, label = "Amount"): Cents {
-  if (cents < 0) throw new Error(`${label} cannot be negative`);
-  return cents;
 }
 
 async function accountCurrency(db: BudgetDb, accountId: number | null): Promise<string> {

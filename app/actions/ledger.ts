@@ -11,12 +11,11 @@ import type {
 } from "@/lib/ledger/explorer-contract";
 import { verifyLedger } from "@/lib/ledger/verify";
 import type { LedgerVerificationResult } from "@/lib/ledger/types";
-
-export type LedgerActionResult<T> = { success: true; data: T } | { error: string };
+import type { ActionResult } from "./shared";
 
 export async function getLedgerExplorerPage(
   input: LedgerExplorerQuery = {},
-): Promise<LedgerActionResult<LedgerExplorerPage>> {
+): Promise<ActionResult<LedgerExplorerPage>> {
   try {
     return { success: true, data: await readLedgerExplorerPage(input) };
   } catch (error) {
@@ -29,7 +28,7 @@ export async function getLedgerExplorerPage(
 
 export async function getLedgerEventPayload(
   eventId: string,
-): Promise<LedgerActionResult<LedgerEventPayload>> {
+): Promise<ActionResult<LedgerEventPayload>> {
   try {
     return { success: true, data: await readLedgerEventPayload(eventId) };
   } catch (error) {
@@ -42,7 +41,7 @@ export async function getLedgerEventPayload(
 
 export type LedgerVerificationView = LedgerVerificationResult & { verifiedAt: string };
 
-export async function verifyLedgerIntegrity(): Promise<LedgerActionResult<LedgerVerificationView>> {
+export async function verifyLedgerIntegrity(): Promise<ActionResult<LedgerVerificationView>> {
   try {
     const result = await verifyLedger();
     return {

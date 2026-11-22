@@ -6,7 +6,8 @@ import { periodContaining, type BudgetPeriod } from "@/lib/budgets";
 import { toDateKey, todayKey, type DateKey } from "@/lib/dates";
 import { parseAmount, type Cents } from "@/lib/money";
 import { incomeBudgetRefusal } from "@/components/budgets/budget-view-logic";
-import { str, parsePeriod, requireDateKey, goalFieldsFromFormData, type ActionResult } from "./shared";
+import { parsePeriod, goalFieldsFromFormData } from "./shared";
+import { str, requireDateKey, type ActionResult } from "../shared";
 
 // A budget governs whole periods: one set mid-month would otherwise skip that month.
 function periodStart(period: BudgetPeriod, dateKey: DateKey): DateKey {

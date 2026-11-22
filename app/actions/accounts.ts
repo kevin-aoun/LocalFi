@@ -48,8 +48,7 @@ import {
   type LedgerMovementInput,
 } from "@/lib/ledger";
 import type { Database } from "sql.js";
-
-export type ActionResult<T> = { success: true; data: T } | { error: string };
+import { requireMagnitude, str, type ActionResult } from "./shared";
 
 type LivePriceRefresh = Awaited<ReturnType<typeof refreshLivePricedAssets>>;
 
@@ -73,13 +72,6 @@ export type NetWorthView = NetWorth & {
   dateKey: DateKey;
 };
 
-function str(formData: FormData, key: string): string | null {
-  const raw = formData.get(key);
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  return trimmed === "" ? null : trimmed;
-}
-
 function parseType(value: string | null): AccountType {
   if (!value || !(accountTypes as readonly string[]).includes(value)) {
     throw new Error(`Invalid account type: ${String(value)}. Expected one of ${accountTypes.join(", ")}`);
@@ -99,11 +91,6 @@ function resolveKind(type: AccountType, requested: string | null): AccountKind {
     throw new Error(`An account of type ${type} must have kind '${implied}', not '${kind}'`);
   }
   return kind;
-}
-
-function requireMagnitude(cents: Cents, label: string): Cents {
-  if (cents < 0) throw new Error(`${label} cannot be negative`);
-  return cents;
 }
 
 function requireOpeningBalanceDate(value: string | null): DateKey {

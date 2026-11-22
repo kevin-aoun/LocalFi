@@ -65,4 +65,5 @@ export async function importLegacyBudgets(...args: Parameters<typeof mutations.i
 }
 
 export type { BudgetReallocationAvailability, BudgetReallocationView } from "./budgets/reallocations";
-export type { ActionResult, BudgetPerformanceRow } from "./budgets/shared";
+export type { BudgetPerformanceRow } from "./budgets/shared";
+export type { ActionResult } from "./shared";

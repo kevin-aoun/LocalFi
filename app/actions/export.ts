@@ -30,8 +30,7 @@ import {
   normalizeCurrencyCode,
   type CsvTransactionRow,
 } from "@/lib/reports";
-
-export type ExportResult<T> = { success: true; data: T } | { error: string };
+import type { ActionResult } from "./shared";
 
 function assertRangeKeys(fromKey: string, toKey: string): { fromKey: DateKey; toKey: DateKey } {
   if (!isDateKey(fromKey)) throw new Error(`Invalid start date: expected 'YYYY-MM-DD', got ${String(fromKey)}`);
@@ -86,7 +85,7 @@ export type CsvExportData = {
 
 export async function exportTransactionsCsv(
   options: CsvExportOptions,
-): Promise<ExportResult<CsvExportData>> {
+): Promise<ActionResult<CsvExportData>> {
   try {
     const { fromKey, toKey } = assertRangeKeys(options.fromKey, options.toKey);
     const includePending = options.includePending === true;
@@ -181,7 +180,7 @@ export type JsonBackupData = {
 };
 
 
-export async function exportJsonBackup(): Promise<ExportResult<JsonBackupData>> {
+export async function exportJsonBackup(): Promise<ActionResult<JsonBackupData>> {
   try {
     const raw = await readDb(async (db) => ({
       accounts: await db.select().from(accounts),
@@ -384,7 +383,7 @@ export type DatabaseLocation = {
 };
 
 
-export async function describeDatabaseLocation(): Promise<ExportResult<DatabaseLocation>> {
+export async function describeDatabaseLocation(): Promise<ActionResult<DatabaseLocation>> {
   try {
     const data = await readDb(async () => {
       const path = resolveDbPath();
@@ -417,7 +416,7 @@ export type DatabaseFileData = {
 };
 
 
-export async function exportDatabaseFile(): Promise<ExportResult<DatabaseFileData>> {
+export async function exportDatabaseFile(): Promise<ActionResult<DatabaseFileData>> {
   try {
     const snapshot = await snapshotEncryptedDatabaseGeneration();
     if (!isVaultEnvelope(snapshot.bytes)) {

@@ -22,7 +22,7 @@ import {
   type Frequency,
   type RecurrenceRule,
 } from "@/lib/recurrence";
-import { parseAmount, type Cents } from "@/lib/money";
+import { parseAmount } from "@/lib/money";
 import { categoryCashDirection, normalizeLedgerCurrency } from "@/lib/cash-balance";
 import { assertAmountOnlyCategory } from "@/lib/investments/categories";
 import type { TransactionDirection } from "@/lib/db/schema";
@@ -32,8 +32,7 @@ import {
   correctLedgerEventInput,
   postLedgerEventRaw,
 } from "@/lib/ledger";
-
-export type ActionResult<T> = { success: true; data: T } | { error: string };
+import { requireDateKey, requireMagnitude, str, type ActionResult } from "./shared";
 
 export type GenerationReport = {
 
@@ -54,13 +53,6 @@ export type GenerationReport = {
   }>;
 };
 
-function str(formData: FormData, key: string): string | null {
-  const raw = formData.get(key);
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  return trimmed === "" ? null : trimmed;
-}
-
 function num(formData: FormData, key: string): number | null {
   const value = str(formData, key);
   if (value === null) return null;
@@ -78,21 +70,9 @@ function parseFrequency(value: string | null): Frequency {
   return value as Frequency;
 }
 
-function requireDateKey(value: string | null, label: string): DateKey {
-  if (!isDateKey(value)) {
-    throw new Error(`Invalid ${label}: expected 'YYYY-MM-DD', received ${JSON.stringify(value)}`);
-  }
-  return value;
-}
-
 function optionalDateKey(value: string | null, label: string): DateKey | null {
   if (value === null) return null;
   return requireDateKey(value, label);
-}
-
-function requireMagnitude(cents: Cents): Cents {
-  if (cents < 0) throw new Error("A recurring amount cannot be negative");
-  return cents;
 }
 
 function recurringMovements(raw: Database, row: Transaction) {
@@ -256,7 +236,7 @@ export async function createRecurringTransaction(
       return { error: "The end date cannot be before the start date" };
     }
 
-    const amountCents = requireMagnitude(parseAmount(str(formData, "amount") ?? ""));
+    const amountCents = requireMagnitude(parseAmount(str(formData, "amount") ?? ""), "A recurring amount");
     const accountId = num(formData, "accountId");
     const transferAccountId = num(formData, "transferAccountId");
     const categoryId = num(formData, "categoryId");
@@ -357,7 +337,7 @@ export async function updateRecurringTransaction(
           accountId,
           transferAccountId,
           categoryId,
-          amountCents: amountRaw === null ? existing.amountCents : requireMagnitude(parseAmount(amountRaw)),
+          amountCents: amountRaw === null ? existing.amountCents : requireMagnitude(parseAmount(amountRaw), "A recurring amount"),
           comment: null,
           frequency,
           interval,
