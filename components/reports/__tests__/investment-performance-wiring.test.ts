@@ -11,7 +11,8 @@ describe("investment performance wiring", () => {
   });
 
   it("limits the tooltip to the hovered line through wide invisible hit strokes", () => {
-    expect(source).toMatch(/byKey\.get\(String\(entry\.dataKey\)\)\?\.key === hovered/);
+    // Without the type check every hovered entry shows twice, once from its hit line.
+    expect(source).toMatch(/entry\.type !== "none" && byKey\.get\(String\(entry\.dataKey\)\)\?\.key === hovered/);
     expect(source).toMatch(/stroke="transparent"[\s\S]*tooltipType="none"[\s\S]*onMouseEnter=\{\(\) => setHovered\(hit\.owner\)\}/);
   });
 
