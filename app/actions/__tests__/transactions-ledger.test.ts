@@ -17,6 +17,7 @@ import {
   form,
   seedAccount,
   seedCategory,
+  seedTransaction,
   type DomainDb,
 } from "./support/domain-fixture";
 
@@ -585,5 +586,56 @@ describe("getTransactions allocations", () => {
     ]);
     expect(byId.get(second)).toEqual([{ categoryId: 14, amountCents: 500 }]);
     expect(byId.get(groceries)).toEqual([]);
+  });
+});
+
+describe("legacy uncategorized confirmed rows", () => {
+  // The 0012 migration posted confirmed rows without a category to legacy-uncategorized.
+  function targetTotal(targetType: string, targetRef: string) {
+    return Number(temp.scalar(
+      `SELECT COALESCE(SUM(m.amount_minor), 0) FROM ledger_movements m
+         JOIN ledger_accounts a ON a.id = m.ledger_account_id
+        WHERE a.target_type = '${targetType}' AND a.target_ref = '${targetRef}'`,
+    ));
+  }
+
+  beforeEach(() => {
+    seedTransaction(temp, { id: 50, categoryId: null, accountId: 1, amountCents: 2_500, dateKey: "2026-08-01" });
+  });
+
+  it("can be given a category with one balanced correction", async () => {
+    const priorEventId = String(eventRows()[0].event_id);
+    expect(targetTotal("system", "legacy-uncategorized")).toBe(2_500);
+
+    expect(await updateTransaction(50, form({ categoryId: 10 })))
+      .toMatchObject({ success: true, data: { id: 50, categoryId: 10, direction: "outflow" } });
+
+    const events = eventRows();
+    expect(events).toHaveLength(2);
+    expect(events[1].amends_event_id).toBe(priorEventId);
+    expect(targetTotal("system", "legacy-uncategorized")).toBe(0);
+    expect(targetTotal("category", "10")).toBe(2_500);
+    expect(targetTotal("real_account", "1")).toBe(-2_500);
+    expect(await verifyLedger()).toMatchObject({ ok: true, failures: [] });
+  });
+
+  it("still requires a category for the corrected state", async () => {
+    expect(await updateTransaction(50, form({ amount: "30.00" })))
+      .toMatchObject({ error: expect.stringMatching(/needs a category/) });
+    expect(eventRows()).toHaveLength(1);
+  });
+
+  it("can be deleted with one balanced deletion event", async () => {
+    const priorEventId = String(eventRows()[0].event_id);
+
+    expect(await deleteTransaction(50)).toEqual({ success: true });
+
+    const events = eventRows();
+    expect(events).toHaveLength(2);
+    expect(events[1].amends_event_id).toBe(priorEventId);
+    expect(temp.query("SELECT id FROM transactions WHERE id = 50")).toEqual([]);
+    expect(targetTotal("system", "legacy-uncategorized")).toBe(0);
+    expect(targetTotal("real_account", "1")).toBe(0);
+    expect(await verifyLedger()).toMatchObject({ ok: true, failures: [] });
   });
 });
