@@ -14,6 +14,7 @@ import {
 import path from "node:path";
 import initSqlJs, { type Database } from "sql.js";
 import type { WriterLease } from "./writer-lease";
+import { plaintextFixtureAllowed } from "./db-path";
 import { initializeAssetCategories } from "../investments/categories";
 import {
   decryptVaultGeneration,
@@ -757,8 +758,7 @@ export async function upgradeDatabase(options: {
     : Buffer.alloc(0);
   const encrypted = originalBytes.length > 0 && isVaultEnvelope(originalBytes);
   if (encrypted) originalBytes = readSensitiveGeneration(dbPath);
-  const allowLegacyPlaintext = options.allowLegacyPlaintext === true ||
-    process.env.LOCALFI_VAULT_TEST_MODE === "plaintext";
+  const allowLegacyPlaintext = options.allowLegacyPlaintext === true || plaintextFixtureAllowed(dbPath);
   if (!encrypted && !allowLegacyPlaintext) {
     throw new DatabaseUpgradeError(
       dbPath,

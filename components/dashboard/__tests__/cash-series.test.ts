@@ -173,6 +173,32 @@ describe("the chart and the headline use ONE rule", () => {
     ]);
   });
 
+  it("uses each day's closing balance, so a same-day transfer between accounts draws no dip", () => {
+    const candles = buildCashCandles(
+      [
+        tx({ categoryId: null, amountCents: 100_000, direction: "inflow", date: new Date(2026, 0, 1) }),
+        tx({ categoryId: null, amountCents: 50_000, direction: "outflow", date: new Date(2026, 0, 2) }),
+        tx({ categoryId: null, amountCents: 50_000, direction: "inflow", date: new Date(2026, 0, 2) }),
+        tx({ categoryId: null, amountCents: 10_000, direction: "outflow", date: new Date(2026, 0, 3) }),
+      ],
+      [],
+      "monthly",
+    );
+    expect(candles).toEqual([
+      { period: "2026-01", openCents: 0, closeCents: 90_000, highCents: 100_000, lowCents: 0 },
+    ]);
+    const daily = buildCashCandles(
+      [
+        tx({ categoryId: null, amountCents: 100_000, direction: "inflow", date: new Date(2026, 0, 1) }),
+        tx({ categoryId: null, amountCents: 50_000, direction: "outflow", date: new Date(2026, 0, 2) }),
+        tx({ categoryId: null, amountCents: 50_000, direction: "inflow", date: new Date(2026, 0, 2) }),
+      ],
+      [],
+      "daily",
+    );
+    expect(daily.at(-1)).toEqual({ period: "2026-01-02", openCents: 100_000, closeCents: 100_000, highCents: 100_000, lowCents: 100_000 });
+  });
+
   it("returns nothing for an empty ledger", () => {
     expect(buildCashCandles([], CATEGORIES, "monthly")).toEqual([]);
   });
