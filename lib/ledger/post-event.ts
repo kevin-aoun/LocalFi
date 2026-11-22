@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 
 import type { Database } from "sql.js";
 
-import { withDb } from "@/lib/db/client";
 import { isDateKey } from "@/lib/dates";
 import { assertCents } from "@/lib/money";
 
@@ -12,7 +11,6 @@ import { buildDeletionDelta, buildMovementDelta } from "./movements";
 import type {
   LedgerEventInput,
   LedgerMovementInput,
-  LedgerProjectionCallback,
   PositionedMovement,
   PostedLedgerEvent,
   StoredLedgerEvent,
@@ -170,17 +168,6 @@ export function postLedgerEventRaw(raw: Database, input: LedgerEventInput): Post
     recordedAt,
   };
   return { ...event, movements };
-}
-
-export async function postLedgerEvent<T = void>(
-  input: LedgerEventInput,
-  applyProjection?: LedgerProjectionCallback<T>,
-): Promise<{ event: PostedLedgerEvent; projection: T | undefined }> {
-  return withDb(async (db, raw) => {
-    const event = postLedgerEventRaw(raw, input);
-    const projection = applyProjection ? await applyProjection(db, raw, event) : undefined;
-    return { event, projection };
-  });
 }
 
 export function correctLedgerEventInput(

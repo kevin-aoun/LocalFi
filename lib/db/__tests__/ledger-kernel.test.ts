@@ -9,13 +9,17 @@ import {
   buildMovementDelta,
   buildTransactionMovements,
   canonicalStringify,
-  postLedgerEvent,
+  postLedgerEventRaw,
   registerLedgerAccount,
   verifyLedger,
+  type LedgerEventInput,
 } from "../../ledger";
 import { projectPositionHolding } from "../../investments";
 
 let directory: string;
+
+const postLedgerEvent = (input: LedgerEventInput) =>
+  withDb((_db, raw) => ({ event: postLedgerEventRaw(raw, input) }));
 
 describe.sequential("immutable ledger kernel", () => {
   beforeEach(async () => {

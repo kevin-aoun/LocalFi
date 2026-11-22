@@ -11,7 +11,6 @@ import {
   DEFAULT_ACCOUNT_TYPE,
   IMPLIED_KIND,
   accountFormStateFromAccount,
-  currencyOf,
   describeBalance,
   emptyAccountFormState,
   groupAccountsByKind,
@@ -507,24 +506,6 @@ describe("presentNetWorth", () => {
 
   it("throws on non-integer cents rather than printing a drifted total", () => {
     expect(() => presentNetWorth({ ...totals, netWorthCents: 7500.5 })).toThrow();
-  });
-});
-
-describe("currencyOf", () => {
-  it("uses the single currency when every account agrees", () => {
-    const shown = currencyOf([row({ currency: "EUR" }), row({ id: 2, currency: "eur" })]);
-    expect(shown.currency).toBe("EUR");
-    expect(shown.mixed).toBe(false);
-  });
-
-  it("flags a mixed-currency book instead of inventing an exchange rate", () => {
-    const shown = currencyOf([row({ currency: "USD" }), row({ id: 2, currency: "LBP" })]);
-    expect(shown.mixed).toBe(true);
-    expect(shown.currencies).toEqual(["LBP", "USD"]);
-  });
-
-  it("falls back to USD with no accounts", () => {
-    expect(currencyOf([])).toEqual({ currency: "USD", mixed: false, currencies: [] });
   });
 });
 

@@ -4,7 +4,7 @@ import { createTempDb, execOn, seedCategory, seedTransaction, type TempDb } from
 
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
-const { createCategory, deleteCategory, updateCategory, countCategoryUsage, getCategories, reorderCategories } =
+const { createCategory, deleteCategory, updateCategory, getCategories, reorderCategories } =
   await import("../categories");
 
 let temp: TempDb;
@@ -84,13 +84,6 @@ describe("deleteCategory refuses to orphan transactions", () => {
     await deleteCategory(1);
 
     expect(readFileSync(temp.file).equals(before)).toBe(true);
-  });
-
-  it("reports the usage count on its own, for the UI", async () => {
-    seedCategory(temp, { id: 1, name: "Groceries", type: "Expense" });
-    seedTransaction(temp, { categoryId: 1, amountCents: 4500, dateKey: "2026-07-28" });
-    expect(await countCategoryUsage(1)).toBe(1);
-    expect(await countCategoryUsage(99)).toBe(0);
   });
 
   it("fails closed when a transaction was orphaned before the fix landed", async () => {

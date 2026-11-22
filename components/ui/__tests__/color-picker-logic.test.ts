@@ -19,7 +19,6 @@ import {
   pickForeground,
   relativeLuminance,
   resolveAccent,
-  rgbToHex,
   type ColorPreset,
 } from "@/components/ui/color-picker-logic";
 
@@ -65,21 +64,15 @@ describe("normalizeHex", () => {
   });
 });
 
-describe("hexToRgb / rgbToHex", () => {
-  it("round-trips", () => {
+describe("hexToRgb", () => {
+  it("parses each channel", () => {
     expect(hexToRgb("#0ea5e9")).toEqual({ r: 14, g: 165, b: 233 });
-    expect(rgbToHex({ r: 14, g: 165, b: 233 })).toBe("#0ea5e9");
-    expect(rgbToHex(hexToRgb("#abc")!)).toBe("#aabbcc");
+    expect(hexToRgb("#abc")).toEqual({ r: 170, g: 187, b: 204 });
   });
 
   it("keeps a zero channel as zero", () => {
 
     expect(hexToRgb("#000000")).toEqual({ r: 0, g: 0, b: 0 });
-    expect(rgbToHex({ r: 0, g: 0, b: 0 })).toBe("#000000");
-  });
-
-  it("clamps out-of-range channels", () => {
-    expect(rgbToHex({ r: -20, g: 300, b: 127.6 })).toBe("#00ff80");
   });
 });
 

@@ -37,8 +37,6 @@ export function canonicalStringify(value: CanonicalValue | unknown): string {
   return serialize(value, "$root");
 }
 
-export const canonicalize = canonicalStringify;
-
 export function sha256Hex(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }

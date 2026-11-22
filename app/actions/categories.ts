@@ -193,14 +193,6 @@ export async function reorderCategories(type: string, orderedIds: number[]) {
 }
 
 
-export async function countCategoryUsage(id: number): Promise<number> {
-  const rows = await readDb((db) =>
-    db.select().from(transactions).where(eq(transactions.categoryId, id)),
-  );
-  return rows.length;
-}
-
-
 export async function deleteCategory(id: number) {
   try {
     await withDb(async (db) => {

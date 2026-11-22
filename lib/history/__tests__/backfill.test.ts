@@ -11,7 +11,7 @@ import {
 import { applyNetWorthReconstruction, planNetWorthReconstruction, runNetWorthReconstruction } from "../run";
 import { renderPlan, renderWriteReport } from "../format";
 import { postLedgerEventRaw, registerLedgerAccount } from "@/lib/ledger";
-import { prepareInvestmentPurchase, projectInvestmentPurchase } from "@/lib/investments";
+import { prepareInvestmentPurchase, syncPositionHoldingProjection } from "@/lib/investments";
 
 let temp: DomainDb;
 
@@ -52,7 +52,7 @@ function seedGoldHolding() {
       ],
       recordedAt: secondsFor("2026-01-10"),
     });
-    projectInvestmentPurchase(db, purchase);
+    syncPositionHoldingProjection(db, purchase.instrumentId, purchase.currency);
   });
 }
 

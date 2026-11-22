@@ -38,18 +38,9 @@ export function totalsByCurrency(assets: readonly ValuedAsset[]): CurrencyTotal[
     );
 }
 
-export function isMixedCurrency(assets: readonly ValuedAsset[]): boolean {
-  const seen = new Set(assets.map((a) => normalizeCurrency(a.currency)));
-  return seen.size > 1;
-}
-
 export function formatCurrencyTotals(totals: readonly CurrencyTotal[]): string {
   if (totals.length === 0) return formatMoney(0);
   return totals.map((t) => formatMoney(t.totalCents, t.currency)).join(" + ");
-}
-
-export function formatAssetTotals(assets: readonly ValuedAsset[]): string {
-  return formatCurrencyTotals(totalsByCurrency(assets));
 }
 
 export function shareOfCurrency(

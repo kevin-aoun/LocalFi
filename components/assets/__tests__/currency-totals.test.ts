@@ -3,10 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   allocationRows,
   barWidth,
-  formatAssetTotals,
   formatCurrencyTotals,
   formatShare,
-  isMixedCurrency,
   normalizeCurrency,
   shareOfCurrency,
   totalsByCurrency,
@@ -21,15 +19,15 @@ const asset = (category: string, currentValueCents: number, currency = "USD") =>
 describe("totals are never summed across currencies", () => {
   it("keeps a single-currency portfolio rendering exactly as before", () => {
     const assets = [asset("Savings", 120000), asset("Crypto", 30000)];
-    expect(isMixedCurrency(assets)).toBe(false);
-    expect(formatAssetTotals(assets)).toBe("$1,500.00");
+    expect(totalsByCurrency(assets).length > 1).toBe(false);
+    expect(formatCurrencyTotals(totalsByCurrency(assets))).toBe("$1,500.00");
   });
 
   it("refuses to collapse USD + EUR into one number", () => {
     const assets = [asset("Savings", 120000, "USD"), asset("Savings", 30000, "EUR")];
-    expect(isMixedCurrency(assets)).toBe(true);
+    expect(totalsByCurrency(assets).length > 1).toBe(true);
 
-    expect(formatAssetTotals(assets)).toBe("$1,200.00 + €300.00");
+    expect(formatCurrencyTotals(totalsByCurrency(assets))).toBe("$1,200.00 + €300.00");
   });
 
   it("subtotals each currency and leads with the dominant one", () => {
@@ -60,7 +58,7 @@ describe("totals are never summed across currencies", () => {
   });
 
   it("uses the ISO code for currencies with no symbol", () => {
-    expect(formatAssetTotals([asset("Savings", 123456, "LBP")])).toBe("LBP 1,234.56");
+    expect(formatCurrencyTotals(totalsByCurrency([asset("Savings", 123456, "LBP")]))).toBe("LBP 1,234.56");
   });
 });
 

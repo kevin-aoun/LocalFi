@@ -181,10 +181,6 @@ export const priceableSymbols = PRICE_SYMBOLS.filter(
   (symbol) => PRICED_HOLDINGS[symbol].coinGeckoId !== null,
 );
 
-export const unpriceableSymbols = PRICE_SYMBOLS.filter(
-  (symbol) => PRICED_HOLDINGS[symbol].coinGeckoId === null,
-);
-
 export function isPriceSymbol(value: unknown): value is PriceSymbol {
   return typeof value === "string" && (
     (PRICE_SYMBOLS as readonly string[]).includes(value) || /^STOCK:[A-Z][A-Z0-9.-]{0,19}$/.test(value)
@@ -207,11 +203,6 @@ export function pricedHolding(symbol: unknown): PricedHoldingSpec | null {
     };
   }
   return isPriceSymbol(upper) ? PRICED_HOLDINGS[upper] : null;
-}
-
-export function canBePriced(symbol: unknown): boolean {
-  const spec = pricedHolding(symbol);
-  return spec !== null && spec.provider !== null;
 }
 
 export function priceSymbolForCommodityType(

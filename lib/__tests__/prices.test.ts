@@ -9,7 +9,6 @@ import {
   PRICED_HOLDINGS,
   PRICE_PROVIDERS,
   PRICE_SYMBOLS,
-  canBePriced,
   cryptoPriceSymbols,
   describePriceError,
   describePriceSource,
@@ -22,9 +21,9 @@ import {
   priceRequestInit,
   priceSourceLabel,
   priceSymbolForCommodityType,
+  pricedHolding,
   priceableSymbols,
   quantityInPriceUnits,
-  unpriceableSymbols,
   type PriceFetchLike,
   type PriceQuote,
   type PriceSymbol,
@@ -135,12 +134,10 @@ describe("what one unit of each price actually is", () => {
   });
 
   it("refuses to price platinum or palladium at all, and says why", () => {
-    expect([...unpriceableSymbols]).toEqual(["XPT", "XPD"]);
     for (const symbol of ["XPT", "XPD"] as const) {
       expect(PRICED_HOLDINGS[symbol].coinGeckoId).toBeNull();
       expect(PRICED_HOLDINGS[symbol].provider).toBeNull();
       expect(PRICED_HOLDINGS[symbol].proxy).toBeNull();
-      expect(canBePriced(symbol)).toBe(false);
 
       expect(PRICED_HOLDINGS[symbol].noSourceReason).toMatch(/ETF SHARE|share/i);
     }
@@ -158,8 +155,8 @@ describe("what one unit of each price actually is", () => {
     expect(isPriceSymbol("BTC")).toBe(true);
     expect(isPriceSymbol("DOGE")).toBe(false);
     expect(isPriceSymbol(null)).toBe(false);
-    expect(canBePriced("DOGE")).toBe(false);
-    expect(canBePriced("btc")).toBe(true);
+    expect(pricedHolding("DOGE")).toBeNull();
+    expect(pricedHolding("btc")?.provider).toBe("coingecko");
   });
 
   it("maps the legacy commodity_type values onto symbols", () => {

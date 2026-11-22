@@ -5,10 +5,6 @@ import { registerLedgerAccount } from "@/lib/ledger/targets";
 
 import { ensurePricedInstrument, type InvestmentInstrument } from "./instruments";
 import { observationDay, recordInstrumentObservation } from "./observations";
-import {
-  syncPositionHoldingProjection,
-  type PositionHoldingProjection,
-} from "./positions";
 
 export type PreparedInvestmentPurchase = {
   instrument: InvestmentInstrument;
@@ -89,12 +85,4 @@ export function prepareInvestmentPurchase(
     frozenUnitPriceMinor: input.unitPriceMinor,
     currency,
   };
-}
-
-
-export function projectInvestmentPurchase(
-  raw: Database,
-  purchase: Pick<PreparedInvestmentPurchase, "instrumentId" | "currency">,
-): PositionHoldingProjection | null {
-  return syncPositionHoldingProjection(raw, purchase.instrumentId, purchase.currency);
 }
