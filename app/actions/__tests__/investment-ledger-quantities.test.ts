@@ -151,6 +151,34 @@ describe("investment inventory comes from transaction movements", () => {
     expect((await verifyLedger()).failures).toEqual([]);
   });
 
+  it("fills a gold holding's missing daily prices once, keeping the prices it recorded", async () => {
+    await createTransaction(purchase("XAU", "1", { date: "2026-09-15" }));
+    const days = ["2026-09-15", "2026-09-16", "2026-09-17", "2026-09-18", "2026-09-19", "2026-09-20"];
+    const yahoo = { chart: { error: null, result: [{
+      meta: { symbol: "PAXG-USD", currency: "USD", gmtoffset: 0 },
+      timestamp: days.map((day) => Date.parse(`${day}T00:00:00Z`) / 1000),
+      indicators: { quote: [{ close: [999, 130, null, 140.12346, 150, 155] }] },
+    }] } };
+    const fetchMock = vi.fn(async (url: string) => ({
+      ok: true, status: 200, json: async () => (url.includes("PAXG-USD") ? yahoo : { "pax-gold": { usd: 160 } }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const historyCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).includes("PAXG-USD")).length;
+
+    await refreshLivePricedAssets();
+    expect(temp.query("SELECT observed_day, unit_price, source FROM instrument_observations ORDER BY observed_day")).toEqual([
+      { observed_day: "2026-09-15", unit_price: "120", source: "purchase" },
+      { observed_day: "2026-09-16", unit_price: "130", source: "yahoo-history" },
+      { observed_day: "2026-09-18", unit_price: "140.1235", source: "yahoo-history" },
+      { observed_day: "2026-09-19", unit_price: "150", source: "yahoo-history" },
+      { observed_day: "2026-09-20", unit_price: "160", source: "coingecko" },
+    ]);
+    expect(historyCalls()).toBe(1);
+
+    await refreshLivePricedAssets();
+    expect(historyCalls()).toBe(1);
+  });
+
   it("uses today's quantity and observation cutoff consistently with net worth", async () => {
     await createTransaction(purchase("BTC", "1", { fees: "0" }));
     await createTransaction(purchase("ETH", "2", { date: "2098-01-01", fees: "0" }));
