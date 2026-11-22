@@ -15,6 +15,7 @@ const {
   createAsset,
   deleteAsset,
   getAssets,
+  getInvestmentHistory,
   setAssetArchived,
   updateAsset,
 } = await import("../assets");
@@ -92,6 +93,20 @@ describe("a failed live-price fetch never persists a $0 asset", () => {
 });
 
 describe("holding retention lifecycle", () => {
+  it("leaves an archived holding out of the investment report, as Home leaves it out of its totals", async () => {
+    priceCents.mockResolvedValue(400_000);
+    const gold = await createAsset(assetForm({ quantity: "1" }));
+    const kept = await createAsset(assetForm({ category: "Investments", useLivePrice: "false", currentValue: "100" }));
+    if ("error" in gold) throw new Error(gold.error);
+    if ("error" in kept) throw new Error(kept.error);
+
+    expect(await setAssetArchived(gold.data.id, true)).toMatchObject({ success: true });
+    expect((await getInvestmentHistory()).map((row) => row.assetId)).toEqual([kept.data.id]);
+
+    expect(await setAssetArchived(gold.data.id, false)).toMatchObject({ success: true });
+    expect(new Set((await getInvestmentHistory()).map((row) => row.assetId))).toEqual(new Set([gold.data.id, kept.data.id]));
+  });
+
   it("archives and restores without erasing daily history; confirmed delete cascades it", async () => {
     const created = await createAsset(
       assetForm({ category: "Savings", useLivePrice: "false", currentValue: "100" }),
