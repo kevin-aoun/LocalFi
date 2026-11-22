@@ -10,6 +10,7 @@ import {
   categories,
   recurringTransactions,
   recurrenceFrequencies,
+  transactionAllocations,
   transactions,
   type RecurringTransaction,
   type Transaction,
@@ -31,6 +32,7 @@ import {
   buildTransactionProjection,
   correctLedgerEventInput,
   postLedgerEventRaw,
+  type CurrentTransactionAllocation,
 } from "@/lib/ledger";
 import { requireDateKey, requireMagnitude, str, type ActionResult } from "./shared";
 
@@ -100,15 +102,21 @@ function postRecurringProjection(raw: Database, row: Transaction, templateName: 
   raw.run("UPDATE transactions SET current_event_id = ? WHERE id = ?", [event.eventId, row.id]);
 }
 
-function detachRecurringProjection(raw: Database, row: Transaction, templateName: string): void {
+function detachRecurringProjection(
+  raw: Database,
+  row: Transaction,
+  allocations: CurrentTransactionAllocation[],
+  templateName: string,
+): void {
   if (!row.currentEventId) throw new Error("A confirmed recurring occurrence has no ledger event");
-  const movements = recurringMovements(raw, row);
+  // An occurrence edited into a principal + interest split carries allocations.
+  const movements = buildProjectedTransactionMovements(raw, row, allocations);
   const input = correctLedgerEventInput(row.currentEventId, movements, movements, {
     effectiveDate: toDateKey(row.date),
     description: row.comment ?? templateName,
     metadata: {
       projectionKey: row.id,
-      transaction: buildTransactionProjection(row, [], { recurringId: null }),
+      transaction: buildTransactionProjection(row, allocations, { recurringId: null }),
       provenance: {
         source: "recurring-template-detach",
         templateId: row.recurringId!,
@@ -399,7 +407,14 @@ export async function deleteRecurringTransaction(id: number): Promise<ActionResu
         .select()
         .from(transactions)
         .where(eq(transactions.recurringId, id));
-      for (const row of materialized) detachRecurringProjection(raw, row, template.name);
+      for (const row of materialized) {
+        const allocations = await db
+          .select({ categoryId: transactionAllocations.categoryId, amountCents: transactionAllocations.amountCents })
+          .from(transactionAllocations)
+          .where(eq(transactionAllocations.transactionId, row.id))
+          .orderBy(asc(transactionAllocations.position));
+        detachRecurringProjection(raw, row, allocations, template.name);
+      }
       await db.delete(recurringTransactions).where(eq(recurringTransactions.id, id));
     });
     revalidate("/transactions", "/recurring", "/");
