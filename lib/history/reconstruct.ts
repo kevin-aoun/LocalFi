@@ -2,19 +2,6 @@ import { fromDateKey, isDateKey, toDateKey, type DateKey } from "@/lib/dates";
 import type { Cents } from "@/lib/money";
 import type { PriceSymbol } from "@/lib/prices";
 
-export type HistoryAsset = {
-  id: number;
-  category: string;
-  currentValueCents: Cents;
-  currency?: string | null;
-  archived?: boolean | null;
-  quantity?: number | null;
-  unit?: string | null;
-  priceSymbol?: string | null;
-  notes?: string | null;
-  createdAt: Date | number;
-};
-
 export type HoldingPlan = {
   assetId: number;
   label: string;

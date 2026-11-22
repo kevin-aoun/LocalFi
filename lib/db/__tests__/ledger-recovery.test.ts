@@ -1,21 +1,34 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { Database } from "sql.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, readDb, withDb } from "../client";
 import {
   buildMovementDelta,
   buildTransactionMovements,
-  postLedgerEvent,
+  postLedgerEventRaw,
   rebuildLedgerProjections,
   registerLedgerAccount,
   verifyLedger,
+  type LedgerEventInput,
+  type PostedLedgerEvent,
 } from "../../ledger";
 
 let directory: string;
 const PRIVATE_DESCRIPTION = "Secret medical payment 987";
 const EVENT_DATE = "2026-08-09";
+
+function postLedgerEvent(
+  input: LedgerEventInput,
+  project?: (raw: Database, event: PostedLedgerEvent) => void,
+): Promise<void> {
+  return withDb((_db, raw) => {
+    const event = postLedgerEventRaw(raw, input);
+    project?.(raw, event);
+  });
+}
 
 function localEpoch(dateKey: string): number {
   const [year, month, day] = dateKey.split("-").map(Number);
@@ -85,7 +98,7 @@ describe.sequential("ledger verification and recovery", () => {
         accountTargetId: target.account, categoryTargetId: target.category,
       }),
       recordedAt: eventEpoch,
-    }, (_db, raw, event) => {
+    }, (raw, event) => {
       raw.run(
         `INSERT INTO transactions
           (id, date, category_id, account_id, amount_cents, direction, currency, current_event_id,
@@ -198,7 +211,7 @@ describe.sequential("ledger verification and recovery", () => {
         accountTargetId: target.account, categoryTargetId: target.category,
       }),
       recordedAt: eurEpoch,
-    }, (_db, raw, event) => {
+    }, (raw, event) => {
       raw.run(
         `INSERT INTO transactions
           (id, date, category_id, account_id, amount_cents, direction, currency, current_event_id,

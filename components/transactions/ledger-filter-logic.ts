@@ -1,6 +1,6 @@
 
 import { isTransfer } from "@/lib/cash-balance";
-import { monthKey, toDateKey, type DateKey, type MonthKey } from "@/lib/dates";
+import { toDateKey, type DateKey, type MonthKey } from "@/lib/dates";
 import type { Cents } from "@/lib/money";
 
 export type LedgerRow = {
@@ -58,11 +58,6 @@ export type LedgerFilters = {
 export function ledgerRowDateKey(row: LedgerRow): DateKey {
   const value = row.date;
   return toDateKey(value instanceof Date ? value : new Date(value));
-}
-
-export function ledgerRowMonthKey(row: LedgerRow): MonthKey {
-  const value = row.date;
-  return monthKey(value instanceof Date ? value : new Date(value));
 }
 
 export function normalizeQuery(query: string | null | undefined): string {
@@ -169,14 +164,6 @@ export function matchesPreparedFilters(
   }
 
   return true;
-}
-
-export function matchesLedgerFilters(
-  row: LedgerRow,
-  index: LedgerIndex,
-  filters: LedgerFilters,
-): boolean {
-  return matchesPreparedFilters(row, index, prepareLedgerFilters(filters));
 }
 
 export function filterLedger<T extends LedgerRow>(

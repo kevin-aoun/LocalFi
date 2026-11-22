@@ -5,10 +5,11 @@ import {
   filterLedger,
   ledgerRowDateKey,
   ledgerSearchText,
-  matchesLedgerFilters,
   normalizeDateRange,
   normalizeQuery,
   sortLedger,
+  type LedgerFilters,
+  type LedgerIndex,
   type LedgerRow,
 } from "../ledger-filter-logic";
 
@@ -24,6 +25,9 @@ const ACCOUNTS = [
 ];
 
 const INDEX = buildLedgerIndex(CATEGORIES, ACCOUNTS);
+
+const matchesLedgerFilters = (tx: LedgerRow, index: LedgerIndex, filters: LedgerFilters) =>
+  filterLedger([tx], index, filters).length === 1;
 
 function row(over: Partial<LedgerRow> = {}): LedgerRow {
   return {

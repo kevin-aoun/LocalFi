@@ -329,16 +329,6 @@ export function presentNetWorth(totals: NetWorthTotals, currency = "USD"): NetWo
   };
 }
 
-export function currencyOf(rows: readonly Pick<AccountRow, "currency">[]): {
-  currency: string;
-  mixed: boolean;
-  currencies: string[];
-} {
-  const codes = [...new Set(rows.map((row) => normalizeCurrency(row.currency)))].sort();
-  if (codes.length === 0) return { currency: "USD", mixed: false, currencies: [] };
-  return { currency: codes.length === 1 ? codes[0] : "USD", mixed: codes.length > 1, currencies: codes };
-}
-
 export function openingBalanceHelp(kind: AccountKind, type?: string): string {
   if (type === "Loan") {
     return kind === "liability"
