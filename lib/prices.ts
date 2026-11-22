@@ -650,6 +650,52 @@ async function fetchStockQuote(spec: PricedHoldingSpec, options: FetchPriceOptio
   }
 }
 
+// Yahoo tickers with keyless daily history. Gold follows its PAXG live proxy; other metals have none.
+const HISTORY_TICKERS: Readonly<Record<string, string>> = { XAU: "PAXG-USD", BTC: "BTC-USD", ETH: "ETH-USD" };
+
+export function historyTicker(symbol: string): string | null {
+  const spec = pricedHolding(symbol);
+  if (!spec) return null;
+  if (spec.symbol.startsWith("STOCK:")) return STOCK_QUOTE_TICKERS[spec.label] ?? spec.label;
+  return HISTORY_TICKERS[spec.symbol] ?? null;
+}
+
+export type DailyClose = { day: string; observedAt: number; unitPrice: string };
+
+/** Daily USD closes from a Yahoo chart payload, each dated in the exchange's own calendar. */
+export function parseDailyCloses(payload: unknown, ticker: string): DailyClose[] | null {
+  const chart = isRecord(payload) && isRecord(payload.chart) ? payload.chart : null;
+  const result = chart && Array.isArray(chart.result) && isRecord(chart.result[0]) ? chart.result[0] : null;
+  const meta = result && isRecord(result.meta) ? result.meta : null;
+  if (!result || !meta || chart?.error || meta.symbol !== ticker || meta.currency !== "USD") return null;
+  const offset = Number.isSafeInteger(meta.gmtoffset) ? Number(meta.gmtoffset) : 0;
+  const quote = isRecord(result.indicators) && Array.isArray(result.indicators.quote) ? result.indicators.quote[0] : null;
+  const closes = isRecord(quote) && Array.isArray(quote.close) ? quote.close : [];
+  const times = Array.isArray(result.timestamp) ? result.timestamp : [];
+  return times.flatMap((time, index) => {
+    const close = closes[index];
+    if (!Number.isSafeInteger(time) || !usablePrice(close)) return [];
+    const local = new Date((Number(time) + offset) * 1000);
+    const day = `${local.getUTCFullYear()}-${String(local.getUTCMonth() + 1).padStart(2, "0")}-${String(local.getUTCDate()).padStart(2, "0")}`;
+    return [{ day, observedAt: Number(time), unitPrice: String(Number(close.toFixed(4))) }];
+  });
+}
+
+/** Daily closes since `fromEpochSeconds`; an empty list when the source has none or fails. */
+export async function fetchDailyCloses(symbol: string, fromEpochSeconds: number, options: FetchPriceOptions = {}): Promise<DailyClose[]> {
+  const ticker = historyTicker(symbol);
+  if (!ticker) return [];
+  const now = Math.floor((options.now ?? Date.now)() / 1000);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&period1=${fromEpochSeconds}&period2=${now}`;
+  try {
+    const init = priceRequestInit(options.revalidateSeconds ?? DEFAULT_REVALIDATE_SECONDS, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const response = await (options.fetchImpl ?? fetch)(url, { ...init, headers: { ...init.headers, "User-Agent": "Mozilla/5.0 LocalFi" } });
+    return response?.ok ? parseDailyCloses(await response.json(), ticker) ?? [] : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchPriceQuotes(symbols: readonly string[], options: FetchPriceOptions = {}) {
   const stocks = [...new Set(symbols.map((symbol) => pricedHolding(symbol)?.symbol))]
     .filter((symbol): symbol is PriceSymbol => symbol !== undefined && symbol.startsWith("STOCK:"));

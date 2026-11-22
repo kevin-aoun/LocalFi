@@ -8,17 +8,21 @@ import {
   ensurePricedInstrument,
   findInstrument,
   findAssetOpeningChain,
+  firstPriceGap,
   getExactPosition,
   observationDay,
   postAssetOpeningPosition,
   projectPositionHolding,
   recordInstrumentObservation,
 } from "@/lib/investments";
-import { tryParseAmount, type Cents } from "@/lib/money";
+import { parseAmount, tryParseAmount, type Cents } from "@/lib/money";
+import { allRows } from "@/lib/db/sql";
+import { todayKey } from "@/lib/dates";
 import { revalidate } from "@/lib/revalidate";
 import {
   PRICED_HOLDINGS,
   describePriceError,
+  fetchDailyCloses,
   fetchHoldingValueCents,
   fetchPriceQuote,
   fetchPriceQuotes,
@@ -26,6 +30,7 @@ import {
   pricedHolding,
   quantityInPriceUnits,
   readQuantityField,
+  type DailyClose,
   type PriceQuote,
   type PriceResult,
   type PriceSymbol,
@@ -149,6 +154,28 @@ function recordQuoteObservation(
   return { amountMinor, observedAt };
 }
 
+function pricedDays(raw: Parameters<typeof recordInstrumentObservation>[0], instrumentId: string): string[] {
+  return allRows(raw, "SELECT observed_day FROM instrument_observations WHERE instrument_id = ?", [instrumentId])
+    .map((row) => String(row.observed_day));
+}
+
+// Closes only fill days with no price yet, so recorded purchase and refresh prices win.
+function fillPriceGaps(
+  raw: Parameters<typeof recordInstrumentObservation>[0],
+  instrumentId: string,
+  closes: readonly DailyClose[],
+  today: string,
+): void {
+  const priced = new Set(pricedDays(raw, instrumentId));
+  for (const close of closes) {
+    if (close.day >= today || priced.has(close.day)) continue;
+    recordInstrumentObservation(raw, {
+      instrumentId, observationKind: "price", observedDay: close.day, observedAt: close.observedAt,
+      amountMinor: parseAmount(close.unitPrice), unitPrice: close.unitPrice, currency: "USD", source: "yahoo-history",
+    });
+    priced.add(close.day);
+  }
+}
 
 export async function updateLivePricedAsset(
   id: number,
@@ -304,8 +331,17 @@ export async function refreshLivePricedAssets(): Promise<{
   if (candidates.length === 0) return { refreshed, skipped, unpriceable, failed };
 
 
-  const batch = await fetchPriceQuotes([
-    ...new Set(candidates.map((asset) => (asset.priceSymbol ?? "").trim())),
+  // A holding missing more than a few days of prices gets its daily closes filled in once.
+  const today = todayKey();
+  const gaps = await readDb((_db, raw) => new Map(candidates.flatMap((asset) => {
+    const from = asset.instrumentId ? firstPriceGap(pricedDays(raw, asset.instrumentId), today) : null;
+    return from ? [[asset.instrumentId!, { symbol: (asset.priceSymbol ?? "").trim(), from }] as const] : [];
+  })));
+  const [batch, history] = await Promise.all([
+    fetchPriceQuotes([...new Set(candidates.map((asset) => (asset.priceSymbol ?? "").trim()))]),
+    Promise.all([...gaps].map(async ([instrumentId, gap]) =>
+      [instrumentId, await fetchDailyCloses(gap.symbol, Date.parse(`${gap.from}T00:00:00Z`) / 1000)] as const,
+    )).then((entries) => new Map(entries)),
   ]);
 
   const quotes: Array<{ asset: (typeof candidates)[number]; quote: PriceQuote }> = [];
@@ -336,6 +372,7 @@ export async function refreshLivePricedAssets(): Promise<{
             continue;
           }
           recordQuoteObservation(raw, instrument.id, quote);
+          fillPriceGaps(raw, instrument.id, history.get(instrument.id) ?? [], today);
           projectPositionHolding(raw, instrument.id, current.currency);
           refreshed += 1;
         }

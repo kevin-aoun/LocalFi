@@ -90,6 +90,12 @@ This file records durable choices and rejected alternatives. See the
   on a quote request; Home and Reports refresh market values independently.
   Provider aliases, such as CSPX to Yahoo's USD `CSPX.L` listing, affect quote
   requests only and preserve existing ledger instrument identities.
+- **Filled price gaps.** When a refreshed holding has gone more than four days
+  without a price, the refresh also requests Yahoo's keyless daily closes since
+  the gap began (gold through `PAXG-USD`, matching its PAXG live proxy) and
+  stores them as `yahoo-history` observations on days with no price. Recorded
+  purchase and refresh prices are never replaced, and a failed request leaves
+  the gap for the next refresh. Metals without a daily source stay as recorded.
 - **Transaction inventory supersedes opening snapshots.** Crypto quantities always
   exclude manual and migrated openings. For other instruments, posting purchases
   adds to opening positions; purchases never imply an opening is a duplicate.
