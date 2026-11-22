@@ -102,7 +102,8 @@ export function InvestmentPerformance({ rows, range }: Props) {
 
   const InvestmentTooltip = ({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) => {
     // Only the line under the pointer, with its cost basis when it has one.
-    const entries = (payload ?? []).filter((entry) => byKey.get(String(entry.dataKey))?.key === hovered);
+    // Hit lines share their dataKey with the drawn line; Recharts marks them type "none".
+    const entries = (payload ?? []).filter((entry) => entry.type !== "none" && byKey.get(String(entry.dataKey))?.key === hovered);
     if (!active || entries.length === 0) return null;
     return (
       <div className="min-w-44 rounded-lg border bg-popover px-3 py-2 text-xs text-popover-foreground">
