@@ -25,6 +25,11 @@ export type InvestmentSeries = {
   color: string;
 };
 
+/** A plotted line the legend can show, hide, or isolate. */
+export type InvestmentLine = Pick<InvestmentSeries, "key" | "label" | "color" | "currency">;
+
+export const TOTAL_KEY = "total";
+
 export type InvestmentPoint = {
   dateKey: DateKey;
   label: string;
@@ -53,6 +58,9 @@ const COLORS = [
   "hsl(var(--chart-7))",
   "hsl(var(--chart-8))",
 ] as const;
+
+// Stock holdings are labelled by ticker; these keep their brand color.
+const BRAND_COLORS: Readonly<Record<string, string>> = { NVDA: "#76B900" };
 
 function dateLabel(key: DateKey, withYear: boolean) {
   return fromDateKey(key).toLocaleDateString("en-US", {
@@ -120,8 +128,14 @@ export function buildInvestmentHistory(
     key: `holding_${item.assetId}`,
     costKey: `cost_${item.assetId}`,
     label: labelCounts.get(item.label)! > 1 ? `${item.label} (#${item.assetId})` : item.label,
-    color: COLORS[index % COLORS.length],
+    color: BRAND_COLORS[item.label.toUpperCase()] ?? COLORS[index % COLORS.length],
   }));
+
+  const currencies = [...new Set(series.map((item) => item.currency))].sort();
+  // Values in different currencies cannot be added without exchange rates.
+  const total: InvestmentLine | null = series.length > 0 && currencies.length === 1
+    ? { key: TOTAL_KEY, label: "Total portfolio", color: "hsl(var(--foreground))", currency: currencies[0] }
+    : null;
 
   const byDate = new Map<string, InvestmentHistoryInput[]>();
   for (const row of usable) {
@@ -142,22 +156,74 @@ export function buildInvestmentHistory(
     }
     if ((range && day < range.startKey) || latest.size === 0) continue;
     const point: InvestmentPoint = { dateKey: day as DateKey, label: dateLabel(day as DateKey, years.size > 1) };
+    const values: Cents[] = [];
     for (const row of latest.values()) {
       if (row.closed && closedOn.get(row.assetId) !== day) continue;
       point[`holding_${row.assetId}`] = centsToDecimal(row.valueCents);
+      values.push(row.valueCents);
       if (row.costBasisCents != null) point[`cost_${row.assetId}`] = centsToDecimal(row.costBasisCents);
     }
+    if (total) point[TOTAL_KEY] = centsToDecimal(sumCents(values));
     points.push(point);
   }
   const summaries = series.map((item) => summarize(item, latest.get(item.assetId)!));
-  const currencies = [...new Set(series.map((item) => item.currency))].sort();
 
   return {
     points,
     series,
+    total,
     summaries,
     currencies,
     mixedCurrency: currencies.length > 1,
     droppedCount,
+  };
+}
+
+/** Shows only `key`; isolating the line that is already alone shows every line again. */
+export function isolateLine(
+  keys: readonly string[],
+  hidden: ReadonlySet<string>,
+  key: string,
+): Set<string> {
+  const alone = !hidden.has(key) && keys.every((candidate) => candidate === key || hidden.has(candidate));
+  return alone ? new Set() : new Set(keys.filter((candidate) => candidate !== key));
+}
+
+export type InvestmentTotals = {
+  currency: string;
+  valueCents: Cents;
+  costBasisCents: Cents | null;
+  unrealizedGainCents: Cents | null;
+  realizedGainCents: Cents | null;
+  totalReturnCents: Cents | null;
+};
+
+function allKnown(values: ReadonlyArray<Cents | null>): Cents[] | null {
+  return values.every((value) => value !== null) ? (values as Cents[]) : null;
+}
+
+/**
+ * Portfolio totals for the summary table; null across currencies. A total that
+ * depends on an unknown cost stays unknown instead of silently skipping it.
+ */
+export function summarizeTotals(summaries: readonly InvestmentSummary[]): InvestmentTotals | null {
+  const currencies = [...new Set(summaries.map((item) => item.currency))];
+  if (currencies.length !== 1) return null;
+  const open = summaries.filter((item) => !item.closed);
+  const valueCents = sumCents(open.map((item) => item.valueCents));
+  const costs = allKnown(open.map((item) => item.costBasisCents));
+  const costBasisCents = costs === null ? null : sumCents(costs);
+  const unrealizedGainCents = costBasisCents === null ? null : sumCents([valueCents, negateCents(costBasisCents)]);
+  const realized = allKnown(summaries.map((item) => item.realizedGainCents));
+  const realizedGainCents = realized === null ? null : sumCents(realized);
+  return {
+    currency: currencies[0],
+    valueCents,
+    costBasisCents,
+    unrealizedGainCents,
+    realizedGainCents,
+    totalReturnCents: unrealizedGainCents === null || realizedGainCents === null
+      ? null
+      : sumCents([unrealizedGainCents, realizedGainCents]),
   };
 }

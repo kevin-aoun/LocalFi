@@ -50,8 +50,8 @@ export function readHoldingReturns(current: readonly CurrentLedgerMovement[]): M
     const state = states.get(key) ?? { quantity: "0", costBasisCents: 0, realizedGainCents: 0 };
     const delta = row.quantityDelta!;
     const sale = delta.startsWith("-");
-    const quantityOnlyReduction = row.amountMinor === 0 && sale;
-    if (!cashChains.has(row.chainRootEventId) && !quantityOnlyReduction) {
+    // A zero amount has no cash leg left in the current movements: a gift in, or units given away.
+    if (!cashChains.has(row.chainRootEventId) && row.amountMinor !== 0) {
       state.costBasisCents = null;
       state.realizedGainCents = null;
     } else if (state.costBasisCents !== null && state.realizedGainCents !== null) {
