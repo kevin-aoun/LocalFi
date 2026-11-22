@@ -1,5 +1,5 @@
 
-import { toDateKey, type DateKey } from "@/lib/dates";
+import { toDateKey } from "@/lib/dates";
 import { centsToDecimal, tryParseAmount } from "@/lib/money";
 import { parsePurchaseQuantity, parsePurchaseUnitPrice, tradeCashAmount } from "@/lib/investments/cost";
 import type { InvestmentSide } from "@/lib/investments/trades";
@@ -9,10 +9,6 @@ export function toTransactionDateValue(date: Date): string {
   return `${toDateKey(date)}T00:00:00`;
 }
 
-
-export function transactionDateKey(stored: Date | number | string): DateKey {
-  return toDateKey(stored instanceof Date ? stored : new Date(stored));
-}
 
 export type TransactionFormState = {
   categoryId: string;

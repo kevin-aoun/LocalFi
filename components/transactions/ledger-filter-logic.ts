@@ -166,14 +166,6 @@ export function matchesPreparedFilters(
   return true;
 }
 
-export function matchesLedgerFilters(
-  row: LedgerRow,
-  index: LedgerIndex,
-  filters: LedgerFilters,
-): boolean {
-  return matchesPreparedFilters(row, index, prepareLedgerFilters(filters));
-}
-
 export function filterLedger<T extends LedgerRow>(
   rows: readonly T[],
   index: LedgerIndex,

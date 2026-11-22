@@ -5,7 +5,6 @@ import {
   buildTransactionFormValues,
   toTransactionDateValue,
   toTransactionFormData,
-  transactionDateKey,
   validateTransactionForm,
 } from "../transaction-form-logic";
 
@@ -41,7 +40,7 @@ describe("the calendar day the user picked survives serialization", () => {
       const picked = new Date(y, m, d);
       const wire = toTransactionDateValue(picked);
       const stored = new Date(wire);
-      expect(transactionDateKey(stored)).toBe(toDateKey(picked));
+      expect(toDateKey(stored)).toBe(toDateKey(picked));
       expect(monthKey(stored)).toBe(monthKey(picked));
     }
   });
